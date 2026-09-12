@@ -201,7 +201,9 @@ class _SearchWorkerSession {
     _isolate = null;
     _port = null;
     _receive.close();
+    final subscription = _subscription;
     _subscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
   }
 
   void close() => _fail(
