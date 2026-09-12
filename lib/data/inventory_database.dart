@@ -142,6 +142,74 @@ void _validateMutationShape(InventoryMutation mutation) {
   }
 }
 
+// The latest Undo is intentionally rich for normal pharmacist actions, but a
+// giant backup restore/bulk operation must never duplicate tens of thousands of
+// OCR-heavy Medicine JSON objects into one in-memory + SQLite audit event. The
+// audit row and transaction still commit; only the reversible before-image is
+// omitted once either bound is crossed, making that event explicitly non-undoable.
+const _maxUndoRows = 256;
+const _maxUndoTextCharacters = 1000000;
+
+int _medicineUndoTextWeight(Medicine record) =>
+    512 +
+    record.id.length +
+    record.name.length +
+    record.brand.length +
+    record.manufacturer.length +
+    record.salt.length +
+    record.strength.length +
+    record.form.length +
+    record.barcode.length +
+    record.batchNumber.length +
+    record.block.length +
+    record.row.length +
+    record.vertical.length +
+    record.location.length +
+    record.notes.length +
+    record.ocrText.length +
+    record.archiveReason.length +
+    (record.soldAt?.length ?? 0);
+
+int _saleUndoTextWeight(SaleEvent sale) =>
+    192 +
+    sale.id.length +
+    sale.stockId.length +
+    sale.medicineName.length +
+    sale.strength.length +
+    sale.form.length +
+    sale.salt.length;
+
+bool _canCaptureUndoSnapshot(
+  InventorySnapshot before,
+  InventoryMutation mutation,
+) {
+  if (!mutation.undoable) return false;
+  final recordIds = <String>{
+    ...mutation.upserts.map((record) => record.id),
+    ...mutation.removeIds,
+  };
+  final saleIds = <String>{
+    ...mutation.upsertSales.map((sale) => sale.id),
+    ...mutation.removeSaleIds,
+  };
+  if (recordIds.length + saleIds.length > _maxUndoRows) return false;
+
+  var textWeight = 0;
+  for (final id in recordIds) {
+    final record = before.records[id];
+    if (record == null) continue;
+    textWeight += _medicineUndoTextWeight(record);
+    if (textWeight > _maxUndoTextCharacters) return false;
+  }
+  for (final id in saleIds) {
+    final sale = before.sales[id];
+    if (sale == null) continue;
+    textWeight += _saleUndoTextWeight(sale);
+    if (textWeight > _maxUndoTextCharacters) return false;
+  }
+  return true;
+}
+
 Map<String, dynamic> makeEvent(
   InventorySnapshot before,
   InventoryMutation mutation,
@@ -168,28 +236,33 @@ Map<String, dynamic> makeEvent(
   // storage callers fall back to one wall-clock read here.
   final operationTime = mutation.operationTime ?? DateTime.now();
   final operationDay = civilDay(operationTime);
+  final captureUndo = _canCaptureUndoSnapshot(before, mutation);
   return {
     'id': newId(),
     'revision': before.revision + 1,
     'label': mutation.label,
     'time': operationTime.toUtc().toIso8601String(),
     'businessDay': dateText(operationDay),
-    'undoable': mutation.undoable,
+    'undoable': captureUndo,
     'undone': false,
-    'before': {
-      for (final id in {
-        ...mutation.upserts.map((m) => m.id),
-        ...mutation.removeIds,
-      })
-        id: before.records[id]?.toJson(),
-    },
-    'salesBefore': {
-      for (final id in {
-        ...mutation.upsertSales.map((sale) => sale.id),
-        ...mutation.removeSaleIds,
-      })
-        id: before.sales[id]?.toJson(),
-    },
+    'before': captureUndo
+        ? {
+            for (final id in {
+              ...mutation.upserts.map((m) => m.id),
+              ...mutation.removeIds,
+            })
+              id: before.records[id]?.toJson(),
+          }
+        : <String, dynamic>{},
+    'salesBefore': captureUndo
+        ? {
+            for (final id in {
+              ...mutation.upsertSales.map((sale) => sale.id),
+              ...mutation.removeSaleIds,
+            })
+              id: before.sales[id]?.toJson(),
+          }
+        : <String, dynamic>{},
     'settingsBefore': before.settings.toJson(),
     'soldValue': soldValue,
     'unknownSold': unknownSold,
