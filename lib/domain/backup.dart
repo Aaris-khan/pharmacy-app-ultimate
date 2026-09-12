@@ -10,6 +10,8 @@ const legacyPharmacyBackupSchema = 'aaris.pharmacy.backup.v1';
 const maxBackupCharacters = 12000000;
 const _backupIntegrityPrefix = 'sha256:';
 
+enum BackupIntegrityStatus { verified, legacyUnsealed }
+
 class PharmacyBackup {
   const PharmacyBackup({
     required this.createdAt,
@@ -19,6 +21,7 @@ class PharmacyBackup {
     required this.sales,
     required this.soldValue,
     required this.unknownSold,
+    this.integrityStatus = BackupIntegrityStatus.verified,
   });
 
   final DateTime createdAt;
@@ -28,6 +31,15 @@ class PharmacyBackup {
   final Map<String, SaleEvent> sales;
   final int soldValue;
   final int unknownSold;
+
+  /// Current-format exports are content-sealed with SHA-256. Legacy v1 files
+  /// remain importable so a pharmacist is never locked out of an older local
+  /// backup, but review surfaces that they predate the integrity proof.
+  final BackupIntegrityStatus integrityStatus;
+  bool get integrityVerified =>
+      integrityStatus == BackupIntegrityStatus.verified;
+  bool get legacyFormat =>
+      integrityStatus == BackupIntegrityStatus.legacyUnsealed;
 
   Map<String, dynamic> _canonicalPayload() {
     final medicines = records.values.toList(growable: false)
@@ -132,6 +144,8 @@ class PharmacyBackup {
     final soldValue = decoded['soldValue'];
     final unknownSold = decoded['unknownSold'];
     if (createdAt == null ||
+        createdAt.year < 2000 ||
+        createdAt.year > 2200 ||
         revision is! int ||
         revision < 0 ||
         medicinesRaw is! List ||
@@ -200,6 +214,9 @@ class PharmacyBackup {
       sales: Map.unmodifiable(sales),
       soldValue: soldValue,
       unknownSold: unknownSold,
+      integrityStatus: current
+          ? BackupIntegrityStatus.verified
+          : BackupIntegrityStatus.legacyUnsealed,
     );
     if (current) {
       final payload = backup._canonicalPayload();
@@ -215,14 +232,133 @@ class PharmacyBackup {
   }
 }
 
+class BackupImpact {
+  const BackupImpact({
+    required this.newStockEntries,
+    required this.reactivatedStockEntries,
+    required this.activeEntriesMovingToRemoved,
+    required this.newSaleEvents,
+    required this.changedSaleEvents,
+    required this.removedSaleEvents,
+    required this.warningSettingsChange,
+    required this.soldTotalsChange,
+  });
+
+  const BackupImpact.none()
+    : newStockEntries = 0,
+      reactivatedStockEntries = 0,
+      activeEntriesMovingToRemoved = 0,
+      newSaleEvents = 0,
+      changedSaleEvents = 0,
+      removedSaleEvents = 0,
+      warningSettingsChange = false,
+      soldTotalsChange = false;
+
+  factory BackupImpact.compare({
+    required PharmacyBackup backup,
+    required Map<String, Medicine> currentRecords,
+    required Map<String, SaleEvent> currentSales,
+    required WarningSettings currentSettings,
+    required int currentSoldValue,
+    required int currentUnknownSold,
+  }) {
+    var newStock = 0;
+    var reactivated = 0;
+    final incomingIds = backup.records.keys.toSet();
+    for (final incoming in backup.records.values) {
+      final current = currentRecords[incoming.id];
+      if (current == null) {
+        newStock++;
+      } else if (current.archived && !incoming.archived) {
+        reactivated++;
+      }
+    }
+
+    var movingToRemoved = 0;
+    for (final current in currentRecords.values) {
+      if (!current.archived && !incomingIds.contains(current.id)) {
+        movingToRemoved++;
+      }
+    }
+
+    var newSales = 0;
+    var changedSales = 0;
+    for (final incoming in backup.sales.values) {
+      final current = currentSales[incoming.id];
+      if (current == null) {
+        newSales++;
+      } else if (!_sameSaleFacts(current, incoming)) {
+        changedSales++;
+      }
+    }
+    final removedSales = currentSales.keys
+        .where((id) => !backup.sales.containsKey(id))
+        .length;
+
+    return BackupImpact(
+      newStockEntries: newStock,
+      reactivatedStockEntries: reactivated,
+      activeEntriesMovingToRemoved: movingToRemoved,
+      newSaleEvents: newSales,
+      changedSaleEvents: changedSales,
+      removedSaleEvents: removedSales,
+      warningSettingsChange:
+          currentSettings.shortDays != backup.settings.shortDays ||
+          currentSettings.months != backup.settings.months,
+      soldTotalsChange:
+          currentSoldValue != backup.soldValue ||
+          currentUnknownSold != backup.unknownSold,
+    );
+  }
+
+  final int newStockEntries;
+  final int reactivatedStockEntries;
+  final int activeEntriesMovingToRemoved;
+  final int newSaleEvents;
+  final int changedSaleEvents;
+  final int removedSaleEvents;
+  final bool warningSettingsChange;
+  final bool soldTotalsChange;
+
+  bool get hasMaterialChange =>
+      newStockEntries > 0 ||
+      reactivatedStockEntries > 0 ||
+      activeEntriesMovingToRemoved > 0 ||
+      newSaleEvents > 0 ||
+      changedSaleEvents > 0 ||
+      removedSaleEvents > 0 ||
+      warningSettingsChange ||
+      soldTotalsChange;
+}
+
+bool _sameSaleFacts(SaleEvent a, SaleEvent b) =>
+    a.id == b.id &&
+    a.stockId == b.stockId &&
+    a.medicineName == b.medicineName &&
+    a.strength == b.strength &&
+    a.form == b.form &&
+    a.salt == b.salt &&
+    a.quantity == b.quantity &&
+    a.occurredAt == b.occurredAt &&
+    a.totalAmountPaise == b.totalAmountPaise &&
+    a.savedUnitPricePaise == b.savedUnitPricePaise;
+
 class BackupReview {
-  const BackupReview({required this.backup, required this.currentRevision});
+  const BackupReview({
+    required this.backup,
+    required this.currentRevision,
+    this.impact = const BackupImpact.none(),
+  });
+
   final PharmacyBackup backup;
   final int currentRevision;
+  final BackupImpact impact;
 
   int get activeMedicines =>
       backup.records.values.where((record) => !record.archived).length;
   int get removedMedicines =>
       backup.records.values.where((record) => record.archived).length;
   int get sales => backup.sales.length;
+  bool get integrityVerified => backup.integrityVerified;
+  bool get legacyFormat => backup.legacyFormat;
 }
