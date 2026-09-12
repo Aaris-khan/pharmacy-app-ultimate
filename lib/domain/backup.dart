@@ -1,10 +1,14 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import 'medicine.dart';
 import 'tracking.dart';
 
-const pharmacyBackupSchema = 'aaris.pharmacy.backup.v1';
+const pharmacyBackupSchema = 'aaris.pharmacy.backup.v2';
+const legacyPharmacyBackupSchema = 'aaris.pharmacy.backup.v1';
 const maxBackupCharacters = 12000000;
+const _backupIntegrityPrefix = 'sha256:';
 
 class PharmacyBackup {
   const PharmacyBackup({
@@ -25,16 +29,39 @@ class PharmacyBackup {
   final int soldValue;
   final int unknownSold;
 
-  String encode() => const JsonEncoder.withIndent('  ').convert({
-    'schema': pharmacyBackupSchema,
-    'createdAt': createdAt.toIso8601String(),
-    'sourceRevision': sourceRevision,
-    'settings': settings.toJson(),
-    'medicines': records.values.map((record) => record.toJson()).toList(),
-    'sales': sales.values.map((sale) => sale.toJson()).toList(),
-    'soldValue': soldValue,
-    'unknownSold': unknownSold,
-  });
+  Map<String, dynamic> _canonicalPayload() {
+    final medicines = records.values.toList(growable: false)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    final saleEvents = sales.values.toList(growable: false)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    return <String, dynamic>{
+      'createdAt': createdAt.toIso8601String(),
+      'sourceRevision': sourceRevision,
+      'settings': settings.toJson(),
+      'medicines': medicines.map((record) => record.toJson()).toList(),
+      'sales': saleEvents.map((sale) => sale.toJson()).toList(),
+      'soldValue': soldValue,
+      'unknownSold': unknownSold,
+    };
+  }
+
+  String _integrityDigest(Map<String, dynamic> payload) => sha256
+      .convert(utf8.encode(jsonEncode(payload)))
+      .toString();
+
+  /// Version 2 adds a deterministic SHA-256 integrity proof over validated,
+  /// canonical pharmacy facts. This detects truncation/accidental edits before
+  /// restore. It is deliberately not described as an authenticity signature:
+  /// there is no secret key and legacy v1 files remain importable.
+  String encode() {
+    final payload = _canonicalPayload();
+    final integrity = '$_backupIntegrityPrefix${_integrityDigest(payload)}';
+    return const JsonEncoder.withIndent('  ').convert({
+      'schema': pharmacyBackupSchema,
+      'integrity': integrity,
+      ...payload,
+    });
+  }
 
   String get fileName =>
       'Aaris_Pharmacy_Backup_${dateText(createdAt)}.aaris.json';
@@ -58,8 +85,16 @@ class PharmacyBackup {
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Choose a complete Aaris Pharmacy backup.');
     }
-    const allowed = {
-      'schema',
+
+    final schema = decoded['schema'];
+    final current = schema == pharmacyBackupSchema;
+    final legacy = schema == legacyPharmacyBackupSchema;
+    if (!current && !legacy) {
+      throw const FormatException(
+        'This is not a supported Aaris Pharmacy backup.',
+      );
+    }
+    const payloadFields = {
       'createdAt',
       'sourceRevision',
       'settings',
@@ -68,12 +103,25 @@ class PharmacyBackup {
       'soldValue',
       'unknownSold',
     };
-    if (decoded.keys.any((key) => !allowed.contains(key)) ||
-        decoded['schema'] != pharmacyBackupSchema) {
+    final allowed = <String>{
+      'schema',
+      ...payloadFields,
+      if (current) 'integrity',
+    };
+    if (decoded.keys.any((key) => !allowed.contains(key))) {
       throw const FormatException(
-        'This is not a supported Aaris Pharmacy backup.',
+        'This backup contains an unsupported field.',
       );
     }
+    final integrity = decoded['integrity'];
+    if (current &&
+        (integrity is! String ||
+            !RegExp(r'^sha256:[a-f0-9]{64}$').hasMatch(integrity))) {
+      throw const FormatException(
+        'Backup integrity proof is missing or invalid.',
+      );
+    }
+
     final createdRaw = decoded['createdAt'];
     final createdAt = createdRaw is String
         ? DateTime.tryParse(createdRaw)
@@ -101,6 +149,9 @@ class PharmacyBackup {
     if (settingsRaw is! Map) {
       throw const FormatException('Backup settings are missing.');
     }
+    final parsedSettings = WarningSettings.fromJson(
+      Map<String, dynamic>.from(settingsRaw),
+    );
     final records = <String, Medicine>{};
     for (var index = 0; index < medicinesRaw.length; index++) {
       final raw = medicinesRaw[index];
@@ -140,17 +191,27 @@ class PharmacyBackup {
       }
       sales[sale.id] = sale;
     }
-    return PharmacyBackup(
+
+    final backup = PharmacyBackup(
       createdAt: createdAt,
       sourceRevision: revision,
-      settings: WarningSettings.fromJson(
-        Map<String, dynamic>.from(settingsRaw),
-      ),
+      settings: parsedSettings,
       records: Map.unmodifiable(records),
       sales: Map.unmodifiable(sales),
       soldValue: soldValue,
       unknownSold: unknownSold,
     );
+    if (current) {
+      final payload = backup._canonicalPayload();
+      final expected =
+          '$_backupIntegrityPrefix${backup._integrityDigest(payload)}';
+      if (integrity != expected) {
+        throw const FormatException(
+          'Backup integrity check failed. The file is incomplete or has changed.',
+        );
+      }
+    }
+    return backup;
   }
 }
 
