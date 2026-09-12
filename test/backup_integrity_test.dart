@@ -29,7 +29,7 @@ PharmacyBackup _backup() {
   return PharmacyBackup(
     createdAt: DateTime.utc(2026, 9, 12, 18, 30),
     sourceRevision: 7,
-    settings: const contractSettings,
+    settings: contractSettings,
     records: {medicine.id: medicine},
     sales: {sale.id: sale},
     soldValue: 1200,
