@@ -15,6 +15,9 @@ class SoldMedicineDemand {
       totalUnitsSold <= 0 ? 0 : unitsSold / totalUnitsSold;
 }
 
+String _finalSaleWitness(String stockId, DateTime occurredAt) =>
+    '$stockId|${occurredAt.toUtc().microsecondsSinceEpoch}';
+
 /// Deterministic, all-time sales analytics derived from the pharmacy's own
 /// recorded sale events plus explicit SOLD transitions. AI never invents a
 /// demand percentage or sale value here.
@@ -30,7 +33,14 @@ class SalesOverview {
       for (final medicine in medicineList) medicine.id: medicine,
     };
 
+    // Build the SOLD/final-sale witness set during the one mandatory sales pass.
+    // The previous fallback reconciliation scanned every sale again for every
+    // currently SOLD medicine, turning a large pharmacy snapshot into O(M×S)
+    // work. Exact stock ID + sale instant is enough to preserve the same
+    // duplicate-suppression rule with O(1) lookup per SOLD row.
+    final recordedSaleWitnesses = <String>{};
     for (final sale in saleList) {
+      recordedSaleWitnesses.add(_finalSaleWitness(sale.stockId, sale.occurredAt));
       final knownValue =
           sale.totalAmountPaise ??
           (sale.savedUnitPricePaise == null
@@ -114,7 +124,7 @@ class SalesOverview {
     // fallback, unless a real final-sale event already represents that SOLD.
     for (final medicine in medicineList.where((medicine) => medicine.sold)) {
       if (directSoldStockIds.contains(medicine.id)) continue;
-      if (_hasRecordedFinalSale(medicine, saleList)) continue;
+      if (_hasRecordedFinalSale(medicine, recordedSaleWitnesses)) continue;
       _record(
         name: medicine.name,
         units: _positiveUnits(medicine.soldQuantity),
@@ -131,17 +141,12 @@ class SalesOverview {
 
   int _positiveUnits(int? value) => value != null && value > 0 ? value : 1;
 
-  bool _hasRecordedFinalSale(Medicine medicine, List<SaleEvent> sales) {
+  bool _hasRecordedFinalSale(Medicine medicine, Set<String> saleWitnesses) {
     final soldAt = medicine.soldAt == null
         ? null
         : DateTime.tryParse(medicine.soldAt!);
     if (soldAt == null) return false;
-    return sales.any(
-      (sale) =>
-          sale.stockId == medicine.id &&
-          sale.occurredAt.toUtc().microsecondsSinceEpoch ==
-              soldAt.toUtc().microsecondsSinceEpoch,
-    );
+    return saleWitnesses.contains(_finalSaleWitness(medicine.id, soldAt));
   }
 
   void _record({
