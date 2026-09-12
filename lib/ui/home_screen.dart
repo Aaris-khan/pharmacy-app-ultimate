@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/pharmacy_controller.dart';
+import '../domain/home_projection.dart';
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import 'design.dart';
@@ -53,12 +54,16 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
-      final short = controller.list(SearchScope.shortExpiry);
-      final month = controller.list(SearchScope.monthExpiry);
-      final expired = controller.list(SearchScope.expired);
-      final sold = controller.list(SearchScope.sold);
-      final records = controller.list(SearchScope.all);
-      final attention = [...expired, ...short, ...month].take(4).toList();
+      // One authoritative, presentation-sized pass replaces five independent
+      // filter/sort scans plus a second full InventoryStats walk. The domain
+      // status engine still owns every expiry/SOLD rule; Home only renders its
+      // bounded projection.
+      final projection = HomeInventoryProjection.build(
+        medicines: controller.records,
+        settings: controller.settings,
+        today: controller.today,
+      );
+      final attention = projection.attention;
       return ListView(
         key: const PageStorageKey('home-scroll'),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -104,7 +109,7 @@ class HomeScreen extends StatelessWidget {
                   title:
                       '${controller.settings.shortDays} ${controller.settings.shortDays == 1 ? 'Day' : 'Days'} Left',
                   caption: 'Short expiry',
-                  count: short.length,
+                  count: projection.shortExpiryCount,
                   icon: Icons.timelapse_rounded,
                   color: primary,
                   background: primarySoft,
@@ -122,7 +127,7 @@ class HomeScreen extends StatelessWidget {
                   title:
                       '${controller.settings.months} ${controller.settings.months == 1 ? 'Month' : 'Months'} Left',
                   caption: 'Month warning',
-                  count: month.length,
+                  count: projection.monthExpiryCount,
                   icon: Icons.calendar_month_rounded,
                   color: accent,
                   background: accentSoft,
@@ -139,7 +144,7 @@ class HomeScreen extends StatelessWidget {
                 _OverviewTile(
                   title: 'Sold Medicines',
                   caption: 'Ready to reorder',
-                  count: sold.length,
+                  count: projection.soldCount,
                   icon: Icons.check_circle_outline_rounded,
                   color: amber,
                   background: warningSoft,
@@ -148,7 +153,7 @@ class HomeScreen extends StatelessWidget {
                 _OverviewTile(
                   title: 'Expired Medicines',
                   caption: 'Review your stock',
-                  count: expired.length,
+                  count: projection.expiredCount,
                   icon: Icons.event_busy_rounded,
                   color: red,
                   background: errorSoft,
@@ -216,7 +221,7 @@ class HomeScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${controller.stats.uniqueMedicines} medicines in your care',
+                        '${projection.uniqueMedicines} medicines in your care',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -245,7 +250,7 @@ class HomeScreen extends StatelessWidget {
               child: const Text('View all →'),
             ),
           ),
-          if (records.isEmpty)
+          if (projection.isEmpty)
             EmptyState(
               title: 'Start with your first medicine',
               message:
