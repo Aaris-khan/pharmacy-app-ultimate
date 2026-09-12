@@ -2,23 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../domain/intake_resolution.dart';
 import '../domain/medicine.dart';
 import '../domain/medicine_intake.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
-import '../services/local_ai_service.dart';
 import '../services/medicine_intake_service.dart';
-import '../services/offline_recognition_memory_service.dart';
 import '../state/pharmacy_controller.dart';
-import 'cloud_scan_review_screen.dart';
 import 'design.dart';
 import 'import_screen.dart';
 
 class MedicineIntakePanel extends StatefulWidget {
   const MedicineIntakePanel({super.key, required this.controller, this.onAsk});
+
   final PharmacyController controller;
   final void Function(String evidence)? onAsk;
+
   @override
   State<MedicineIntakePanel> createState() => _MedicineIntakePanelState();
 }
@@ -27,7 +25,6 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   final queue = MedicineIntakeService.instance;
   int visible = 5;
   String error = '';
-  bool _savingQuickAdd = false;
 
   @override
   void initState() {
@@ -46,9 +43,14 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     try {
       await action();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = _cleanError(e));
     }
   }
+
+  String _cleanError(Object value) => value
+      .toString()
+      .replaceFirst(RegExp(r'^(Exception|Bad state|StateError):\s*'), '')
+      .trim();
 
   Future<void> _review(MedicineIntakeJob job) async {
     await Navigator.push<void>(
@@ -63,46 +65,6 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     );
   }
 
-  String _jobStatus(MedicineIntakeJob job) {
-    String clock(int milliseconds) {
-      final seconds = milliseconds ~/ 1000;
-      return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
-    }
-
-    final progress = job.kind == 'video' && job.durationMs > 0
-        ? ' ${clock(job.cursorMs)} / ${clock(job.durationMs)}'
-        : '';
-    final state = switch (job.status) {
-      'reasoning' => 'Refining fields',
-      'review' => 'Ready to review',
-      'failed' => 'Needs attention',
-      _ => job.kind == 'video' ? 'Reading video$progress' : 'Reading medicine',
-    };
-    return '$state · ${job.drafts.length} medicines found';
-  }
-
-  Future<void> _cloudReview(MedicineScanDraft draft) async {
-    // A durable queue draft may contain deterministic identity hints learned from
-    // private shop memory. Never forward that enriched object to an external
-    // provider. Reconstruct the explicit cloud lane from the draft's raw OCR and
-    // barcode only; CloudScanReviewScreen then rebuilds a provider-bound V2 draft
-    // with private knowledge disabled before any request leaves the device.
-    final evidence = MedicineFrameEvidence(
-      text: draft.rawText,
-      barcode: draft.barcode,
-      source: 'Saved on-device OCR draft',
-    );
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CloudScanReviewScreen(
-          controller: widget.controller,
-          evidence: <MedicineFrameEvidence>[evidence],
-        ),
-      ),
-    );
-  }
-
   bool _expired(String value) {
     try {
       return parseDate(
@@ -111,370 +73,375 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
           )?.isBefore(civilDay(widget.controller.today)) ??
           false;
     } on FormatException {
-      return false; // A malformed recovered draft remains reviewable, not a UI crash.
+      return false;
     }
   }
 
-  String _fact(String label, String value) =>
-      '$label: ${value.trim().isEmpty ? 'Unknown' : value.trim()}';
+  String _value(String value) =>
+      value.trim().isEmpty ? 'Not found' : value.trim();
 
-  bool _hasCompleteQuickIdentity(MedicineScanDraft draft) {
-    // Keep the quick-add affordance on the same authoritative identity projection
-    // that the commit boundary persists. Raw deterministic form candidates can be
-    // deliberately conservative or legacy-normalized; confirmedScanForm() first
-    // recovers an unambiguous pharmaceutical form directly from source OCR and
-    // otherwise requires a strong non-conflicted extracted form. The preview,
-    // button gate and saved Medicine therefore cannot disagree about Form.
-    final form = confirmedScanForm(draft);
-    return confirmedScanName(draft).isNotEmpty &&
-        draft.brand.trim().isNotEmpty &&
-        draft.salt.trim().isNotEmpty &&
-        draft.strength.trim().isNotEmpty &&
-        form.isNotEmpty;
+  String _statusTitle(MedicineIntakeJob job) {
+    if (job.status == 'reasoning') return 'Improving medicine details…';
+    if (job.kind == 'video') return 'Reading medicine video…';
+    return 'Reading medicine…';
   }
 
-  ScanQuickAddDecision _quickAddDecision(MedicineScanDraft draft) {
-    if (!_hasCompleteQuickIdentity(draft)) {
-      return const ScanQuickAddDecision.blocked(
-        'Brand, salt, strength and a recognized form are required for one-tap add. Open detailed review for this scan.',
-      );
+  String _simpleJobError(MedicineIntakeJob job) {
+    final raw = job.error.toLowerCase();
+    if (raw.contains('no medicine could be read')) {
+      return job.kind == 'video'
+          ? 'No medicine could be read clearly. Try the video again or use closer, steadier views.'
+          : 'Medicine could not be read clearly. Try a closer, steadier image.';
     }
-    return scanQuickAddDecision(
-      draft,
-      resolveIntakeDraft(
-        draft: draft,
-        records: widget.controller.records,
-        today: widget.controller.today,
-      ),
-    );
-  }
-
-  bool _canConfirmAdd(MedicineScanDraft draft) =>
-      _quickAddDecision(draft).allowed;
-
-  bool _identityNeedsReview(MedicineScanDraft draft) {
-    if (confirmedScanForm(draft).isEmpty) return true;
-    return [
-      'name',
-      'brand',
-      'salt',
-      'strength',
-    ].any((key) => draft.field(key).needsReview);
-  }
-
-  Future<void> _confirmAndAdd(MedicineScanDraft draft) async {
-    if (_savingQuickAdd) return;
-    final initialDecision = _quickAddDecision(draft);
-    if (!initialDecision.allowed) {
-      setState(() => error = initialDecision.reason);
-      return;
+    if (raw.contains('storage')) {
+      return 'This scan could not continue because the device needs more free storage.';
     }
-
-    setState(() {
-      _savingQuickAdd = true;
-      error = '';
-    });
-    try {
-      // The same deterministic gate is shared with ImportInbox. It owns duplicate
-      // lot detection, trusted-batch admission and date-conflict/chronology rules
-      // so every Confirm/Add entry point has identical safety semantics.
-      final decision = _quickAddDecision(draft);
-      if (!decision.allowed) throw StateError(decision.reason);
-
-      final expectedRevision = widget.controller.snapshot.revision;
-      final record = medicineFromConfirmedScan(draft);
-
-      // Re-resolve immediately before the revision-bound commit. A concurrent
-      // stock write can revoke the shortcut instead of creating a duplicate lot.
-      final finalDecision = _quickAddDecision(draft);
-      if (!finalDecision.allowed ||
-          finalDecision.isNewBatch != decision.isNewBatch) {
-        throw StateError(
-          finalDecision.reason.isEmpty
-              ? 'Inventory changed before save. Review this scan again; nothing was added.'
-              : finalDecision.reason,
-        );
-      }
-      await widget.controller.save(record, expectedRevision: expectedRevision);
-      await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
-        draft,
-        record,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            decision.isNewBatch
-                ? '${record.title} added as a reviewed new batch.'
-                : '${record.title} added from the confirmed AI preview.',
-          ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(
-          () => error = e.toString().replaceFirst(
-            RegExp(r'^(Bad state|StateError):\s*'),
-            '',
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _savingQuickAdd = false);
-    }
+    return 'Medicine details could not be completed. Try again.';
   }
+
+  Future<void> _retry(MedicineIntakeJob job) => _run(
+    () => job.canRescanVideo
+        ? queue.retry(job, rescanVideo: true)
+        : queue.retry(job),
+  );
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([queue, LocalAiService.instance]),
+    animation: queue,
     builder: (context, _) {
       if (!queue.supported || (queue.jobs.isEmpty && error.isEmpty)) {
         return const SizedBox.shrink();
       }
-      final local = LocalAiService.instance;
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'AI scan preview · ${queue.jobs.length}',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              TextButton(
-                onPressed: () => queue.setPaused(!queue.paused),
-                child: Text(
-                  queue.paused ? 'Resume' : 'Pause after current step',
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(height: 16),
           const Text(
-            'OCR stays local, deterministic extraction runs first, then the active Local AI can refine evidence-grounded Brand, Salt, Strength and Form. Cloud refinement is always an explicit per-draft action. Nothing enters stock until you confirm.',
-            style: TextStyle(fontSize: 11, color: muted),
+            'Medicine preview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
-          if (local.hasSelection && local.scannerEnabled && !local.scanVerified)
-            const Padding(
-              padding: EdgeInsets.only(top: 5),
-              child: Text(
-                'Smart warning: this model loaded successfully but did not pass the optional extraction probe. Scan AI is still available; verify its preview before adding.',
-                style: TextStyle(fontSize: 11, color: amber),
-              ),
+          const SizedBox(height: 5),
+          const Text(
+            'Your scan is read automatically. Check the details, then tap Next.',
+            style: TextStyle(color: muted, fontSize: 12, height: 1.35),
+          ),
+          if (queue.persistenceError.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Saved scan processing needs attention. Your medicine database was not changed.',
+              style: TextStyle(color: red, fontSize: 12),
             ),
-          if (queue.pauseReason.isNotEmpty)
-            Text(queue.pauseReason, style: const TextStyle(color: amber)),
-          if (queue.persistenceError.isNotEmpty)
-            Text(queue.persistenceError, style: const TextStyle(color: red)),
-          if (error.isNotEmpty) Text(error, style: const TextStyle(color: red)),
-          for (final job in queue.jobs.reversed.take(visible))
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      job.title,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text(_jobStatus(job), style: const TextStyle(fontSize: 12)),
-                    if (!job.terminal)
-                      LinearProgressIndicator(
-                        value:
-                            job.status == 'reasoning' && job.drafts.isNotEmpty
-                            ? job.aiIndex / job.drafts.length
-                            : job.kind == 'video'
-                            ? job.videoProgress
-                            : null,
-                      ),
-                    if (job.coverageWarning.isNotEmpty)
-                      Text(
-                        job.coverageWarning,
-                        style: const TextStyle(color: amber, fontSize: 12),
-                      ),
-                    if (job.error.isNotEmpty)
-                      Text(
-                        job.error,
-                        style: const TextStyle(color: amber, fontSize: 12),
-                      ),
-                    for (final draft in job.drafts.take(3))
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(11),
-                          decoration: BoxDecoration(
-                            color: primary.withValues(alpha: .045),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: primary.withValues(alpha: .12),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                confirmedScanName(draft).isEmpty
-                                    ? 'Identity needs review'
-                                    : confirmedScanName(draft),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                [
-                                  _fact('Brand', draft.brand),
-                                  _fact('Salt', draft.salt),
-                                  _fact('Strength', draft.strength),
-                                  _fact('Form', confirmedScanForm(draft)),
-                                  _fact('EXP', draft.expiry),
-                                ].join('\n'),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  height: 1.35,
-                                ),
-                              ),
-                              if (_expired(draft.expiry))
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 5),
-                                  child: Text(
-                                    'Expired — do not dispense. Check the printed date.',
-                                    style: TextStyle(
-                                      color: red,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              if (job.terminal &&
-                                  _canConfirmAdd(draft) &&
-                                  _identityNeedsReview(draft))
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 6),
-                                  child: Text(
-                                    'Evidence-refined identity: compare these values with the pack before confirming.',
-                                    style: TextStyle(
-                                      color: amber,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              if (job.terminal && _canConfirmAdd(draft))
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: FilledButton.icon(
-                                    onPressed: _savingQuickAdd
-                                        ? null
-                                        : () => _confirmAndAdd(draft),
-                                    icon: const Icon(
-                                      Icons.check_circle_outline_rounded,
-                                    ),
-                                    label: Text(
-                                      _savingQuickAdd
-                                          ? 'Adding…'
-                                          : _quickAddDecision(draft)
-                                                .actionLabel,
-                                    ),
-                                  ),
-                                ),
-                              if (job.terminal)
-                                TextButton.icon(
-                                  onPressed: () => _cloudReview(draft),
-                                  icon: const Icon(
-                                    Icons.cloud_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Cloud refine this draft'),
-                                ),
-                              if (widget.onAsk != null && job.terminal)
-                                TextButton(
-                                  // AI routing belongs to AiScreen/AiService, not
-                                  // this scan-preview widget. A cloud-only route
-                                  // is valid, a busy Local AI turn can queue at
-                                  // the shared lease, and a missing route is
-                                  // handled by AiScreen's Connections flow.
-                                  onPressed: () => widget.onAsk!(draft.rawText),
-                                  child: const Text('Ask about this scan'),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (job.drafts.length > 3)
-                      Text('+ ${job.drafts.length - 3} more in review'),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        if (job.drafts.isNotEmpty)
-                          FilledButton.icon(
-                            onPressed: () => _review(job),
-                            icon: const Icon(Icons.fact_check_outlined),
-                            label: const Text('Preview & Confirm / Add'),
-                          ),
-                        if (job.terminal)
-                          TextButton(
-                            onPressed: () => _run(() => queue.retry(job)),
-                            child: Text(
-                              job.drafts.isEmpty || job.status == 'failed'
-                                  ? 'Retry capture'
-                                  : 'Retry local reasoning',
-                            ),
-                          ),
-                        if (job.canRescanVideo)
-                          TextButton.icon(
-                            onPressed: () =>
-                                _run(() => queue.retry(job, rescanVideo: true)),
-                            icon: const Icon(Icons.video_library_outlined),
-                            label: const Text('Read video again'),
-                          ),
-                        if (job.terminal)
-                          IconButton(
-                            tooltip: 'Dismiss capture draft',
-                            onPressed: () async {
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Dismiss this capture?'),
-                                  content: const Text(
-                                    'This removes its saved draft and retained source file. Saved inventory is unchanged. Recapture to recover it.',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, true),
-                                      child: const Text('Dismiss'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (confirmed == true) {
-                                await _run(() => queue.dismiss(job));
-                              }
-                            },
-                            icon: const Icon(Icons.close),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          ],
+          if (error.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(error, style: const TextStyle(color: red, fontSize: 12)),
+          ],
+          const SizedBox(height: 8),
+          for (final job in queue.jobs.reversed.take(visible)) _jobCard(job),
           if (queue.jobs.length > visible)
             TextButton(
               onPressed: () => setState(() => visible += 10),
-              child: const Text('Show more captures'),
+              child: const Text('Show more'),
             ),
         ],
       );
     },
   );
+
+  Widget _jobCard(MedicineIntakeJob job) {
+    final processing = !job.terminal;
+    final failedWithoutDraft = job.status == 'failed' && job.drafts.isEmpty;
+    final previews = job.drafts.take(3).toList(growable: false);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (processing) ...[
+              Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: primary.withValues(alpha: .08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.document_scanner_outlined,
+                      color: primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _statusTitle(job),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        const Text(
+                          'Please wait a moment',
+                          style: TextStyle(color: muted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              LinearProgressIndicator(
+                value: job.status == 'reasoning' && job.drafts.isNotEmpty
+                    ? job.aiIndex / job.drafts.length
+                    : job.kind == 'video'
+                    ? job.videoProgress
+                    : null,
+                minHeight: 5,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ] else if (failedWithoutDraft) ...[
+              const Row(
+                children: [
+                  Icon(Icons.error_outline_rounded, color: amber),
+                  SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Couldn’t read this medicine',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _simpleJobError(job),
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () => _retry(job),
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
+              ),
+            ] else ...[
+              for (var i = 0; i < previews.length; i++)
+                _draftCard(previews[i], i),
+              if (job.drafts.length > 3)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '+ ${job.drafts.length - 3} more medicines',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                ),
+              if (job.coverageWarning.isNotEmpty) ...[
+                const SizedBox(height: 9),
+                const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: amber, size: 18),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        'Some parts of this video were unclear. Check the medicine count before saving.',
+                        style: TextStyle(
+                          color: amber,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (job.canRescanVideo)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _retry(job),
+                      icon: const Icon(Icons.video_library_outlined, size: 18),
+                      label: const Text('Read video again'),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 52,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: primary.withValues(alpha: .10),
+                    foregroundColor: primary,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color: primary.withValues(alpha: .16),
+                      ),
+                    ),
+                  ),
+                  onPressed: job.drafts.isEmpty ? null : () => _review(job),
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text(
+                    'Next',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (job.terminal) ...[
+              const SizedBox(height: 2),
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  tooltip: 'Remove this scan',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _dismiss(job),
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _draftCard(MedicineScanDraft draft, int index) {
+    final name = confirmedScanName(draft).isEmpty
+        ? 'Medicine ${index + 1}'
+        : confirmedScanName(draft);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: primary.withValues(alpha: .045),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: primary.withValues(alpha: .12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (!_identityIncomplete(draft))
+                const Icon(Icons.check_circle_rounded, color: green, size: 20),
+            ],
+          ),
+          const SizedBox(height: 11),
+          _factRow('Brand', _value(draft.brand)),
+          _factRow('Salt', _value(draft.salt)),
+          _factRow('Strength', _value(draft.strength)),
+          _factRow('Form', _value(confirmedScanForm(draft))),
+          _factRow('MFG', _value(draft.mfg)),
+          _factRow('EXP', _value(draft.expiry)),
+          if (_expired(draft.expiry)) ...[
+            const SizedBox(height: 8),
+            const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: red, size: 18),
+                SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Expired medicine — check the printed date.',
+                    style: TextStyle(
+                      color: red,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (_identityIncomplete(draft)) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Some details need checking before saving.',
+              style: TextStyle(
+                color: amber,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  bool _identityIncomplete(MedicineScanDraft draft) =>
+      confirmedScanName(draft).isEmpty ||
+      draft.brand.trim().isEmpty ||
+      draft.salt.trim().isEmpty ||
+      draft.strength.trim().isEmpty ||
+      confirmedScanForm(draft).isEmpty;
+
+  Widget _factRow(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 82,
+          child: Text(
+            label,
+            style: const TextStyle(color: muted, fontSize: 12.5),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: value == 'Not found' ? amber : ink,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _dismiss(MedicineIntakeJob job) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove this scan?'),
+        content: const Text(
+          'This removes only this saved scan draft. Your medicine database is unchanged.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await _run(() => queue.dismiss(job));
+  }
 }

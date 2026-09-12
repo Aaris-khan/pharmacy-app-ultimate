@@ -37,19 +37,17 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void>? _initializing;
   Future<void> _intakeWrites = Future.value();
   final _workBarrier = MedicineIntakeWorkBarrier();
-  bool _running = false, _paused = false, _appActive = true;
+  bool _running = false, _appActive = true;
   bool _ready = false, _preferReasoning = false, _observingMemory = false;
   String persistenceError = '';
   Iterable<Medicine> Function()? _records;
   int Function()? _revision;
   int? _knowledgeRevision;
   List<MedicineKnowledgeEntry>? _knowledge;
-  String pauseReason = '';
 
   List<MedicineIntakeJob> get jobs => List.unmodifiable(_jobs);
   bool get full => _jobs.length >= capacity;
   bool get processing => _running;
-  bool get paused => _paused;
   bool get supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -294,12 +292,14 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didHaveMemoryPressure() {
-    _paused = true;
-    pauseReason =
-        'Device memory is low. Close other apps, then resume this saved queue.';
+    // Memory pressure is a resource signal, not a user workflow state. The
+    // LocalAiService owns runtime shedding and safely unloads its model after an
+    // active lease completes. Intake only drops rebuildable identity knowledge;
+    // durable OCR/video checkpoints continue automatically without a Resume gate.
     _knowledge = null;
     _knowledgeRevision = null;
     notifyListeners();
+    if (_appActive) _kick();
   }
 
   @override
@@ -309,8 +309,8 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     _appActive = active;
 
     // Identity-only derived knowledge can be rebuilt cheaply after resume and
-    // need not occupy memory while the app is backgrounded. Do not rewrite the
-    // user's explicit/manual pause state here.
+    // need not occupy memory while the app is backgrounded. Foregrounding the
+    // app always restarts any durable queued work automatically.
     if (!active) {
       _knowledge = null;
       _knowledgeRevision = null;
@@ -322,20 +322,12 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     _kick();
   }
 
-  void setPaused(bool value) {
-    _paused = value;
-    if (!value) pauseReason = '';
-    notifyListeners();
-    if (!value) _kick();
-  }
-
   void _modelChanged() {
     if (!LocalAiService.instance.busy) _kick();
   }
 
   void _kick() {
     if (_running ||
-        _paused ||
         !_appActive ||
         !_ready ||
         _database == null ||
@@ -345,7 +337,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     }
     unawaited(
       _pump().catchError((Object e) {
-        persistenceError = 'Capture queue paused: $e';
+        persistenceError = 'Capture queue needs attention: $e';
         notifyListeners();
       }),
     );
@@ -390,7 +382,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     _running = true;
     notifyListeners();
     try {
-      while (!_paused && _appActive) {
+      while (_appActive) {
         // OCR/capture work has priority, so fast photos are turned into durable
         // text before slower semantic reasoning monopolizes the native model.
         final local = LocalAiService.instance;
@@ -440,7 +432,6 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
       // idle spin when the queue contains review/failed cards only.
       final local = LocalAiService.instance;
       final shouldRestart =
-          !_paused &&
           _appActive &&
           _ready &&
           persistenceError.isEmpty &&
@@ -746,7 +737,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
       if (!_jobs.contains(job)) return;
       if (!job.terminal) {
         throw StateError(
-          'Pause/finish processing before dismissing a capture.',
+          'Wait for processing to finish before removing this capture.',
         );
       }
       final deleted = await _database!.delete(
