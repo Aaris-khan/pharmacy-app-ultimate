@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import '../domain/search.dart';
-import '../domain/inventory.dart';
 
 void _searchEntry(SendPort main) {
   final receive = ReceivePort();
@@ -66,36 +66,40 @@ void _searchEntry(SendPort main) {
   });
 }
 
-class SearchWorker {
-  final _receive = ReceivePort();
-  final _ready = Completer<SendPort?>();
-  final Map<int, Completer<dynamic>> _pending = {};
-  Isolate? _isolate;
-  int _id = 0, _revision = -1;
-  bool _closed = false;
-  late final Future<void> _start = _initialize();
-  Future<void> _queue = Future.value();
+class _SearchWorkerTransportFailure implements Exception {
+  const _SearchWorkerTransportFailure(this.message);
+  final String message;
 
-  Future<void> _initialize() async {
-    if (_closed) return;
-    _receive.listen((dynamic value) {
-      if (value is SendPort) {
-        if (!_ready.isCompleted) _ready.complete(value);
-        return;
-      }
-      if (value == null || value is List) {
-        close(); // Worker exit/error must settle callers, including startup.
-        return;
-      }
-      final result = value as Map;
-      final pending = _pending.remove(result['id']);
-      if (pending == null) return;
-      if (result.containsKey('error')) {
-        pending.completeError(StateError(result['error'] as String));
-      } else {
-        pending.complete(result['result']);
-      }
-    });
+  @override
+  String toString() => message;
+}
+
+/// One restartable actor session.
+///
+/// Search errors produced by the domain engine are ordinary request failures and
+/// keep the actor alive. Isolate exit/protocol/startup failures are transport
+/// failures: every borrower is settled, the actor is retired, and SearchWorker
+/// may create one fresh session for the same queued operation.
+class _SearchWorkerSession {
+  final ReceivePort _receive = ReceivePort();
+  final Completer<SendPort> _ready = Completer<SendPort>();
+  final Map<int, Completer<dynamic>> _pending = {};
+
+  Isolate? _isolate;
+  SendPort? _port;
+  StreamSubscription<dynamic>? _subscription;
+  bool _alive = true;
+  int _id = 0;
+
+  bool get alive => _alive;
+
+  Future<void> start() async {
+    if (!_alive) {
+      throw const _SearchWorkerTransportFailure(
+        'Background search session is unavailable.',
+      );
+    }
+    _subscription = _receive.listen(_onMessage);
     try {
       _isolate = await Isolate.spawn(
         _searchEntry,
@@ -103,17 +107,81 @@ class SearchWorker {
         onExit: _receive.sendPort,
         onError: _receive.sendPort,
       );
-    } catch (_) {
-      close();
-      rethrow;
+      _port = await _ready.future.timeout(const Duration(seconds: 8));
+    } catch (error) {
+      final failure = error is _SearchWorkerTransportFailure
+          ? error
+          : _SearchWorkerTransportFailure(
+              'Background search could not start: $error',
+            );
+      _fail(failure);
+      throw failure;
     }
-    if (_closed) _isolate?.kill(priority: Isolate.immediate);
   }
 
-  Future<dynamic> _request(Map<String, dynamic> message) async {
-    if (_closed) throw StateError('Search closed.');
-    final port = await _ready.future;
-    if (_closed || port == null) throw StateError('Search closed.');
+  void _onMessage(dynamic value) {
+    if (!_alive) return;
+    if (value is SendPort) {
+      if (!_ready.isCompleted) _ready.complete(value);
+      return;
+    }
+    if (value == null || value is List) {
+      _fail(
+        const _SearchWorkerTransportFailure(
+          'Background search stopped unexpectedly.',
+        ),
+      );
+      return;
+    }
+    if (value is! Map) {
+      _fail(
+        const _SearchWorkerTransportFailure(
+          'Background search returned an invalid transport message.',
+        ),
+      );
+      return;
+    }
+
+    final result = Map<dynamic, dynamic>.from(value);
+    final id = result['id'];
+    if (id is! int) {
+      _fail(
+        const _SearchWorkerTransportFailure(
+          'Background search returned an invalid request ID.',
+        ),
+      );
+      return;
+    }
+    final pending = _pending.remove(id);
+    if (pending == null || pending.isCompleted) return;
+    final error = result['error'];
+    if (error is String) {
+      pending.completeError(StateError(error));
+      return;
+    }
+    if (!result.containsKey('result')) {
+      _fail(
+        const _SearchWorkerTransportFailure(
+          'Background search returned an incomplete response.',
+        ),
+      );
+      return;
+    }
+    pending.complete(result['result']);
+  }
+
+  Future<dynamic> request(Map<String, dynamic> message) async {
+    if (!_alive) {
+      throw const _SearchWorkerTransportFailure(
+        'Background search session stopped.',
+      );
+    }
+    final port = _port ?? await _ready.future;
+    if (!_alive) {
+      throw const _SearchWorkerTransportFailure(
+        'Background search session stopped.',
+      );
+    }
     final id = ++_id;
     final completer = Completer<dynamic>();
     _pending[id] = completer;
@@ -121,15 +189,160 @@ class SearchWorker {
     return completer.future;
   }
 
-  Future<void> _ensureIndex(List<Medicine> records, int revision) async {
-    await _start;
-    if (_revision == revision) return;
-    await _request({
+  void _fail(Object error) {
+    if (!_alive) return;
+    _alive = false;
+    if (!_ready.isCompleted) _ready.completeError(error);
+    for (final pending in _pending.values) {
+      if (!pending.isCompleted) pending.completeError(error);
+    }
+    _pending.clear();
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _port = null;
+    _receive.close();
+    _subscription = null;
+  }
+
+  void close() => _fail(
+    const _SearchWorkerTransportFailure('Background search closed.'),
+  );
+}
+
+bool _sameSearchProjection(Medicine before, Medicine after) =>
+    before.id == after.id &&
+    before.name == after.name &&
+    before.brand == after.brand &&
+    before.manufacturer == after.manufacturer &&
+    before.salt == after.salt &&
+    before.strength == after.strength &&
+    before.form == after.form &&
+    before.mfg == after.mfg &&
+    before.expiry == after.expiry &&
+    before.barcode == after.barcode &&
+    before.batchNumber == after.batchNumber &&
+    before.block == after.block &&
+    before.row == after.row &&
+    before.vertical == after.vertical &&
+    before.location == after.location &&
+    before.notes == after.notes &&
+    before.ocrText == after.ocrText &&
+    before.sold == after.sold &&
+    before.archived == after.archived;
+
+class SearchWorker {
+  _SearchWorkerSession? _session;
+  Future<_SearchWorkerSession>? _starting;
+  final Map<String, Medicine> _indexedRecordRefs = {};
+  int _revision = -1;
+  int _indexBuilds = 0;
+  bool _closed = false;
+  Future<void> _queue = Future.value();
+
+  /// Diagnostic only. Useful for regression tests and future performance
+  /// telemetry; it does not participate in search decisions.
+  int get debugIndexBuilds => _indexBuilds;
+
+  Future<_SearchWorkerSession> _worker() {
+    if (_closed) {
+      return Future.error(StateError('Search closed.'));
+    }
+    final current = _session;
+    if (current != null && current.alive) return Future.value(current);
+    if (current != null) _retire(current);
+    final starting = _starting;
+    if (starting != null) return starting;
+
+    late final Future<_SearchWorkerSession> operation;
+    operation = _startWorker().whenComplete(() {
+      if (identical(_starting, operation)) _starting = null;
+    });
+    _starting = operation;
+    return operation;
+  }
+
+  Future<_SearchWorkerSession> _startWorker() async {
+    final session = _SearchWorkerSession();
+    await session.start();
+    if (_closed) {
+      session.close();
+      throw StateError('Search closed.');
+    }
+    _session = session;
+    _revision = -1;
+    _indexedRecordRefs.clear();
+    return session;
+  }
+
+  void _retire(_SearchWorkerSession session) {
+    session.close();
+    if (!identical(_session, session)) return;
+    _session = null;
+    _revision = -1;
+    _indexedRecordRefs.clear();
+  }
+
+  bool _canReuseIndex(List<Medicine> records) {
+    if (_revision < 0 || _indexedRecordRefs.length != records.length) {
+      return false;
+    }
+    final replacements = <Medicine>[];
+    for (final record in records) {
+      final indexed = _indexedRecordRefs[record.id];
+      if (indexed == null) return false;
+      if (identical(indexed, record)) continue;
+      if (!_sameSearchProjection(indexed, record)) return false;
+      replacements.add(record);
+    }
+    // Quantity, cost, row revision and other non-search facts may change very
+    // frequently during dispensing. Update only those object witnesses while
+    // retaining the expensive token/fuzzy index built from identical search
+    // facts. The worker never returns Medicine objects, only stable stock IDs.
+    for (final record in replacements) {
+      _indexedRecordRefs[record.id] = record;
+    }
+    return true;
+  }
+
+  Future<_SearchWorkerSession> _ensureIndex(
+    List<Medicine> records,
+    int revision,
+  ) async {
+    final session = await _worker();
+    if (_revision == revision) return session;
+    if (_canReuseIndex(records)) {
+      _revision = revision;
+      return session;
+    }
+    await session.request({
       'kind': 'index',
       'records': records,
       'revision': revision,
     });
+    if (!session.alive) {
+      throw const _SearchWorkerTransportFailure(
+        'Background search stopped while indexing.',
+      );
+    }
     _revision = revision;
+    _indexedRecordRefs
+      ..clear()
+      ..addEntries(records.map((record) => MapEntry(record.id, record)));
+    _indexBuilds++;
+    return session;
+  }
+
+  Future<T> _withTransportRecovery<T>(Future<T> Function() operation) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await operation();
+      } on _SearchWorkerTransportFailure {
+        final session = _session;
+        if (session != null) _retire(session);
+        if (_closed || attempt == 1) rethrow;
+      }
+    }
+    throw StateError('Background search recovery failed.');
   }
 
   Future<List<SearchHit>> search(
@@ -140,19 +353,21 @@ class SearchWorker {
     WarningSettings settings,
     DateTime today,
   ) {
-    final result = _queue.then((_) async {
-      await _ensureIndex(records, revision);
-      final response = await _request({
-        'kind': 'search',
-        'revision': revision,
-        'query': query,
-        'scope': scope,
-        'settings': settings,
-        'today': today,
-        'limit': query.trim().isEmpty ? 100000 : 150,
-      });
-      return (response as List).cast<SearchHit>();
-    });
+    final result = _queue.then(
+      (_) => _withTransportRecovery(() async {
+        final session = await _ensureIndex(records, revision);
+        final response = await session.request({
+          'kind': 'search',
+          'revision': revision,
+          'query': query,
+          'scope': scope,
+          'settings': settings,
+          'today': today,
+          'limit': query.trim().isEmpty ? 100000 : 150,
+        });
+        return (response as List).cast<SearchHit>();
+      }),
+    );
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
@@ -163,17 +378,19 @@ class SearchWorker {
     String query,
     DateTime today,
   ) {
-    final result = _queue.then((_) async {
-      await _ensureIndex(records, revision);
-      final response = await _request({
-        'kind': 'searchArchived',
-        'revision': revision,
-        'query': query,
-        'today': today,
-        'limit': query.trim().isEmpty ? 100000 : 150,
-      });
-      return (response as List).cast<SearchHit>();
-    });
+    final result = _queue.then(
+      (_) => _withTransportRecovery(() async {
+        final session = await _ensureIndex(records, revision);
+        final response = await session.request({
+          'kind': 'searchArchived',
+          'revision': revision,
+          'query': query,
+          'today': today,
+          'limit': query.trim().isEmpty ? 100000 : 150,
+        });
+        return (response as List).cast<SearchHit>();
+      }),
+    );
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
@@ -181,12 +398,10 @@ class SearchWorker {
   void close() {
     if (_closed) return;
     _closed = true;
-    if (!_ready.isCompleted) _ready.complete(null);
-    _isolate?.kill(priority: Isolate.immediate);
-    _receive.close();
-    for (final pending in _pending.values) {
-      pending.completeError(StateError('Search closed.'));
-    }
-    _pending.clear();
+    final session = _session;
+    _session = null;
+    session?.close();
+    _revision = -1;
+    _indexedRecordRefs.clear();
   }
 }
