@@ -1,12 +1,27 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../domain/backup.dart';
+import '../domain/medicine.dart';
+import '../domain/tracking.dart';
 import '../services/backup_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
+
+BackupImpact _backupImpactWorker(Map<String, Object?> payload) =>
+    BackupImpact.compare(
+      backup: payload['backup']! as PharmacyBackup,
+      currentRecords: Map<String, Medicine>.from(
+        payload['records']! as Map,
+      ),
+      currentSales: Map<String, SaleEvent>.from(payload['sales']! as Map),
+      currentSettings: payload['settings']! as WarningSettings,
+      currentSoldValue: payload['soldValue']! as int,
+      currentUnknownSold: payload['unknownSold']! as int,
+    );
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key, required this.controller});
@@ -90,8 +105,8 @@ class _BackupScreenState extends State<BackupScreen> {
       if (!mounted || _input.text != input) return;
 
       // The impact preview must describe the exact live snapshot bound to this
-      // review. If a concurrent stock write lands in the tiny hand-off window,
-      // fail closed and ask for a fresh review instead of showing stale counts.
+      // review. For large pharmacies, compare the snapshots away from the UI
+      // isolate so a 50k-row restore review cannot freeze scrolling/animation.
       final current = widget.controller.snapshot;
       if (parsed.currentRevision != current.revision) {
         setState(
@@ -100,14 +115,22 @@ class _BackupScreenState extends State<BackupScreen> {
         );
         return;
       }
-      final impact = BackupImpact.compare(
-        backup: parsed.backup,
-        currentRecords: current.records,
-        currentSales: current.sales,
-        currentSettings: current.settings,
-        currentSoldValue: current.soldValue,
-        currentUnknownSold: current.unknownSold,
-      );
+      final impact = await compute(_backupImpactWorker, <String, Object?>{
+        'backup': parsed.backup,
+        'records': current.records,
+        'sales': current.sales,
+        'settings': current.settings,
+        'soldValue': current.soldValue,
+        'unknownSold': current.unknownSold,
+      });
+      if (!mounted || _input.text != input) return;
+      if (widget.controller.snapshot.revision != parsed.currentRevision) {
+        setState(
+          () => _error =
+              'Inventory changed while restore impact was being calculated. Review the backup again before restoring.',
+        );
+        return;
+      }
       setState(
         () => _review = BackupReview(
           backup: parsed.backup,
