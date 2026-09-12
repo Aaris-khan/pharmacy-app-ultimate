@@ -235,6 +235,7 @@ class PharmacyBackup {
 class BackupImpact {
   const BackupImpact({
     required this.newStockEntries,
+    required this.changedStockEntries,
     required this.reactivatedStockEntries,
     required this.activeEntriesMovingToRemoved,
     required this.newSaleEvents,
@@ -246,6 +247,7 @@ class BackupImpact {
 
   const BackupImpact.none()
     : newStockEntries = 0,
+      changedStockEntries = 0,
       reactivatedStockEntries = 0,
       activeEntriesMovingToRemoved = 0,
       newSaleEvents = 0,
@@ -263,14 +265,16 @@ class BackupImpact {
     required int currentUnknownSold,
   }) {
     var newStock = 0;
+    var changedStock = 0;
     var reactivated = 0;
     final incomingIds = backup.records.keys.toSet();
     for (final incoming in backup.records.values) {
       final current = currentRecords[incoming.id];
       if (current == null) {
         newStock++;
-      } else if (current.archived && !incoming.archived) {
-        reactivated++;
+      } else {
+        if (!_sameMedicineRestoreFacts(current, incoming)) changedStock++;
+        if (current.archived && !incoming.archived) reactivated++;
       }
     }
 
@@ -297,6 +301,7 @@ class BackupImpact {
 
     return BackupImpact(
       newStockEntries: newStock,
+      changedStockEntries: changedStock,
       reactivatedStockEntries: reactivated,
       activeEntriesMovingToRemoved: movingToRemoved,
       newSaleEvents: newSales,
@@ -312,6 +317,7 @@ class BackupImpact {
   }
 
   final int newStockEntries;
+  final int changedStockEntries;
   final int reactivatedStockEntries;
   final int activeEntriesMovingToRemoved;
   final int newSaleEvents;
@@ -322,6 +328,7 @@ class BackupImpact {
 
   bool get hasMaterialChange =>
       newStockEntries > 0 ||
+      changedStockEntries > 0 ||
       reactivatedStockEntries > 0 ||
       activeEntriesMovingToRemoved > 0 ||
       newSaleEvents > 0 ||
@@ -330,6 +337,36 @@ class BackupImpact {
       warningSettingsChange ||
       soldTotalsChange;
 }
+
+bool _sameMedicineRestoreFacts(Medicine a, Medicine b) =>
+    a.id == b.id &&
+    a.name == b.name &&
+    a.brand == b.brand &&
+    a.manufacturer == b.manufacturer &&
+    a.salt == b.salt &&
+    a.strength == b.strength &&
+    a.form == b.form &&
+    a.mfg == b.mfg &&
+    a.mfgMonthOnly == b.mfgMonthOnly &&
+    a.expiry == b.expiry &&
+    a.expiryMonthOnly == b.expiryMonthOnly &&
+    a.quantity == b.quantity &&
+    a.unitPricePaise == b.unitPricePaise &&
+    a.barcode == b.barcode &&
+    a.batchNumber == b.batchNumber &&
+    a.block == b.block &&
+    a.row == b.row &&
+    a.vertical == b.vertical &&
+    a.location == b.location &&
+    a.notes == b.notes &&
+    a.ocrText == b.ocrText &&
+    a.sold == b.sold &&
+    a.archived == b.archived &&
+    a.archivedAt == b.archivedAt &&
+    a.archiveReason == b.archiveReason &&
+    a.soldAt == b.soldAt &&
+    a.soldQuantity == b.soldQuantity &&
+    a.soldUnitPricePaise == b.soldUnitPricePaise;
 
 bool _sameSaleFacts(SaleEvent a, SaleEvent b) =>
     a.id == b.id &&
