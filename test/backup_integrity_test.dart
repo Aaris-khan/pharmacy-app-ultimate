@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/domain/backup.dart';
+import '../lib/domain/medicine.dart';
 import '../lib/domain/tracking.dart';
 import 'domain_contract.dart';
 
@@ -53,6 +54,8 @@ void main() {
     expect(parsed.records.single.name, 'Dolo');
     expect(parsed.sales.single.quantity, 2);
     expect(parsed.soldValue, 1200);
+    expect(parsed.integrityVerified, isTrue);
+    expect(parsed.legacyFormat, isFalse);
   });
 
   test('valid-looking fact edits are rejected when integrity no longer matches', () {
@@ -63,7 +66,7 @@ void main() {
     expect(() => PharmacyBackup.parse(tampered), throwsFormatException);
   });
 
-  test('legacy v1 backups remain importable after the v2 upgrade', () {
+  test('legacy v1 backups remain importable and are marked unsealed', () {
     final legacy = jsonDecode(_backup().encode()) as Map<String, dynamic>;
     legacy['schema'] = legacyPharmacyBackupSchema;
     legacy.remove('integrity');
@@ -71,6 +74,8 @@ void main() {
     final parsed = PharmacyBackup.parse(jsonEncode(legacy));
     expect(parsed.records.single.id, 'stock-a');
     expect(parsed.sales.single.id, 'sale-a');
+    expect(parsed.integrityVerified, isFalse);
+    expect(parsed.legacyFormat, isTrue);
   });
 
   test('JSON field reordering does not break canonical integrity verification', () {
@@ -86,5 +91,132 @@ void main() {
 
     final parsed = PharmacyBackup.parse(jsonEncode(envelope));
     expect(parsed.records.single.name, 'Dolo');
+  });
+
+  test('restore impact explains stock, sale and settings consequences', () {
+    final incomingBase = stock(
+      'stock-a',
+      name: 'Dolo',
+      strength: '650mg',
+      notes: 'Rack A',
+      quantity: 10,
+    );
+    final incomingReactivated = stock(
+      'restore-me',
+      name: 'Cefixime',
+      strength: '200mg',
+    );
+    final incomingNew = stock('new-stock', name: 'Azithromycin');
+    final incomingChangedSale = SaleEvent(
+      id: 'sale-a',
+      stockId: incomingBase.id,
+      medicineName: incomingBase.name,
+      strength: incomingBase.strength,
+      form: incomingBase.form,
+      quantity: 2,
+      occurredAt: contractToday,
+    );
+    final incomingNewSale = SaleEvent(
+      id: 'sale-new',
+      stockId: incomingNew.id,
+      medicineName: incomingNew.name,
+      strength: incomingNew.strength,
+      form: incomingNew.form,
+      quantity: 1,
+      occurredAt: contractToday,
+    );
+    final incoming = PharmacyBackup(
+      createdAt: contractToday,
+      sourceRevision: 9,
+      settings: const WarningSettings(shortDays: 5, months: 3),
+      records: {
+        incomingBase.id: incomingBase,
+        incomingReactivated.id: incomingReactivated,
+        incomingNew.id: incomingNew,
+      },
+      sales: {
+        incomingChangedSale.id: incomingChangedSale,
+        incomingNewSale.id: incomingNewSale,
+      },
+      soldValue: 5000,
+      unknownSold: 1,
+    );
+
+    final archived = Medicine.fromJson({
+      ...incomingReactivated.toJson(),
+      'archived': true,
+      'archivedAt': '2026-09-10T10:00:00Z',
+      'archiveReason': 'Correction',
+    });
+    final currentSameId = Medicine.fromJson({
+      ...incomingBase.toJson(),
+      'notes': 'Rack B',
+      'revision': incomingBase.revision + 4,
+    });
+    final currentOnly = stock('current-only', name: 'Pantoprazole');
+    final currentChangedSale = SaleEvent(
+      id: 'sale-a',
+      stockId: incomingBase.id,
+      medicineName: incomingBase.name,
+      strength: incomingBase.strength,
+      form: incomingBase.form,
+      quantity: 1,
+      occurredAt: contractToday,
+    );
+    final currentOnlySale = SaleEvent(
+      id: 'sale-old',
+      stockId: currentOnly.id,
+      medicineName: currentOnly.name,
+      strength: currentOnly.strength,
+      form: currentOnly.form,
+      quantity: 1,
+      occurredAt: contractToday,
+    );
+
+    final impact = BackupImpact.compare(
+      backup: incoming,
+      currentRecords: {
+        currentSameId.id: currentSameId,
+        archived.id: archived,
+        currentOnly.id: currentOnly,
+      },
+      currentSales: {
+        currentChangedSale.id: currentChangedSale,
+        currentOnlySale.id: currentOnlySale,
+      },
+      currentSettings: contractSettings,
+      currentSoldValue: 0,
+      currentUnknownSold: 0,
+    );
+
+    expect(impact.newStockEntries, 1);
+    expect(impact.changedStockEntries, 2);
+    expect(impact.reactivatedStockEntries, 1);
+    expect(impact.activeEntriesMovingToRemoved, 1);
+    expect(impact.newSaleEvents, 1);
+    expect(impact.changedSaleEvents, 1);
+    expect(impact.removedSaleEvents, 1);
+    expect(impact.warningSettingsChange, isTrue);
+    expect(impact.soldTotalsChange, isTrue);
+    expect(impact.hasMaterialChange, isTrue);
+  });
+
+  test('restore impact ignores record revision churn when facts are identical', () {
+    final incoming = _backup();
+    final current = Medicine.fromJson({
+      ...incoming.records.single.toJson(),
+      'revision': incoming.records.single.revision + 50,
+    });
+    final impact = BackupImpact.compare(
+      backup: incoming,
+      currentRecords: {current.id: current},
+      currentSales: incoming.sales,
+      currentSettings: incoming.settings,
+      currentSoldValue: incoming.soldValue,
+      currentUnknownSold: incoming.unknownSold,
+    );
+
+    expect(impact.changedStockEntries, 0);
+    expect(impact.hasMaterialChange, isFalse);
   });
 }
