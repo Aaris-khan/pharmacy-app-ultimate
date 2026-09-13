@@ -253,7 +253,27 @@ OfflineEvidenceGraph buildOfflineEvidenceGraph(
 }
 
 bool _hasGraphEvidence(MedicineFrameEvidence frame) =>
-    searchText(frame.text).isNotEmpty || frame.allBarcodes.isNotEmpty;
+    _frameSearchCorpus(frame).isNotEmpty || frame.allBarcodes.isNotEmpty;
+
+/// Raw OCR text is normally authoritative, but ML Kit can occasionally retain
+/// valid bounded line geometry after a merged text stream is empty. Treat those
+/// lines as evidence rather than silently deleting the entire observation. This
+/// fallback is used only for graph selection/correlation; it never rewrites the
+/// persisted OCR payload or manufactures field values.
+String _frameSearchCorpus(MedicineFrameEvidence frame) {
+  final raw = frame.text.trim();
+  if (raw.isNotEmpty) return raw;
+  final parts = <String>[];
+  var total = 0;
+  for (final line in frame.layoutLines.take(160)) {
+    final clean = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty) continue;
+    if (total + clean.length > 12000) break;
+    parts.add(clean);
+    total += clean.length + 1;
+  }
+  return parts.join('\n');
+}
 
 class _FrameSignature {
   const _FrameSignature(
@@ -264,7 +284,7 @@ class _FrameSignature {
   );
 
   factory _FrameSignature.fromFrame(MedicineFrameEvidence frame) {
-    final normalized = searchText(frame.text);
+    final normalized = searchText(_frameSearchCorpus(frame));
     final tokens = normalized
         .split(' ')
         .where((value) => value.length >= 2)
