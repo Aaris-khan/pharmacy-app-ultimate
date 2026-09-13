@@ -467,45 +467,43 @@ Map<String, FutureOr<void> Function()> scanCaptureContract() => {
   },
   'retries cannot cite source removed by the current budget': () async {
     final raw = 'ZORBEXA 650\n${'x' * 3900} Cefixime 200 mg';
+    final original = _draft(raw);
     var calls = 0;
-    await _reject(
-      () => runLocalScanTurn(
-        draft: _draft(raw),
-        sourceLimit: 7000,
-        outputTokens: 512,
-        checkCurrent: () {},
-        generate: (handoff, budget) async {
-          if (++calls == 1) throw _overflow;
-          return jsonEncode(_pair('Cefixime', '200 mg', 'Cefixime 200 mg'));
-        },
-      ),
-    );
-    _check(calls == 2, 'Invalid evidence was retried as a context error');
-  },
-  'impossible admission is bounded and requests a crop, not model repair':
-      () async {
-        var calls = 0;
-        try {
-          await runLocalScanTurn(
-            draft: _draft(_longPack()),
-            sourceLimit: 7000,
-            outputTokens: 512,
-            checkCurrent: () {},
-            generate: (_, _) async {
-              calls++;
-              throw _overflow;
-            },
-          );
-          throw StateError('Expected failure');
-        } on FormatException catch (error) {
-          _check(
-            error.message.contains('model remains available') &&
-                error.message.contains('offline draft'),
-            'Misdiagnosed unavailable model',
-          );
-          _check(calls <= 4, 'Unbounded retries');
-        }
+    final result = await runLocalScanTurn(
+      draft: original,
+      sourceLimit: 7000,
+      outputTokens: 512,
+      checkCurrent: () {},
+      generate: (handoff, budget) async {
+        if (++calls == 1) throw _overflow;
+        return jsonEncode(_pair('Cefixime', '200 mg', 'Cefixime 200 mg'));
       },
+    );
+    _check(
+      identical(result, original),
+      'Unsafe omitted evidence replaced the deterministic draft',
+    );
+    _check(calls == 2, 'Invalid evidence escaped bounded repair');
+  },
+  'impossible admission is bounded and preserves the offline draft': () async {
+    final original = _draft(_longPack());
+    var calls = 0;
+    final result = await runLocalScanTurn(
+      draft: original,
+      sourceLimit: 7000,
+      outputTokens: 512,
+      checkCurrent: () {},
+      generate: (_, _) async {
+        calls++;
+        throw _overflow;
+      },
+    );
+    _check(
+      identical(result, original),
+      'Context exhaustion discarded deterministic evidence',
+    );
+    _check(calls <= 4, 'Unbounded context admission retries');
+  },
   'cancel before admission never starts native inference': () async {
     var calls = 0;
     await _reject(
@@ -588,22 +586,25 @@ Map<String, FutureOr<void> Function()> scanCaptureContract() => {
     '{"fields":{},"actions":["delete"]}',
     '{"fields":{"brand":{"value":"FAKE","quote":"FAKE"}}}',
   ])
-    'malformed/unsafe response is not a retryable admission error: $response':
+    'malformed/unsafe response fails closed to deterministic evidence: $response':
         () async {
+          final original = _draft(_pack);
           var calls = 0;
-          await _reject(
-            () => runLocalScanTurn(
-              draft: _draft(_pack),
-              sourceLimit: 1800,
-              outputTokens: 512,
-              checkCurrent: () {},
-              generate: (_, _) async {
-                calls++;
-                return response;
-              },
-            ),
+          final result = await runLocalScanTurn(
+            draft: original,
+            sourceLimit: 1800,
+            outputTokens: 512,
+            checkCurrent: () {},
+            generate: (_, _) async {
+              calls++;
+              return response;
+            },
           );
-          _check(calls == 1, 'Bad output triggered generation loop');
+          _check(
+            identical(result, original),
+            'Bad local-model output replaced deterministic evidence',
+          );
+          _check(calls == 1, 'Bad output triggered an unbounded generation loop');
         },
   'transport failure is not hidden as token overflow': () async {
     var calls = 0;
@@ -640,18 +641,21 @@ Map<String, FutureOr<void> Function()> scanCaptureContract() => {
   },
   'empty/oversized unbroken OCR avoids a useless native call': () async {
     for (final source in ['', 'x' * 1801]) {
+      final original = _draft(source);
       var calls = 0;
-      await _reject(
-        () => runLocalScanTurn(
-          draft: _draft(source),
-          sourceLimit: 1800,
-          outputTokens: 512,
-          checkCurrent: () {},
-          generate: (_, _) async {
-            calls++;
-            return _reply;
-          },
-        ),
+      final result = await runLocalScanTurn(
+        draft: original,
+        sourceLimit: 1800,
+        outputTokens: 512,
+        checkCurrent: () {},
+        generate: (_, _) async {
+          calls++;
+          return _reply;
+        },
+      );
+      _check(
+        identical(result, original),
+        'No-evidence scan did not preserve deterministic draft',
       );
       _check(calls == 0, 'No-evidence inference attempted');
     }
