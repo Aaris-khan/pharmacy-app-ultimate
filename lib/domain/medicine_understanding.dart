@@ -162,6 +162,7 @@ class MedicineKnowledgeEntry {
     this.barcode = '',
     this.aliases = const <String>[],
     this.ocrAliases = const <String>[],
+    this.saltOcrAliases = const <String>[],
   });
 
   final String name;
@@ -173,6 +174,10 @@ class MedicineKnowledgeEntry {
   final String barcode;
   final List<String> aliases;
   final List<String> ocrAliases;
+
+  /// Human-confirmed OCR spellings for this entry's single active ingredient.
+  /// These are field-scoped corrections, never general product aliases.
+  final List<String> saltOcrAliases;
 
   factory MedicineKnowledgeEntry.fromMedicine(Medicine medicine) =>
       MedicineKnowledgeEntry(
@@ -195,6 +200,7 @@ class MedicineKnowledgeEntry {
     'barcode': barcode,
     'aliases': aliases.take(24).toList(growable: false),
     'ocrAliases': ocrAliases.take(24).toList(growable: false),
+    'saltOcrAliases': saltOcrAliases.take(24).toList(growable: false),
   };
 
   factory MedicineKnowledgeEntry.fromMessage(Map<Object?, Object?> map) {
@@ -226,6 +232,7 @@ class MedicineKnowledgeEntry {
       barcode: text('barcode'),
       aliases: texts('aliases'),
       ocrAliases: texts('ocrAliases'),
+      saltOcrAliases: texts('saltOcrAliases'),
     );
   }
 
@@ -1114,10 +1121,15 @@ class MedicineUnderstandingEngine {
         }
       }
       final source = parts.join(' ');
-      final salt = _saltValue(source);
-      if (salt.isNotEmpty) add('salt', salt, .94);
-      for (final hit in knowledgeResolver.matchSalt(source)) {
-        add(hit.field, hit.value, hit.score);
+      final learnedSalt = knowledgeResolver.learnedSaltCorrection(source);
+      if (learnedSalt != null) {
+        add(learnedSalt.field, learnedSalt.value, learnedSalt.score);
+      } else {
+        final salt = _saltValue(source);
+        if (salt.isNotEmpty) add('salt', salt, .94);
+        for (final hit in knowledgeResolver.matchSalt(source)) {
+          add(hit.field, hit.value, hit.score);
+        }
       }
       final strengths = _strengths(source);
       if (strengths.isNotEmpty) {
@@ -1176,10 +1188,15 @@ class MedicineUnderstandingEngine {
       }
 
       if (!compositionLines.contains(index) && _looksLikeGenericLine(line)) {
-        final salt = _saltValue(line);
-        if (salt.isNotEmpty) add('salt', salt, .76);
-        for (final hit in knowledgeResolver.matchSalt(line)) {
-          add(hit.field, hit.value, hit.score);
+        final learnedSalt = knowledgeResolver.learnedSaltCorrection(line);
+        if (learnedSalt != null) {
+          add(learnedSalt.field, learnedSalt.value, learnedSalt.score);
+        } else {
+          final salt = _saltValue(line);
+          if (salt.isNotEmpty) add('salt', salt, .76);
+          for (final hit in knowledgeResolver.matchSalt(line)) {
+            add(hit.field, hit.value, hit.score);
+          }
         }
       }
 
@@ -1195,8 +1212,13 @@ class MedicineUnderstandingEngine {
           if (!_looksLikeGenericLine(line)) {
             // A known ingredient printed with a dose is strong semantic
             // evidence even when OCR missed the words COMPOSITION or I.P.
-            for (final hit in knowledgeResolver.matchSalt(line)) {
-              add(hit.field, hit.value, max(.70, hit.score - .04));
+            final learnedSalt = knowledgeResolver.learnedSaltCorrection(line);
+            if (learnedSalt != null) {
+              add(learnedSalt.field, learnedSalt.value, learnedSalt.score - .02);
+            } else {
+              for (final hit in knowledgeResolver.matchSalt(line)) {
+                add(hit.field, hit.value, max(.70, hit.score - .04));
+              }
             }
           }
         }
@@ -1217,21 +1239,30 @@ class MedicineUnderstandingEngine {
         }
         final name = _productName(line);
         if (name.isNotEmpty) {
-          final ingredientHits = knowledgeResolver.matchSalt(name);
-          if (ingredientHits.length == 1 &&
-              ingredientHits.single.score >= .95 &&
-              _candidateKey('salt', name) ==
-                  _candidateKey('salt', ingredientHits.single.value)) {
+          final learnedIngredient = knowledgeResolver.learnedSaltCorrection(name);
+          if (learnedIngredient != null) {
             add(
               'salt',
-              ingredientHits.single.value,
-              ingredientHits.single.score - .035,
+              learnedIngredient.value,
+              learnedIngredient.score - .02,
             );
-            add(
-              'name',
-              ingredientHits.single.value,
-              ingredientHits.single.score - .025,
-            );
+          } else {
+            final ingredientHits = knowledgeResolver.matchSalt(name);
+            if (ingredientHits.length == 1 &&
+                ingredientHits.single.score >= .95 &&
+                _candidateKey('salt', name) ==
+                    _candidateKey('salt', ingredientHits.single.value)) {
+              add(
+                'salt',
+                ingredientHits.single.value,
+                ingredientHits.single.score - .035,
+              );
+              add(
+                'name',
+                ingredientHits.single.value,
+                ingredientHits.single.score - .025,
+              );
+            }
           }
           final manufacturerHits = knowledgeResolver.matchManufacturer(line);
           final hasVerifiedIdentity = identityHits.any(
@@ -1355,6 +1386,13 @@ class _OfflineMedicineKnowledge {
     for (final entry in entries) {
       _addSalt(entry.salt, verifiedLocal: true, includeComponents: false);
     }
+    // Learned composition corrections stay in a separate exact index. They are
+    // never fuzzy product aliases and cannot override an ambiguous collision.
+    for (final entry in entries) {
+      for (final alias in entry.saltOcrAliases.take(24)) {
+        _addLearnedSaltCorrection(alias, entry.salt);
+      }
+    }
     for (final salt in _embeddedActiveIngredients) {
       _addPhrase(
         indexField: 'salt',
@@ -1401,6 +1439,8 @@ class _OfflineMedicineKnowledge {
       <String, List<MedicineKnowledgeEntry>>{};
   final Map<String, List<String>> _strengthsByIdentity =
       <String, List<String>>{};
+  final Map<String, Set<String>> _learnedSaltCorrections =
+      <String, Set<String>>{};
 
   void _addLocalIdentity(MedicineKnowledgeEntry entry) {
     final barcode = _barcodeKnowledgeKey(entry.barcode);
@@ -1478,6 +1518,47 @@ class _OfflineMedicineKnowledge {
         verifiedLocal: true,
       );
     }
+  }
+
+  void _addLearnedSaltCorrection(String alias, String canonical) {
+    final cleanAlias = _cleanValue(alias);
+    final cleanCanonical = _cleanValue(canonical);
+    if (cleanAlias.isEmpty ||
+        cleanCanonical.length < 4 ||
+        cleanCanonical.contains('+') ||
+        cleanCanonical.contains(';')) {
+      return;
+    }
+    final key = _knowledgeKey(cleanAlias);
+    if (key.length < 2 || key.length > 160) return;
+    _learnedSaltCorrections
+        .putIfAbsent(key, () => <String>{})
+        .add(cleanCanonical);
+  }
+
+  /// Exact, human-confirmed composition correction. Longest matching OCR span
+  /// wins. If the same learned spelling points at two different salts, this
+  /// method abstains instead of following support order or insertion order.
+  _KnowledgeHit? learnedSaltCorrection(String raw) {
+    final query = _knowledgeKey(raw);
+    if (query.isEmpty || _learnedSaltCorrections.isEmpty) return null;
+    final tokens = query
+        .split(' ')
+        .where((value) => value.isNotEmpty)
+        .take(48)
+        .toList(growable: false);
+    if (tokens.isEmpty) return null;
+    for (var width = min(8, tokens.length); width >= 1; width--) {
+      final values = <String>{};
+      for (var start = 0; start + width <= tokens.length; start++) {
+        final key = tokens.sublist(start, start + width).join(' ');
+        values.addAll(_learnedSaltCorrections[key] ?? const <String>{});
+      }
+      if (values.isEmpty) continue;
+      if (values.length != 1) return null;
+      return _KnowledgeHit('salt', values.single, .99);
+    }
+    return null;
   }
 
   void _addIdentity(String field, String value, String strength) {
@@ -2186,8 +2267,9 @@ List<String> _strengths(String line) {
           (unit) => ' ${unit[1]!.toLowerCase()}',
         )
         .trim();
-    if (!values.map(_strengthKey).contains(_strengthKey(value)))
+    if (!values.map(_strengthKey).contains(_strengthKey(value))) {
       values.add(value);
+    }
   }
   return values;
 }

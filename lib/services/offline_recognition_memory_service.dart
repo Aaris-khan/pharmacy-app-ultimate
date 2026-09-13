@@ -8,12 +8,13 @@ import '../domain/medicine.dart';
 import '../domain/medicine_understanding.dart';
 import '../domain/search.dart';
 
-/// Private, bounded learning memory for recurring OCR identity mistakes.
+/// Private, bounded learning memory for recurring OCR recognition mistakes.
 ///
 /// Only explicit pharmacist-confirmed saves may teach this store. It never
-/// stores the full OCR document, dates, batch, price, quantity or location. A
-/// learned alias can only enrich an already active pharmacist-reviewed local
-/// identity; it cannot create a new medicine identity by itself.
+/// stores the full OCR document, dates, batch, price, quantity or location.
+/// Identity aliases remain product-scoped. Salt corrections are additionally
+/// field-scoped and are activated only when independent evidence in the same
+/// frame supports that exact pharmacist-reviewed medicine identity.
 class OfflineRecognitionMemoryService {
   OfflineRecognitionMemoryService._();
 
@@ -22,6 +23,7 @@ class OfflineRecognitionMemoryService {
 
   static const _schemaVersion = 1;
   static const _maxRows = 16000;
+  static const _saltAliasPrefix = 'salt:';
   Database? _database;
   Future<void>? _initializing;
 
@@ -58,15 +60,20 @@ CREATE TABLE recognition_aliases (
     );
   }
 
-  /// Learns only compact name/brand OCR variants after an explicit human save.
+  /// Learns compact OCR corrections only after an explicit human-confirmed
+  /// save. Name/brand variants become identity memory. A single-ingredient salt
+  /// correction is stored in a separate namespace so it can never become a
+  /// global product-name shortcut.
+  ///
   /// Recognition-memory failure is intentionally non-authoritative: inventory
-  /// save has already succeeded and callers should keep operating normally.
+  /// save has already succeeded and callers keep operating normally.
   Future<void> learnFromConfirmedScan(
     MedicineScanDraft draft,
     Medicine confirmed,
   ) async {
-    final aliases = deriveLearnableIdentityAliases(draft, confirmed);
-    if (aliases.isEmpty) return;
+    final identityAliases = deriveLearnableIdentityAliases(draft, confirmed);
+    final saltAliases = deriveLearnableSaltAliases(draft, confirmed);
+    if (identityAliases.isEmpty && saltAliases.isEmpty) return;
     try {
       await _initialize();
       final db = _database;
@@ -81,9 +88,8 @@ CREATE TABLE recognition_aliases (
       if (identityKey.isEmpty) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       await db.transaction((txn) async {
-        for (final alias in aliases.take(8)) {
-          final normalized = searchText(alias);
-          if (normalized.length < 3 || normalized.length > 40) continue;
+        Future<void> remember(String alias, String normalized) async {
+          if (alias.trim().isEmpty || normalized.isEmpty) return;
           await txn.rawInsert(
             '''INSERT INTO recognition_aliases
                (identity_key, alias, normalized_alias, support, last_confirmed)
@@ -95,6 +101,18 @@ CREATE TABLE recognition_aliases (
             <Object?>[identityKey, alias, normalized, now],
           );
         }
+
+        for (final alias in identityAliases.take(8)) {
+          final normalized = searchText(alias);
+          if (normalized.length < 3 || normalized.length > 40) continue;
+          await remember(alias, normalized);
+        }
+        for (final alias in saltAliases.take(4)) {
+          final normalized = _storedSaltAliasKey(alias);
+          if (normalized.isEmpty || normalized.length > 72) continue;
+          await remember(alias, normalized);
+        }
+
         final countRows = await txn.rawQuery(
           'SELECT COUNT(*) AS count FROM recognition_aliases',
         );
@@ -118,9 +136,14 @@ CREATE TABLE recognition_aliases (
     }
   }
 
-  /// Adds previously confirmed OCR aliases only to matching current local
-  /// medicine identities. If the memory DB is absent/corrupt/unavailable, the
-  /// exact original knowledge list is returned.
+  /// Adds previously confirmed OCR memory only to matching current local
+  /// medicine identities. Identity aliases use recency-weighted collision
+  /// evidence. Salt corrections additionally require the learned typo and an
+  /// independent identity anchor to co-occur in the same OCR frame, preventing
+  /// one medicine in a video/import from teaching another medicine by accident.
+  ///
+  /// If the memory DB is absent/corrupt/unavailable, the exact original
+  /// knowledge list is returned.
   Future<List<MedicineKnowledgeEntry>> enrichKnowledge(
     List<MedicineKnowledgeEntry> knowledge,
     List<MedicineFrameEvidence> evidence,
@@ -130,17 +153,27 @@ CREATE TABLE recognition_aliases (
       await _initialize();
       final db = _database;
       if (db == null) return knowledge;
-      final keys = _evidenceAliasKeys(evidence)
+
+      final identityEvidenceKeys = _evidenceAliasKeys(evidence)
           .take(96)
           .toList(growable: false);
+      final saltEvidenceKeys = _evidenceSaltAliasKeys(evidence)
+          .take(96)
+          .map((key) => '$_saltAliasPrefix$key')
+          .toList(growable: false);
+      final keys = <String>{
+        ...identityEvidenceKeys,
+        ...saltEvidenceKeys,
+      }.take(192).toList(growable: false);
       if (keys.isEmpty) return knowledge;
+
       final placeholders = List.filled(keys.length, '?').join(',');
       final rows = await db.rawQuery(
         '''SELECT identity_key, alias, normalized_alias, support, last_confirmed
            FROM recognition_aliases
            WHERE normalized_alias IN ($placeholders)
            ORDER BY support DESC, last_confirmed DESC
-           LIMIT 128''',
+           LIMIT 256''',
         keys,
       );
       if (rows.isEmpty) return knowledge;
@@ -154,30 +187,54 @@ CREATE TABLE recognition_aliases (
             .add(row);
       }
 
-      final learned = <String, List<String>>{};
-      for (final collision in byAlias.values) {
+      // Identity aliases are allowed to accelerate product recognition only
+      // when an ambiguous alias has a materially dominant, reasonably recent
+      // pharmacist-confirmed mapping. The exponential half-life prevents old
+      // mistakes from owning a typo forever while preserving repeated evidence.
+      final learnedIdentity = <String, List<String>>{};
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final entry in byAlias.entries) {
+        if (entry.key.startsWith(_saltAliasPrefix)) continue;
+        final collision = entry.value;
+        final weightByIdentity = <String, double>{};
         final supportByIdentity = <String, int>{};
         for (final row in collision) {
           final identity = row['identity_key'];
           final support = row['support'];
           if (identity is! String || support is! num) continue;
+          final count = max(1, support.toInt());
+          final last = row['last_confirmed'];
+          final lastConfirmed = last is num ? last.toInt() : now;
+          final ageDays = max(0, now - lastConfirmed) / 86400000.0;
+          final recency = pow(.5, ageDays / 180.0).toDouble();
+          final weight = count * recency;
+          weightByIdentity.update(
+            identity,
+            (value) => value + weight,
+            ifAbsent: () => weight,
+          );
           supportByIdentity.update(
             identity,
-            (value) => value + support.toInt(),
-            ifAbsent: () => support.toInt(),
+            (value) => value + count,
+            ifAbsent: () => count,
           );
         }
-        if (supportByIdentity.isEmpty) continue;
-        final ranked = supportByIdentity.entries.toList(growable: false)
+        if (weightByIdentity.isEmpty) continue;
+        final ranked = weightByIdentity.entries.toList(growable: false)
           ..sort((a, b) {
-            final support = b.value.compareTo(a.value);
-            return support != 0 ? support : a.key.compareTo(b.key);
+            final weight = b.value.compareTo(a.value);
+            return weight != 0 ? weight : a.key.compareTo(b.key);
           });
         final winner = ranked.first;
         if (ranked.length > 1) {
           final runner = ranked[1];
+          final total = ranked.fold<double>(0, (sum, item) => sum + item.value);
+          final posterior = total <= 0 ? 0.0 : winner.value / total;
+          final ratio = runner.value <= 0 ? double.infinity : winner.value / runner.value;
           final dominant =
-              winner.value >= 3 && winner.value >= runner.value * 2;
+              (supportByIdentity[winner.key] ?? 0) >= 2 &&
+              posterior >= .64 &&
+              ratio >= 1.75;
           if (!dominant) continue;
         }
 
@@ -185,43 +242,98 @@ CREATE TABLE recognition_aliases (
           if (row['identity_key'] != winner.key) continue;
           final alias = row['alias'];
           if (alias is! String || alias.trim().isEmpty) continue;
-          final values = learned.putIfAbsent(winner.key, () => <String>[]);
+          final values = learnedIdentity.putIfAbsent(
+            winner.key,
+            () => <String>[],
+          );
           if (!values.contains(alias) && values.length < 12) values.add(alias);
           break;
         }
       }
-      if (learned.isEmpty) return knowledge;
+
+      final knowledgeByIdentity = <String, List<MedicineKnowledgeEntry>>{};
+      for (final item in knowledge) {
+        final identity = recognitionIdentityKey(
+          name: item.name,
+          brand: item.brand,
+          salt: item.salt,
+          strength: item.strength,
+          form: item.form,
+        );
+        if (identity.isEmpty) continue;
+        knowledgeByIdentity
+            .putIfAbsent(identity, () => <MedicineKnowledgeEntry>[])
+            .add(item);
+      }
+      final frameContexts = _recognitionFrameContexts(evidence);
+      final learnedSalt = <String, List<String>>{};
+      for (final entry in byAlias.entries) {
+        if (!entry.key.startsWith(_saltAliasPrefix)) continue;
+        final aliasKey = entry.key.substring(_saltAliasPrefix.length);
+        if (aliasKey.isEmpty) continue;
+        for (final row in entry.value) {
+          final identity = row['identity_key'];
+          final alias = row['alias'];
+          if (identity is! String || alias is! String || alias.trim().isEmpty) {
+            continue;
+          }
+          final knownEntries = knowledgeByIdentity[identity];
+          if (knownEntries == null || knownEntries.isEmpty) continue;
+          final identityAliases =
+              learnedIdentity[identity] ?? const <String>[];
+          final supported = knownEntries.any(
+            (item) => _saltCorrectionContextSupports(
+              item,
+              aliasKey,
+              frameContexts,
+              identityAliases,
+            ),
+          );
+          if (!supported) continue;
+          final values = learnedSalt.putIfAbsent(identity, () => <String>[]);
+          if (!values.contains(alias) && values.length < 8) values.add(alias);
+        }
+      }
+
+      if (learnedIdentity.isEmpty && learnedSalt.isEmpty) return knowledge;
 
       var changed = false;
       final result = <MedicineKnowledgeEntry>[];
-      for (final entry in knowledge) {
+      for (final item in knowledge) {
         final identity = recognitionIdentityKey(
-          name: entry.name,
-          brand: entry.brand,
-          salt: entry.salt,
-          strength: entry.strength,
-          form: entry.form,
+          name: item.name,
+          brand: item.brand,
+          salt: item.salt,
+          strength: item.strength,
+          form: item.form,
         );
-        final aliases = learned[identity];
-        if (aliases == null || aliases.isEmpty) {
-          result.add(entry);
+        final identityAliases = learnedIdentity[identity];
+        final saltAliases = learnedSalt[identity];
+        if ((identityAliases == null || identityAliases.isEmpty) &&
+            (saltAliases == null || saltAliases.isEmpty)) {
+          result.add(item);
           continue;
         }
-        final merged = <String>{
-          ...entry.ocrAliases,
-          ...aliases,
+        final mergedIdentityAliases = <String>{
+          ...?identityAliases,
+          ...item.ocrAliases,
+        }.take(24).toList(growable: false);
+        final mergedSaltAliases = <String>{
+          ...?saltAliases,
+          ...item.saltOcrAliases,
         }.take(24).toList(growable: false);
         result.add(
           MedicineKnowledgeEntry(
-            name: entry.name,
-            brand: entry.brand,
-            salt: entry.salt,
-            strength: entry.strength,
-            form: entry.form,
-            manufacturer: entry.manufacturer,
-            barcode: entry.barcode,
-            aliases: entry.aliases,
-            ocrAliases: merged,
+            name: item.name,
+            brand: item.brand,
+            salt: item.salt,
+            strength: item.strength,
+            form: item.form,
+            manufacturer: item.manufacturer,
+            barcode: item.barcode,
+            aliases: item.aliases,
+            ocrAliases: mergedIdentityAliases,
+            saltOcrAliases: mergedSaltAliases,
           ),
         );
         changed = true;
@@ -254,10 +366,11 @@ String recognitionIdentityKey({
   return sha256.convert(parts.join('|').codeUnits).toString();
 }
 
-/// Extracts bounded OCR variants that are demonstrably close to the confirmed
-/// human-reviewed Name/Brand. Salt, strength and lot text are intentionally not
-/// learned as identity aliases, preventing a common ingredient or dose from
-/// becoming a shortcut to the wrong product.
+/// Extracts bounded OCR variants demonstrably related to the final
+/// human-reviewed Name/Brand. In addition to fuzzy candidates, an explicit
+/// scan-field correction may teach a more damaged spelling when that exact
+/// observed value is present in raw OCR and still has enough character evidence
+/// to be a plausible OCR corruption rather than a semantic jump.
 List<String> deriveLearnableIdentityAliases(
   MedicineScanDraft draft,
   Medicine confirmed,
@@ -268,28 +381,25 @@ List<String> deriveLearnableIdentityAliases(
   }.map(searchText).where((value) => value.length >= 3).toSet();
   if (targets.isEmpty || draft.rawText.trim().isEmpty) return const <String>[];
 
-  final observed = <String>{};
-  for (final rawLine in draft.rawText.split(RegExp(r'[\r\n]+')).take(32)) {
-    final line = searchText(rawLine);
-    if (line.isEmpty) continue;
-    final tokens = line
-        .split(' ')
-        .where((value) => value.isNotEmpty)
-        .take(16)
-        .toList(growable: false);
-    for (final token in tokens) {
-      if (token.length >= 3 && token.length <= 28) observed.add(token);
+  final observed = _textIdentityAliasKeys(draft.rawText);
+  final scores = <String, double>{};
+
+  void considerDirectCorrection(String observedValue, String confirmedValue) {
+    final candidate = searchText(observedValue);
+    final target = searchText(confirmedValue);
+    if (candidate.length < 3 ||
+        target.length < 3 ||
+        candidate == target ||
+        !observed.contains(candidate)) {
+      return;
     }
-    for (var width = 2; width <= min(3, tokens.length); width++) {
-      for (var start = 0; start + width <= tokens.length; start++) {
-        final phrase = tokens.sublist(start, start + width).join(' ');
-        if (phrase.length >= 4 && phrase.length <= 32) observed.add(phrase);
-      }
-    }
-    if (line.length <= 32) observed.add(line);
+    if (!_plausibleOcrCorrection(candidate, target)) return;
+    scores.update(candidate, (value) => max(value, 1.05), ifAbsent: () => 1.05);
   }
 
-  final ranked = <(String, double)>[];
+  considerDirectCorrection(draft.name, confirmed.name);
+  considerDirectCorrection(draft.brand, confirmed.brand);
+
   for (final candidate in observed) {
     if (targets.contains(candidate)) continue;
     if (RegExp(r'^\d+(?:[ ./:+-]\d+)*$').hasMatch(candidate)) continue;
@@ -301,42 +411,269 @@ List<String> deriveLearnableIdentityAliases(
       if (ratio < .58) continue;
       best = max(best, _identitySimilarity(candidate, target));
     }
-    if (best >= .74) ranked.add((candidate, best));
+    if (best >= .74) {
+      scores.update(candidate, (value) => max(value, best), ifAbsent: () => best);
+    }
   }
-  ranked.sort((a, b) {
-    final score = b.$2.compareTo(a.$2);
-    if (score != 0) return score;
-    final length = a.$1.length.compareTo(b.$1.length);
-    return length != 0 ? length : a.$1.compareTo(b.$1);
-  });
-  return ranked.map((value) => value.$1).take(8).toList(growable: false);
+
+  final ranked = scores.entries.toList(growable: false)
+    ..sort((a, b) {
+      final score = b.value.compareTo(a.value);
+      if (score != 0) return score;
+      final length = a.key.length.compareTo(b.key.length);
+      return length != 0 ? length : a.key.compareTo(b.key);
+    });
+  return ranked.map((value) => value.key).take(8).toList(growable: false);
+}
+
+/// Learns one explicitly corrected single-ingredient OCR spelling. Combination
+/// salts deliberately abstain here because a flat alias cannot safely prove
+/// which component was corrected. The observed salt must be a real raw-OCR
+/// witness and must still share enough character evidence with the confirmed
+/// salt to reject semantic jumps such as Paracetamol -> Prednisolone.
+List<String> deriveLearnableSaltAliases(
+  MedicineScanDraft draft,
+  Medicine confirmed,
+) {
+  final observedParts = _saltParts(draft.salt);
+  final confirmedParts = _saltParts(confirmed.salt);
+  if (observedParts.length != 1 || confirmedParts.length != 1) {
+    return const <String>[];
+  }
+  final observed = observedParts.single.trim();
+  final confirmedSalt = confirmedParts.single.trim();
+  final observedKey = _saltAliasKey(observed);
+  final confirmedKey = _saltAliasKey(confirmedSalt);
+  if (observedKey.length < 4 ||
+      observedKey.length > 56 ||
+      confirmedKey.length < 4 ||
+      observedKey == confirmedKey) {
+    return const <String>[];
+  }
+  if (_saltAliasNoise.contains(observedKey)) return const <String>[];
+  if (!_evidenceSaltAliasKeysFromText(draft.rawText).contains(observedKey)) {
+    return const <String>[];
+  }
+  if (!_plausibleOcrCorrection(observedKey, confirmedKey)) {
+    return const <String>[];
+  }
+
+  // Never turn a printed trade name/manufacturer into a learned salt shortcut
+  // merely because the user corrected the Salt box afterwards.
+  for (final other in <String>[
+    confirmed.name,
+    confirmed.brand,
+    confirmed.manufacturer,
+  ]) {
+    final otherKey = _saltAliasKey(other);
+    if (otherKey.isEmpty || otherKey == confirmedKey) continue;
+    if (observedKey == otherKey ||
+        _identitySimilarity(observedKey, otherKey) >= .92) {
+      return const <String>[];
+    }
+  }
+  return <String>[observed];
 }
 
 Set<String> _evidenceAliasKeys(List<MedicineFrameEvidence> evidence) {
   final result = <String>{};
   for (final frame in evidence.take(12)) {
-    for (final rawLine in frame.text.split(RegExp(r'[\r\n]+')).take(24)) {
-      final line = searchText(rawLine);
-      if (line.isEmpty) continue;
-      final tokens = line
-          .split(' ')
-          .where((value) => value.isNotEmpty)
-          .take(16)
-          .toList(growable: false);
-      for (final token in tokens) {
-        if (token.length >= 3 && token.length <= 28) result.add(token);
+    result.addAll(_textIdentityAliasKeys(frame.text));
+    if (result.length >= 128) break;
+  }
+  return result.take(128).toSet();
+}
+
+Set<String> _textIdentityAliasKeys(String text) {
+  final result = <String>{};
+  for (final rawLine in text.split(RegExp(r'[\r\n]+')).take(32)) {
+    final line = searchText(rawLine);
+    if (line.isEmpty) continue;
+    final tokens = line
+        .split(' ')
+        .where((value) => value.isNotEmpty)
+        .take(16)
+        .toList(growable: false);
+    for (final token in tokens) {
+      if (token.length >= 3 && token.length <= 28) result.add(token);
+    }
+    for (var width = 2; width <= min(3, tokens.length); width++) {
+      for (var start = 0; start + width <= tokens.length; start++) {
+        final phrase = tokens.sublist(start, start + width).join(' ');
+        if (phrase.length >= 4 && phrase.length <= 40) result.add(phrase);
       }
-      for (var width = 2; width <= min(3, tokens.length); width++) {
-        for (var start = 0; start + width <= tokens.length; start++) {
-          final phrase = tokens.sublist(start, start + width).join(' ');
-          if (phrase.length >= 4 && phrase.length <= 40) result.add(phrase);
-        }
+    }
+    if (line.length <= 40) result.add(line);
+    if (result.length >= 128) break;
+  }
+  return result.take(128).toSet();
+}
+
+Set<String> _evidenceSaltAliasKeys(List<MedicineFrameEvidence> evidence) {
+  final result = <String>{};
+  for (final frame in evidence.take(12)) {
+    result.addAll(_evidenceSaltAliasKeysFromText(frame.text));
+    if (result.length >= 192) break;
+  }
+  return result.take(192).toSet();
+}
+
+Set<String> _evidenceSaltAliasKeysFromText(String text) {
+  final result = <String>{};
+  for (final rawLine in text.split(RegExp(r'[\r\n]+')).take(32)) {
+    final line = searchText(rawLine);
+    if (line.isEmpty) continue;
+    final tokens = line
+        .split(' ')
+        .where((value) => value.isNotEmpty)
+        .take(18)
+        .toList(growable: false);
+    for (var width = 1; width <= min(6, tokens.length); width++) {
+      for (var start = 0; start + width <= tokens.length; start++) {
+        final key = _saltAliasKey(tokens.sublist(start, start + width).join(' '));
+        if (_validSaltAliasKey(key)) result.add(key);
+        if (result.length >= 192) return result;
       }
-      if (line.length <= 40) result.add(line);
-      if (result.length >= 128) return result;
     }
   }
   return result;
+}
+
+String _storedSaltAliasKey(String alias) {
+  final key = _saltAliasKey(alias);
+  return _validSaltAliasKey(key) ? '$_saltAliasPrefix$key' : '';
+}
+
+String _saltAliasKey(String value) => _ocrFoldIdentity(searchText(value))
+    .replaceAll(RegExp(r'[^a-z0-9\u0900-\u097f]+'), '');
+
+bool _validSaltAliasKey(String key) {
+  if (key.length < 4 || key.length > 56) return false;
+  final letters = RegExp(r'[a-z\u0900-\u097f]').allMatches(key).length;
+  return letters >= 3;
+}
+
+List<String> _saltParts(String value) => value
+    .split(RegExp(r'\s*(?:\+|;)\s*'))
+    .map((part) => part.trim())
+    .where((part) => part.isNotEmpty)
+    .take(8)
+    .toList(growable: false);
+
+const _saltAliasNoise = <String>{
+  'tablet',
+  'tablets',
+  'capsule',
+  'capsules',
+  'syrup',
+  'suspension',
+  'injection',
+  'cream',
+  'ointment',
+  'drops',
+  'composition',
+  'contains',
+  'ingredient',
+  'generic',
+  'medicine',
+};
+
+class _RecognitionFrameContext {
+  const _RecognitionFrameContext({
+    required this.identityKeys,
+    required this.saltKeys,
+    required this.barcodes,
+  });
+
+  final Set<String> identityKeys;
+  final Set<String> saltKeys;
+  final Set<String> barcodes;
+}
+
+List<_RecognitionFrameContext> _recognitionFrameContexts(
+  List<MedicineFrameEvidence> evidence,
+) => <_RecognitionFrameContext>[
+  for (final frame in evidence.take(12))
+    _RecognitionFrameContext(
+      identityKeys: _textIdentityAliasKeys(frame.text),
+      saltKeys: _evidenceSaltAliasKeysFromText(frame.text),
+      barcodes: frame.allBarcodes
+          .map(_recognitionBarcodeKey)
+          .where((value) => value.length >= 6)
+          .toSet(),
+    ),
+];
+
+bool _saltCorrectionContextSupports(
+  MedicineKnowledgeEntry entry,
+  String aliasKey,
+  List<_RecognitionFrameContext> contexts,
+  List<String> learnedIdentityAliases,
+) {
+  final expectedBarcode = _recognitionBarcodeKey(entry.barcode);
+  final learnedIdentityKeys = learnedIdentityAliases
+      .map(searchText)
+      .where((value) => value.length >= 3)
+      .toSet();
+  final identityTargets = <String>{
+    searchText(entry.name),
+    searchText(entry.brand),
+  }.where((value) => value.length >= 3).toList(growable: false);
+
+  for (final context in contexts) {
+    if (!context.saltKeys.contains(aliasKey)) continue;
+    if (expectedBarcode.length >= 6 &&
+        context.barcodes.contains(expectedBarcode)) {
+      return true;
+    }
+    if (learnedIdentityKeys.any(context.identityKeys.contains)) return true;
+    for (final target in identityTargets) {
+      for (final observed in context.identityKeys) {
+        final ratio =
+            min(observed.length, target.length) /
+            max(observed.length, target.length);
+        if (ratio < .68) continue;
+        if (_identitySimilarity(observed, target) >= .86) return true;
+      }
+    }
+  }
+  return false;
+}
+
+String _recognitionBarcodeKey(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+
+bool _plausibleOcrCorrection(String observed, String confirmed) {
+  final left = _ocrFoldIdentity(searchText(observed)).replaceAll(' ', '');
+  final right = _ocrFoldIdentity(searchText(confirmed)).replaceAll(' ', '');
+  if (left.length < 3 || right.length < 3) return false;
+  if (left == right) return true;
+  final ratio = min(left.length, right.length) / max(left.length, right.length);
+  if (ratio < .42) return false;
+  if (_editSimilarity(left, right) >= .62) return true;
+  return ratio >= .45 && _characterDice(left, right) >= .62;
+}
+
+double _characterDice(String left, String right) {
+  if (left.isEmpty || right.isEmpty) return 0;
+  final counts = <int, int>{};
+  for (final rune in left.runes) {
+    counts.update(rune, (value) => value + 1, ifAbsent: () => 1);
+  }
+  var overlap = 0;
+  for (final rune in right.runes) {
+    final available = counts[rune] ?? 0;
+    if (available <= 0) continue;
+    overlap++;
+    if (available == 1) {
+      counts.remove(rune);
+    } else {
+      counts[rune] = available - 1;
+    }
+  }
+  return (2 * overlap / (left.runes.length + right.runes.length))
+      .clamp(0, 1)
+      .toDouble();
 }
 
 double _identitySimilarity(String left, String right) {
