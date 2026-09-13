@@ -7,12 +7,22 @@ import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import '../domain/capture_quality.dart';
+import '../domain/medicine_machine_code_safety.dart';
 import '../domain/medicine_ocr_reliability.dart';
 import '../domain/medicine_ocr_text.dart';
 import '../domain/medicine_understanding.dart';
-import '../domain/regulatory_medicine_code.dart';
 
 typedef ScanEvidence = MedicineFrameEvidence;
+
+const String _ambiguousMedicineCodesMarker =
+    '[aaris:ambiguous-medicine-machine-codes]';
+
+/// True only when one immutable image contained more than one independently
+/// checksum-valid medicine product identity. Such a frame is still useful OCR
+/// evidence, but its machine codes are deliberately quarantined so no resolver
+/// can exact-lock an arbitrary product from a multi-pack image.
+bool scanEvidenceHasAmbiguousMedicineCodes(MedicineFrameEvidence evidence) =>
+    evidence.source.contains(_ambiguousMedicineCodesMarker);
 
 class MedicineVisionService {
   static const _channel = MethodChannel('com.aaris.pharmacy/documents');
@@ -110,13 +120,16 @@ class MedicineVisionService {
         if (hindi is RecognizedText)
           ..._layoutEvidence(hindi as RecognizedText),
       ]);
-      final barcodes = barcodeResult is List<Barcode>
-          ? _rankBarcodes(
-              (barcodeResult as List<Barcode>)
-                  .map((barcode) => barcode.rawValue ?? '')
-                  .where((value) => value.trim().isNotEmpty),
-            )
+      final decodedBarcodes = barcodeResult is List<Barcode>
+          ? (barcodeResult as List<Barcode>)
+                .map((barcode) => barcode.rawValue ?? '')
+                .where((value) => value.trim().isNotEmpty)
           : const <String>[];
+      final barcodeSelection = selectSafeMedicineMachineCodes(decodedBarcodes);
+      final barcodes = barcodeSelection.payloads;
+      final evidenceSource = barcodeSelection.ambiguousTrustedProductCodes
+          ? '${source.trim()} $_ambiguousMedicineCodesMarker'.trim()
+          : source;
 
       // Keep physical camera quality semantically pure. Detector confidence is
       // used only to choose among duplicate OCR layout lines. Downstream capture,
@@ -127,7 +140,7 @@ class MedicineVisionService {
         barcodes: barcodes,
         layoutLines: layoutLines,
         text: lines.join('\n'),
-        source: source,
+        source: evidenceSource,
         sequence: sequence,
         timestampMs: timestampMs,
         quality: measuredQuality,
@@ -241,55 +254,4 @@ double _layoutPreference(_OcrLayoutLine item) {
   final size = min(evidence.height / 1000, .08);
   final detector = item.confidence == null ? 0.0 : item.confidence! * .32;
   return lexical + size + detector;
-}
-
-List<String> _rankBarcodes(Iterable<String> input) {
-  final values = <String>{};
-  for (final candidate in input.take(24)) {
-    final raw = candidate.trim();
-    if (raw.isEmpty) continue;
-    values.add(raw);
-
-    // GS1 healthcare DataMatrix commonly carries a GTIN plus batch/expiry in one
-    // element string. Preserve the complete raw payload for future traceability,
-    // but also expose its verified GTIN as a canonical barcode candidate. That
-    // lets the existing private inventory knowledge index hit the exact product
-    // instead of treating a structured GS1 payload as an unrelated long string.
-    final structured = parseRegulatoryMedicineCode(raw);
-    if (structured != null && structured.gtin.isNotEmpty) {
-      values.add(structured.gtin);
-    }
-  }
-  final ranked = values.toList(growable: false)
-    ..sort((a, b) {
-      final score = _barcodeScore(b).compareTo(_barcodeScore(a));
-      return score != 0 ? score : a.compareTo(b);
-    });
-  return ranked.take(8).toList(growable: false);
-}
-
-int _barcodeScore(String value) {
-  final digits = value.replaceAll(RegExp(r'\D'), '');
-  if (digits == value && const {8, 12, 13, 14}.contains(digits.length)) {
-    return _validGtin(digits) ? 6 : 3;
-  }
-  final structured = parseRegulatoryMedicineCode(value);
-  if (structured != null && structured.gtin.isNotEmpty) return 5;
-  if (digits == value && digits.length >= 6) return 3;
-  if (structured != null && structured.hasTraceability) return 2;
-  return 1;
-}
-
-bool _validGtin(String digits) {
-  if (!const {8, 12, 13, 14}.contains(digits.length)) return false;
-  var sum = 0;
-  for (
-    var index = digits.length - 2, position = 1;
-    index >= 0;
-    index--, position++
-  ) {
-    final digit = int.parse(digits[index]);
-    sum += digit * (position.isOdd ? 3 : 1);
-  }
-  return (10 - sum % 10) % 10 == int.parse(digits[digits.length - 1]);
 }
