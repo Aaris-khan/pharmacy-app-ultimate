@@ -115,7 +115,8 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       return;
     }
     final sameStrength =
-        _strengthKey(old.strength) == _strengthKey(candidate.strength);
+        _strengthKey(old.strength) ==
+        _strengthKey(candidate.strength);
     final preferCandidateIngredient =
         candidate.ingredient.length < old.ingredient.length &&
         _semanticSimilarity(
@@ -431,15 +432,22 @@ class _ComponentVote {
 List<_SemanticLine> _orderedFrameLines(MedicineFrameEvidence frame) {
   final result = <_SemanticLine>[];
   final seen = <String>{};
+  // ML Kit recognizers are merged from more than one script. Their insertion
+  // order is therefore not guaranteed to be physical reading order. Sort a
+  // bounded copy by row/column geometry before any adjacency-sensitive semantic
+  // parsing so a COMPOSITION heading still owns the ingredient printed beneath
+  // it even when the recognizer streams arrived in the opposite order.
+  final layout = frame.layoutLines.take(160).toList(growable: false)
+    ..sort(_compareLayoutReadingOrder);
   final heights =
-      frame.layoutLines
+      layout
           .where((line) => line.height > 0)
           .map((line) => line.height)
           .toList(growable: false)
         ..sort();
   final median = heights.isEmpty ? 0.0 : heights[heights.length ~/ 2];
 
-  for (final line in frame.layoutLines.take(160)) {
+  for (final line in layout) {
     final clean = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
     final key = searchText(clean);
     if (key.length < 2 || !seen.add(key)) continue;
@@ -454,6 +462,24 @@ List<_SemanticLine> _orderedFrameLines(MedicineFrameEvidence frame) {
     result.add(_SemanticLine(clean, 0));
   }
   return result;
+}
+
+int _compareLayoutReadingOrder(
+  MedicineTextLineEvidence left,
+  MedicineTextLineEvidence right,
+) {
+  final leftCenterY = left.top + left.height / 2;
+  final rightCenterY = right.top + right.height / 2;
+  final rowTolerance = max(3.0, min(left.height, right.height) * .65);
+  if ((leftCenterY - rightCenterY).abs() > rowTolerance) {
+    final vertical = left.top.compareTo(right.top);
+    if (vertical != 0) return vertical;
+  }
+  final horizontal = left.left.compareTo(right.left);
+  if (horizontal != 0) return horizontal;
+  final vertical = left.top.compareTo(right.top);
+  if (vertical != 0) return vertical;
+  return left.text.compareTo(right.text);
 }
 
 List<String> _compositionWindows(List<_SemanticLine> lines) {
@@ -514,26 +540,11 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
     if (ingredient.length < 4 || ingredient.length > 88) continue;
 
     final ingredientKey = searchText(ingredient);
-    final tokens = ingredientKey
-        .split(' ')
-        .where((value) => value.length >= 2)
-        .toList(growable: false);
-    if (tokens.isEmpty) continue;
-
+    if (ingredientKey.isEmpty) continue;
     final pharmacopoeial = _pharmacopoeiaHint.hasMatch(prefix);
     final chemical = _genericChemistryHint.hasMatch(ingredientKey);
     final genericMorphology = _genericDrugMorphology.hasMatch(ingredientKey);
-    final multiWordNaturalCase =
-        tokens.length >= 2 &&
-        _uppercaseRatio(prefix) < .78 &&
-        lines[index].prominence < .055 &&
-        index >= 2;
-    if (!pharmacopoeial &&
-        !chemical &&
-        !genericMorphology &&
-        !multiWordNaturalCase) {
-      continue;
-    }
+    if (!pharmacopoeial && !chemical && !genericMorphology) continue;
 
     final strength = _normalizeStrength(match.group(0) ?? '');
     if (strength.isEmpty) continue;
@@ -541,7 +552,6 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
     if (pharmacopoeial) confidence += .065;
     if (chemical) confidence += .035;
     if (genericMorphology) confidence += .025;
-    if (multiWordNaturalCase) confidence += .015;
     result.add(
       _ComponentCandidate(
         ingredient,
@@ -714,7 +724,7 @@ final _manufacturerNoise = RegExp(
   caseSensitive: false,
 );
 final _unlabelledCompositionNoise = RegExp(
-  r'(?:₹|\brs\.?\b|\bmrp\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bexp(?:iry)?\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b)',
+  r'(?:₹|\brs\.?\b|\bmrp\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bexp(?:iry)?\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
   caseSensitive: false,
 );
 final _pharmacopoeiaHint = RegExp(
