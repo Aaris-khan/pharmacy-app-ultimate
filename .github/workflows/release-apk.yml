@@ -1,5 +1,5 @@
 name: Aaris Pharmacy Release APK
-# Rebuild marker for latest main APK generation (2026-09-10)
+# Rebuild marker for latest main APK generation (2026-09-13 final intelligence build)
 
 on:
   push:
