@@ -384,6 +384,17 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
               ),
             ),
           ],
+          if (widget.onAsk != null && draft.rawText.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => widget.onAsk!(draft.rawText),
+                icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                label: const Text('Ask AI'),
+              ),
+            ),
+          ],
         ],
       ),
     );

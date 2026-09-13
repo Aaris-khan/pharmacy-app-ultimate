@@ -26,6 +26,17 @@ void _searchEntry(SendPort main) {
         archivedEngine = null;
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
+      } else if (kind == 'reuseIndex') {
+        if (engine == null || indexedRecords == null) {
+          throw StateError('Search index changed. Retry this search.');
+        }
+        // Stock-only facts (quantity, price, row revision) do not participate
+        // in the expensive token/fuzzy projection. The main isolate already
+        // proved every searchable/status field is unchanged; rebind only the
+        // dataset revision so subsequent requests keep the actor protocol exact
+        // without rebuilding an identical index.
+        revision = message['revision'] as int;
+        main.send({'id': id, 'result': true});
       } else {
         if (engine == null ||
             indexedRecords == null ||
@@ -313,6 +324,15 @@ class SearchWorker {
     final session = await _worker();
     if (_revision == revision) return session;
     if (_canReuseIndex(records)) {
+      await session.request({
+        'kind': 'reuseIndex',
+        'revision': revision,
+      });
+      if (!session.alive) {
+        throw const _SearchWorkerTransportFailure(
+          'Background search stopped while rebinding its index.',
+        );
+      }
       _revision = revision;
       return session;
     }
