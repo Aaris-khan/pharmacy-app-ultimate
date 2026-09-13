@@ -7,6 +7,8 @@ class _DatePair {
   final double score;
 }
 
+final _bareFullDateSurface = RegExp(r'^[0-9०-९٠-٩۰-۹OoIlL]{8}$');
+
 int _compareEvidence(MedicineDateEvidence a, MedicineDateEvidence b) {
   final explicit = (b.explicitLabel ? 1 : 0) - (a.explicitLabel ? 1 : 0);
   if (explicit != 0) return explicit;
@@ -118,8 +120,7 @@ bool _isStandaloneDateMatch(String line, MedicineDateMatch match) =>
 bool _isBareSeparatorlessFullDate(String line, MedicineDateMatch match) {
   if (!_isStandaloneDateMatch(line, match)) return false;
   final raw = line.substring(match.start, match.end).trim();
-  if (raw.length != 8) return false;
-  return RegExp(r'^[0-9०-९٠-٩۰-۹OoIlL]{8}$').hasMatch(raw);
+  return raw.length == 8 && _bareFullDateSurface.hasMatch(raw);
 }
 
 List<(MedicineDateRole, int, int)> _dateLabels(String line) {
