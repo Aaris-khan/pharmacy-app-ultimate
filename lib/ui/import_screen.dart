@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../domain/import_text_guard.dart';
 import '../domain/intake_resolution.dart';
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
@@ -42,6 +43,14 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
   bool _busy = false;
   int _generation = 0;
   bool _cancelRequested = false;
+
+  void _rejectFullBackup(String text) {
+    if (isAarisPharmacyBackupText(text)) {
+      throw const FormatException(
+        'This is a full backup. Open Profile → Backup & Restore so it can be validated safely.',
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -124,11 +133,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
     try {
       final text = await _files.pickBackupText();
       if (text == null || !mounted || generation != _generation) return;
-      if (text.contains('aaris.pharmacy.backup.v1')) {
-        throw const FormatException(
-          'This is a full backup. Open Profile → Backup & Restore so it can be validated safely.',
-        );
-      }
+      _rejectFullBackup(text);
       await _openInbox(
         medicineListEvidence(text, source: 'Imported text file'),
       );
@@ -160,6 +165,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
         showError(context, 'Clipboard has no medicine text.');
         return;
       }
+      _rejectFullBackup(text);
       await _openInbox(medicineListEvidence(text, source: 'Clipboard'));
     } catch (error) {
       if (mounted) showError(context, error);
