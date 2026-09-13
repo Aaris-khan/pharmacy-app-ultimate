@@ -1161,7 +1161,7 @@ class MedicineUnderstandingEngine {
       final manufacturer = _afterLabel(
         line,
         RegExp(
-          r'\b(?:manufactured|mfd|made)\s+by\b|\bmanufacturer\b',
+          r'\b(?:manufactured|mfg\.?|mfd|made)\s+by\b|\bmanufacturer\b',
           caseSensitive: false,
         ),
       );
@@ -1936,7 +1936,7 @@ String _knowledgeKey(String value) {
   for (final raw in searchText(value).split(' ').take(48)) {
     var token = _repairKnowledgeToken(raw);
     token = token.replaceAllMapped(
-      RegExp(r'^(\d+(?:\.\d+)?)(?:mcg|mg|g|ml|iu)$'),
+      RegExp(r'^(\d+(?:\.\d+)?)(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$'),
       (match) => match[1]!,
     );
     if (token.isEmpty || _knowledgeNoise.contains(token)) continue;
@@ -2032,10 +2032,18 @@ const _knowledgeNoise = <String>{
   'capsules',
   'syrup',
   'suspension',
+  'solution',
   'injection',
   'cream',
   'ointment',
+  'gel',
+  'lotion',
   'drops',
+  'spray',
+  'inhaler',
+  'powder',
+  'sachet',
+  'sachets',
   'brand',
   'trade',
   'product',
@@ -2047,8 +2055,13 @@ const _knowledgeNoise = <String>{
   'eur',
   'mg',
   'mcg',
+  'ug',
+  'gm',
   'ml',
+  'meq',
   'iu',
+  'unit',
+  'units',
 };
 
 /// Conservative lexical anchors, not a product catalogue and not treatment
@@ -2128,32 +2141,36 @@ const _embeddedActiveIngredientAliases = <String, String>{
 final _mfgLabel = medicineManufacturingLabel;
 final _expiryLabel = medicineExpiryLabel;
 final _compositionLabel = RegExp(
-  r'\b(?:composition|compositions|generic|salt|active\s+ingredient|each\s+(?:film\s+coated\s+|uncoated\s+)?(?:tablet|capsule|\d+\s*ml)\s+contains)\b',
+  r'\b(?:composition|compositions|generic|salt|active\s+ingredients?|each\s+(?:film\s+coated\s+|uncoated\s+)?(?:tablet|capsule|\d+\s*ml)\s+contains)\b',
   caseSensitive: false,
 );
 final _manufacturerHeader = RegExp(
-  r'\b(?:manufactured|mfd|made)\s+by\b|\bmanufacturer\b',
+  r'\b(?:manufactured|mfg\.?|mfd|made)\s+by\b|\bmanufacturer\b',
   caseSensitive: false,
 );
 final _dateNoise = RegExp(
-  r'\b(?:mfg|mfd|exp|expiry|expires|use\s*before|use\s*by|best\s*before)\b',
+  r'\b(?:mfg|mfd|dom|manufactur(?:e|ed|ing)|exp|expiry|expires|doe|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|pkd|pkg|packed|packing)\b',
   caseSensitive: false,
 );
 final _priceNoise = RegExp(
-  r'\b(?:mrp|price|rs|inr|inclusive|tax|₹)\b',
+  r'\b(?:m\s*r\s*p|price|rs|inr|inclusive|tax|gst)\b|₹',
   caseSensitive: false,
 );
 final _packNoise = RegExp(
-  r'\b(?:pack|strip|blister|bottle|tablets?|capsules?|sachets?)\s*(?:of|size|x)?\s*\d+|\b\d+\s*x\s*\d+\b',
+  r'\b(?:pack|strip|blister|bottle|tablets?|capsules?|sachets?)\s*(?:of|size|x)?\s*\d+|\b\d+\s*x\s*\d+\b|\bnet\s*(?:qty|quantity|content|wt|weight)\b',
   caseSensitive: false,
 );
 final _compositionStop = RegExp(
-  r'\b(?:excipients?|colou?r|dosage|directions?|storage|warning|schedule|keep|manufactured|marketed|batch|lot|mfg|mfd|exp|expiry|mrp|price|net\s*(?:qty|content))\b',
+  r'\b(?:excipients?|colou?r|dosage|directions?|storage|warning|schedule|keep|manufactured|marketed|batch|lot|mfg|mfd|dom|exp|expiry|doe|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until)|mrp|price|net\s*(?:qty|content|wt|weight))\b',
   caseSensitive: false,
 );
 
 String _cleanLine(String value) => value
     .replaceAll(RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F]'), ' ')
+    .replaceAll(
+      RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
+      ' ',
+    )
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
@@ -2250,11 +2267,14 @@ List<String> _strengths(String line) {
   final normalized = line
       .replaceAll('μ', 'µ')
       .replaceAllMapped(
-        RegExp(r'(?<=\d)[oO](?=\s*(?:mg|mcg|µg|ml|g)\b)'),
+        RegExp(
+          r'(?<=\d)[oO](?=\s*(?:mg|mcg|ug|µg|gm|g|meq|iu|units?)\b)',
+          caseSensitive: false,
+        ),
         (_) => '0',
       );
   final matches = RegExp(
-    r'(?<![a-z0-9])\d+(?:[.,]\d+)?\s*(?:mcg|µg|mg|g|iu|i\.u\.)(?:\s*/\s*\d+(?:[.,]\d+)?\s*(?:ml|g|dose|actuation))?|(?<![a-z0-9])\d+(?:[.,]\d+)?\s*mg\s*/\s*ml',
+    r'(?<![a-z0-9])\d+(?:[.,]\d+)?\s*(?:mcg|ug|µg|mg|gm|g|meq|iu|i\.u\.|units?|%)(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?',
     caseSensitive: false,
   ).allMatches(normalized);
   final values = <String>[];
@@ -2263,7 +2283,10 @@ List<String> _strengths(String line) {
         .replaceAll(',', '.')
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAllMapped(
-          RegExp(r'(?<=\d)(mcg|µg|mg|g|iu)\b', caseSensitive: false),
+          RegExp(
+            r'(?<=\d)(mcg|ug|µg|mg|gm|g|meq|iu|units?)\b',
+            caseSensitive: false,
+          ),
           (unit) => ' ${unit[1]!.toLowerCase()}',
         )
         .trim();
@@ -2288,7 +2311,7 @@ String _saltValue(String raw) {
       )
       .replaceAll(
         RegExp(
-          r'\b(?:equivalent\s+to|eq\.?\s*to|contains?|each|film\s+coated|uncoated|tablets?|capsules?|oral|solution|suspension|excipients?|colou?r|q\.?s\.?)\b',
+          r'\b(?:equivalent\s+to|eq\.?\s*to|contains?|each|film\s+coated|uncoated|tablets?|capsules?|oral|syrup|solution|suspension|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?|excipients?|colou?r|q\.?s\.?)\b',
           caseSensitive: false,
         ),
         ' ',
@@ -2322,14 +2345,14 @@ String _productName(String raw) {
       .replaceAll(RegExp(r'[®™©]'), ' ')
       .replaceAll(
         RegExp(
-          r'\b(?:tablets?|capsules?|syrup|suspension|injection|cream|ointment|drops?|sachets?|ip|bp|usp)\b',
+          r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?|ip|bp|usp)\b',
           caseSensitive: false,
         ),
         ' ',
       )
       .replaceAll(
         RegExp(
-          r'\s+\d+(?:\.\d+)?\s*(?:mg|mcg|µg|g|ml|iu)?\s*$',
+          r'\s+\d+(?:\.\d+)?\s*(?:mg|mcg|ug|µg|gm|g|ml|meq|iu|units?|%)?\s*$',
           caseSensitive: false,
         ),
         ' ',
@@ -2390,7 +2413,7 @@ bool _eligibleNameLine(String line, int index) {
         caseSensitive: false,
       ).hasMatch(line) ||
       RegExp(
-        r'\b(?:batch|b no|lot|lic|license|schedule|warning|dosage|storage|keep|children|marketed|distributed|address|pin|email|website|customer|care|net\s*(?:qty|content)|only|physician|prescription)\b',
+        r'\b(?:batch|b no|lot|lic|license|schedule|warning|dosage|storage|keep|children|marketed|distributed|packed|packing|pkd|pkg|address|pin|email|website|customer|care|net\s*(?:qty|quantity|content|wt|weight)|only|physician|prescription)\b',
       ).hasMatch(normalized)) {
     return false;
   }
@@ -2453,6 +2476,12 @@ double _uppercaseRatio(String value) {
 
 String _formValue(String normalized) {
   for (final entry in const <String, String>{
+    'oral suspension': 'Suspension',
+    'suspension': 'Suspension',
+    'susp': 'Suspension',
+    'oral solution': 'Solution',
+    'solution': 'Solution',
+    'soln': 'Solution',
     'tablet': 'Tablet',
     'tablets': 'Tablet',
     'tab': 'Tablet',
@@ -2460,13 +2489,27 @@ String _formValue(String normalized) {
     'capsules': 'Capsule',
     'cap': 'Capsule',
     'syrup': 'Syrup',
-    'suspension': 'Syrup',
+    'syp': 'Syrup',
+    'syr': 'Syrup',
     'injection': 'Injection',
     'injectable': 'Injection',
+    'inj': 'Injection',
     'cream': 'Cream',
     'ointment': 'Ointment',
+    'gel': 'Gel',
+    'lotion': 'Lotion',
+    'eye drops': 'Drops',
+    'ear drops': 'Drops',
+    'nasal drops': 'Drops',
     'drops': 'Drops',
     'drop': 'Drops',
+    'nasal spray': 'Spray',
+    'spray': 'Spray',
+    'inhaler': 'Inhaler',
+    'inhalation': 'Inhaler',
+    'dry powder': 'Powder',
+    'powder': 'Powder',
+    'sachets': 'Sachet',
     'sachet': 'Sachet',
   }.entries) {
     if (RegExp('\\b${entry.key}\\b').hasMatch(normalized)) return entry.value;
@@ -2498,7 +2541,7 @@ String _packSize(String line) {
 
 String _mrpValue(String line) {
   final match = RegExp(
-    r'\bmrp\b[^\d]{0,12}(?:rs\.?|inr|₹)?\s*(\d{1,7}(?:[.,]\d{1,2})?)',
+    r'\bm\s*\.?\s*r\s*\.?\s*p\.?\b[^\d]{0,12}(?:rs\.?|inr|₹)?\s*(\d{1,7}(?:[.,]\d{1,2})?)',
     caseSensitive: false,
   ).firstMatch(line);
   return match == null ? '' : '₹${match[1]!.replaceAll(',', '.')}';
@@ -2519,10 +2562,18 @@ const _identityNoise = <String>{
   'capsules',
   'syrup',
   'suspension',
+  'solution',
   'injection',
   'cream',
   'ointment',
+  'gel',
+  'lotion',
   'drops',
+  'spray',
+  'inhaler',
+  'powder',
+  'sachet',
+  'sachets',
   'each',
   'contains',
   'composition',
@@ -2535,7 +2586,16 @@ const _identityNoise = <String>{
   'marketed',
   'batch',
   'expiry',
+  'expires',
   'mfg',
+  'mfd',
+  'dom',
+  'exp',
+  'doe',
+  'pkd',
+  'pkg',
+  'packed',
+  'packing',
   'mrp',
   'inclusive',
   'taxes',

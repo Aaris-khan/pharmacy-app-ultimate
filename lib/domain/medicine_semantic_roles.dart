@@ -800,7 +800,7 @@ String _stripPresentation(String raw) {
   value = value.replaceAll(_pharmacopoeiaHint, ' ');
   value = value.replaceAll(
     RegExp(
-      r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|drops?|spray|inhaler|powder|sachets?)\b',
+      r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?)\b',
       caseSensitive: false,
     ),
     ' ',
@@ -820,6 +820,7 @@ String _cleanSemanticText(String raw) => raw
     .trim();
 
 String _normalizeStrength(String raw) => raw
+    .replaceAll(',', '.')
     .replaceAll(RegExp(r'\s+'), ' ')
     .replaceAll('µ', 'u')
     .trim()
@@ -867,7 +868,7 @@ final _compositionCue = RegExp(
   caseSensitive: false,
 );
 final _compositionStop = RegExp(
-  r'\b(?:manufactured|manufacturer|mfg|mfd|exp|expiry|batch|lot|mrp|storage|schedule|marketed|distributed)\b',
+  r'\b(?:manufactured|manufacturer|mfg|mfd|dom|exp|expiry|doe|batch|lot|mrp|storage|schedule|marketed|distributed|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
   caseSensitive: false,
 );
 final _brandLabel = RegExp(
@@ -883,15 +884,15 @@ final _semanticLegalNoise = RegExp(
   caseSensitive: false,
 );
 final _semanticDateNoise = RegExp(
-  r'\b(?:mfg|mfd|manufactured|exp|expiry|batch|lot|mrp)\b',
+  r'\b(?:mfg|mfd|dom|manufactured|exp|expiry|doe|batch|lot|mrp|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
   caseSensitive: false,
 );
 final _manufacturerNoise = RegExp(
-  r'\b(?:manufactured\s+by|manufacturer|made\s+by)\b',
+  r'\b(?:manufactured\s+by|mfg\.?\s+by|manufacturer|made\s+by)\b',
   caseSensitive: false,
 );
 final _unlabelledCompositionNoise = RegExp(
-  r'(?:₹|\brs\.?\b|\bmrp\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bexp(?:iry)?\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
+  r'(?:₹|\brs\.?\b|\bm\s*\.?\s*r\s*\.?\s*p\.?\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bdom\b|\bexp(?:iry)?\b|\bdoe\b|\bpkd\b|\bpkg\b|\bpacked\b|\bpacking\b|\buse\s*(?:before|by|till|until)\b|\bbest\s*before\b|\bvalid\s*(?:till|until)\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
   caseSensitive: false,
 );
 final _pharmacopoeiaHint = RegExp(
@@ -911,7 +912,7 @@ final _equivalentToHint = RegExp(
   caseSensitive: false,
 );
 final _strengthPattern = RegExp(
-  r'(?<![\d.])\d+(?:\.\d+)?\s*(?:mcg|ug|µg|mg|gm|g|ml|iu|units?|%)(?:\s*/\s*(?:\d+(?:\.\d+)?\s*)?(?:ml|g))?',
+  r'(?<![\d.])\d+(?:[.,]\d+)?\s*(?:mcg|ug|µg|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?',
   caseSensitive: false,
 );
 
@@ -938,6 +939,7 @@ const _presentationNoise = <String>{
   'cream',
   'ointment',
   'gel',
+  'lotion',
   'drops',
   'drop',
   'spray',

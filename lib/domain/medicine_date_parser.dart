@@ -1,18 +1,19 @@
 final medicineManufacturingLabel = RegExp(
-  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd]\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+by)(?:\s*(?:date|dt|on))?|production\s*date|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIl](?=[0-9OoIl]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd]\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+by)(?:\s*(?:date|dt|on))?|production\s*date|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineExpiryLabel = RegExp(
-  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIl](?=[0-9OoIl]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineNonDateLabel = RegExp(
-  r'(?<![A-Za-z])(?:batch(?:[\s.:_-]*(?:no|number)\.?)?|lot(?:[\s.:_-]*no\.?)?|b[.\s]*no\.?|serial|barcode|gtin|mrp|price|licen[cs]e|pack\s*size)(?=$|[^A-Za-z]|[OoIl](?=[0-9OoIl]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:batch(?:[\s.:_-]*(?:no|number)\.?)?|lot(?:[\s.:_-]*no\.?)?|b[.\s]*no\.?|serial|barcode|gtin|mrp|price|licen[cs]e|pack\s*size|p[.\s]*k[.\s]*(?:d|g)\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+packing|pack(?:ed|ing)?\s*(?:date|dt|on))(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 
 final _medicineCompactDatePrefix = RegExp(
-  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?)(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*$',
+  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?)' 
+  r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*$',
   caseSensitive: false,
 );
 
@@ -232,8 +233,15 @@ int _month(String value) =>
     0;
 
 String _repairNumericOcr(String raw) {
-  // One-to-one replacements keep detector character offsets intact.
-  var text = raw.replaceAllMapped(RegExp(r'[०-९٠-٩۰-۹]'), (m) {
+  // Replace directional/invisible OCR artifacts one-for-one so date offsets
+  // stay aligned with the original line used by spatial/role reasoning.
+  var text = raw.replaceAll(
+    RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
+    ' ',
+  );
+
+  // One-to-one digit replacements also keep detector character offsets intact.
+  text = text.replaceAllMapped(RegExp(r'[०-९٠-٩۰-۹]'), (m) {
     final code = m[0]!.codeUnitAt(0);
     final zero = code >= 0x966
         ? 0x966
@@ -244,18 +252,19 @@ String _repairNumericOcr(String raw) {
   });
 
   // OCR frequently glues a date directly to its field label and reads 0/1 as
-  // O/I/l. Repair only this tightly bounded label-adjacent token first; global
-  // letter-to-digit replacement would corrupt medicine names and batch codes.
+  // O/I/l/L. Repair only this tightly bounded label-adjacent token first;
+  // global letter-to-digit replacement would corrupt medicine names/batch IDs.
   text = text.replaceAllMapped(
     RegExp(
-      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?)(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*)([0-9OoIl]{4,8})(?![A-Za-z0-9])',
+      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?)' 
+      r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*)([0-9OoIlL]{4,8})(?![A-Za-z0-9])',
       caseSensitive: false,
     ),
     (m) => '${m[1]!}${_repairOcrDigitToken(m[2]!)}',
   );
 
   return text.replaceAllMapped(
-    RegExp(r'(?<![A-Za-z0-9])([0-9OoIl]{1,8})(?![A-Za-z0-9])'),
+    RegExp(r'(?<![A-Za-z0-9])([0-9OoIlL]{1,8})(?![A-Za-z0-9])'),
     (m) {
       final token = m[1]!;
       if (!RegExp(r'\d').hasMatch(token) && token.length == 1) return token;
@@ -266,4 +275,4 @@ String _repairNumericOcr(String raw) {
 
 String _repairOcrDigitToken(String value) => value
     .replaceAll(RegExp('[Oo]'), '0')
-    .replaceAll(RegExp('[Il]'), '1');
+    .replaceAll(RegExp('[IlL]'), '1');
