@@ -34,11 +34,14 @@ Tablets''',
       expect(result.salt, isEmpty);
     });
 
-    test('price and pack noise cannot become an active ingredient', () {
+    test('price, pack, and country-of-origin noise cannot become ingredients', () {
       final result = inferMedicineSemanticRoles(const <MedicineFrameEvidence>[
         MedicineFrameEvidence(
-          text: '''MRP Rs. 500 mg
+          text: '''NOVA
+Tablets
+MRP Rs. 500 mg
 10 TABLETS x 500 mg
+Made in India 500 mg
 BATCH AB500''',
           quality: .98,
         ),
@@ -46,6 +49,48 @@ BATCH AB500''',
 
       expect(result.components, isEmpty);
       expect(result.salt, isEmpty);
+    });
+
+    test('geometry restores composition adjacency from scrambled OCR streams', () {
+      final result = inferMedicineSemanticRoles(const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          quality: .96,
+          layoutLines: <MedicineTextLineEvidence>[
+            MedicineTextLineEvidence(
+              text: 'Paracetamol I.P. 650 mg',
+              left: 20,
+              top: 60,
+              width: 190,
+              height: 18,
+            ),
+            MedicineTextLineEvidence(
+              text: 'Tablets',
+              left: 20,
+              top: 84,
+              width: 80,
+              height: 16,
+            ),
+            MedicineTextLineEvidence(
+              text: 'DOLO 650',
+              left: 20,
+              top: 10,
+              width: 150,
+              height: 24,
+            ),
+            MedicineTextLineEvidence(
+              text: 'Composition',
+              left: 20,
+              top: 38,
+              width: 120,
+              height: 18,
+            ),
+          ],
+        ),
+      ]);
+
+      expect(result.components, hasLength(1));
+      expect(result.components.single.ingredient.toLowerCase(), 'paracetamol');
+      expect(result.components.single.strength, '650 mg');
     });
 
     test('V2 keeps semantic recovery aligned with physical lot dates', () {
