@@ -6,8 +6,10 @@ import '../data/inventory_database.dart';
 import '../domain/ai_protocol.dart';
 import '../domain/backup.dart';
 import '../domain/dispensing_plan.dart';
+import '../domain/home_projection.dart';
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
+import '../domain/sales_overview.dart';
 import '../domain/search.dart';
 import '../domain/tracking.dart';
 import '../services/search_worker.dart';
@@ -167,14 +169,82 @@ class PharmacyController extends ChangeNotifier {
   Future<void> _writes = Future.value();
   final _searchWorker = SearchWorker();
   MedicineSearch? _webSearch, _webArchivedSearch;
-  int _webRevision = -1, _webArchivedRevision = -1;
+  InventorySnapshot? _webSearchSnapshot, _webArchivedSearchSnapshot;
+
+  // Read models are derived from one immutable InventorySnapshot. Keep exactly
+  // one stable record-reference list and memoized projections per snapshot so
+  // keystrokes and non-inventory notifications do not repeatedly allocate or
+  // rescan a large pharmacy. Snapshot identity, not just its numeric revision,
+  // is the cache witness; a reload with the same revision therefore cannot reuse
+  // stale derived state. Day-sensitive projections carry their own civil-day key.
+  InventorySnapshot? _readSnapshot;
+  List<Medicine>? _readRecords;
+  InventoryStats? _statsCache;
+  String _statsDayKey = '';
+  HomeInventoryProjection? _homeProjectionCache;
+  String _homeProjectionDayKey = '';
+  SalesOverview? _salesOverviewCache;
+  int _searchDatasetEpoch = 0;
+
   DateTime get today => civilDay(clock());
   WarningSettings get settings => snapshot.settings;
   Iterable<Medicine> get records => snapshot.records.values;
   Iterable<SaleEvent> get sales => snapshot.sales.values;
-  InventoryStats get stats => InventoryStats(records, today);
+
+  void _syncReadSnapshot() {
+    if (identical(_readSnapshot, snapshot)) return;
+    _readSnapshot = snapshot;
+    _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
+    _statsCache = null;
+    _statsDayKey = '';
+    _homeProjectionCache = null;
+    _homeProjectionDayKey = '';
+    _salesOverviewCache = null;
+    _searchDatasetEpoch++;
+  }
+
+  List<Medicine> get _stableRecords {
+    _syncReadSnapshot();
+    return _readRecords!;
+  }
+
+  InventoryStats get stats {
+    final date = today;
+    final dayKey = dateText(date);
+    _syncReadSnapshot();
+    if (_statsCache == null || _statsDayKey != dayKey) {
+      _statsCache = InventoryStats(_stableRecords, date);
+      _statsDayKey = dayKey;
+    }
+    return _statsCache!;
+  }
+
+  HomeInventoryProjection get homeProjection {
+    final date = today;
+    final dayKey = dateText(date);
+    _syncReadSnapshot();
+    if (_homeProjectionCache == null || _homeProjectionDayKey != dayKey) {
+      _homeProjectionCache = HomeInventoryProjection.build(
+        medicines: _stableRecords,
+        settings: settings,
+        today: date,
+      );
+      _homeProjectionDayKey = dayKey;
+    }
+    return _homeProjectionCache!;
+  }
+
+  SalesOverview get salesOverview {
+    _syncReadSnapshot();
+    return _salesOverviewCache ??= SalesOverview(
+      snapshot.sales.values,
+      medicines: _stableRecords,
+      events: snapshot.events,
+    );
+  }
+
   TrackingStats tracking(TrackingRange range) => TrackingStats(
-    medicines: records,
+    medicines: _stableRecords,
     sales: sales,
     range: range,
     today: today,
@@ -1147,14 +1217,15 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<List<SearchHit>> search(String raw, SearchScope scope) async {
-    final data = records.toList();
+    final data = _stableRecords;
+    final datasetRevision = _searchDatasetEpoch;
     final selectedSettings = settings;
     final date = today;
     // Isolate.run transfers the result; widgets bind it to their request generation.
     if (kIsWeb || !backgroundSearch) {
-      if (_webRevision != snapshot.revision) {
+      if (!identical(_webSearchSnapshot, snapshot)) {
         _webSearch = MedicineSearch(data);
-        _webRevision = snapshot.revision;
+        _webSearchSnapshot = snapshot;
       }
       return _webSearch!.search(
         raw,
@@ -1166,7 +1237,7 @@ class PharmacyController extends ChangeNotifier {
     }
     return _searchWorker.search(
       data,
-      snapshot.revision,
+      datasetRevision,
       raw,
       scope,
       selectedSettings,
@@ -1179,15 +1250,16 @@ class PharmacyController extends ChangeNotifier {
   /// path uses the existing background search isolate and builds the archive
   /// index only when this feature is actually opened.
   Future<List<SearchHit>> searchArchived(String raw) async {
-    final data = records.toList();
+    final data = _stableRecords;
+    final datasetRevision = _searchDatasetEpoch;
     final date = today;
     if (kIsWeb || !backgroundSearch) {
-      if (_webArchivedRevision != snapshot.revision) {
+      if (!identical(_webArchivedSearchSnapshot, snapshot)) {
         _webArchivedSearch = MedicineSearch(
           data.where((medicine) => medicine.archived),
           includeArchived: true,
         );
-        _webArchivedRevision = snapshot.revision;
+        _webArchivedSearchSnapshot = snapshot;
       }
       return _webArchivedSearch!.searchArchived(
         raw,
@@ -1195,7 +1267,7 @@ class PharmacyController extends ChangeNotifier {
         limit: raw.trim().isEmpty ? 100000 : 150,
       );
     }
-    return _searchWorker.searchArchived(data, snapshot.revision, raw, date);
+    return _searchWorker.searchArchived(data, datasetRevision, raw, date);
   }
 
   @override
