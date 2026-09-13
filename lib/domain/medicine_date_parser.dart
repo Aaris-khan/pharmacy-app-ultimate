@@ -83,6 +83,10 @@ List<MedicineDateMatch> extractMedicineDateMatches(
       )) {
         continue;
       }
+      // Reserve the complete syntactic surface before semantic/boundary
+      // rejection. This prevents an embedded or invalid full date such as
+      // A32/02/2027 from degrading into the plausible-looking 02/2027 tail.
+      occupied.add((match.start, match.end));
       final before = text.substring(0, match.start);
       final after = text.substring(match.end);
       if (RegExp(r'[A-Za-z0-9]$').hasMatch(before) &&
@@ -90,11 +94,6 @@ List<MedicineDateMatch> extractMedicineDateMatches(
         continue;
       }
       if (RegExp(r'^[A-Za-z0-9]').hasMatch(after)) continue;
-      // Reserve only a token with valid lexical boundaries. Invalid complete
-      // calendar values are still reserved so 32/02/2027 cannot degrade into
-      // a misleading 02/2027 month, but a boundary-invalid bridge can no
-      // longer suppress a legitimate neighbouring date token.
-      occupied.add((match.start, match.end));
       final date = parse(match);
       if (date != null) {
         result.add(
@@ -123,14 +122,14 @@ List<MedicineDateMatch> extractMedicineDateMatches(
       r'JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?';
   add(
     RegExp(
-      '(?<![A-Za-z0-9])(\\d{1,2})$sep($monthNames)[\\s,./-]+(20\\d{2}|\\d{2})(?!\\d)',
+      '(?<![A-Za-z0-9])(\\d{1,2})$sep($monthNames)$sep(20\\d{2}|\\d{2})(?!\\d)',
       caseSensitive: false,
     ),
     (m) => _date(_year(m[3]!), _month(m[2]!), int.parse(m[1]!)),
   );
   add(
     RegExp(
-      '(?<![A-Za-z0-9])($monthNames)[\\s,./-]+(20\\d{2}|\\d{2})(?!\\d)',
+      '(?<![A-Za-z0-9])($monthNames)$sep(20\\d{2}|\\d{2})(?!\\d)',
       caseSensitive: false,
     ),
     (m) => _date(_year(m[2]!), _month(m[1]!), null),
