@@ -357,8 +357,8 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
   for (final entry in const <String, String>{
     'tablet': 'Tablet',
     'capsule': 'Capsule',
-    'oral suspension': 'Syrup',
-    'oral solution': 'Syrup',
+    'oral suspension': 'Suspension',
+    'oral solution': 'Solution',
     'syrup': 'Syrup',
     'injection': 'Injection',
     'injectable': 'Injection',

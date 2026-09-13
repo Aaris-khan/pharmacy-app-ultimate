@@ -78,6 +78,34 @@ void main() {
     expect(seed.source, 'RxNorm');
   });
 
+  test('RxNorm preserves suspension and solution as distinct dosage forms', () {
+    final suspension = RxNormProvider.parseResults(
+      [
+        {
+          'rxcui': '201',
+          'rank': '1',
+          'score': '10',
+          'name': 'amoxicillin 250 MG/5 ML Oral Suspension [Example A]',
+        },
+      ],
+      queryText: 'amoxicillin suspension',
+    ).single.seed;
+    final solution = RxNormProvider.parseResults(
+      [
+        {
+          'rxcui': '202',
+          'rank': '1',
+          'score': '10',
+          'name': 'cetirizine 1 MG/ML Oral Solution [Example B]',
+        },
+      ],
+      queryText: 'cetirizine solution',
+    ).single.seed;
+
+    expect(suspension.form, 'Suspension');
+    expect(solution.form, 'Solution');
+  });
+
   test('catalog service deduplicates identity and keeps stronger result', () async {
     final weak = _FakeProvider([
       const MedicineCatalogCandidate(
