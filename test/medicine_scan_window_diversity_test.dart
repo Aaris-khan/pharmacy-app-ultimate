@@ -17,7 +17,7 @@ MedicineFrameEvidence _frame(
 
 void main() {
   group('single-pack evidence window diversity', () {
-    test('repeated back views do not evict complementary front identity', () {
+    test('repeated back views collapse without evicting complementary front identity', () {
       var window = mergeSinglePackMedicineEvidence(
         const <MedicineFrameEvidence>[],
         _frame(0, 'DOLO 650 PARACETAMOL TABLETS FRONT'),
@@ -36,14 +36,17 @@ void main() {
         );
       }
 
-      expect(window.frames, hasLength(6));
+      // Exact duplicate observations must not manufacture evidence authority or
+      // consume the finite window. Keep the complementary front observation and
+      // only the newest/best copy of the repeated back panel.
+      expect(window.frames, hasLength(2));
       expect(
-        window.frames.any((frame) => frame.text.contains('FRONT')),
-        isTrue,
+        window.frames.where((frame) => frame.text.contains('FRONT')),
+        hasLength(1),
       );
       expect(
-        window.frames.any((frame) => frame.text.contains('EXP 10/2027')),
-        isTrue,
+        window.frames.where((frame) => frame.text.contains('EXP 10/2027')),
+        hasLength(1),
       );
       expect(window.frames.last.sequence, 12);
     });
