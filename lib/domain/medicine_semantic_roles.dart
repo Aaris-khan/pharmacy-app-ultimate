@@ -198,6 +198,47 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
         }
       }
     }
+
+    // Packaging OCR frequently loses the COMPOSITION/CONTAINS heading while
+    // still reading a clinically useful ingredient + dose line perfectly. A
+    // second, conservative semantic lane recovers only structurally strong
+    // single-strength generic lines. It deliberately abstains on ordinary
+    // trade-name + dose lines (for example "CROCIN 500 mg") unless the text
+    // itself carries pharmaceutical morphology such as I.P. or a chemical salt
+    // descriptor. This raises recall without turning every prominent brand into
+    // a hallucinated active ingredient.
+    for (final component in _unlabelledCompositionCandidates(lines, quality)) {
+      final rawKey = searchText(component.ingredient);
+      if (rawKey.length < 3) continue;
+      String key = rawKey;
+      for (final existing in frameComponents.entries) {
+        final sameStrength =
+            _strengthKey(existing.value.strength) ==
+            _strengthKey(component.strength);
+        if (!sameStrength) continue;
+        if (_semanticSimilarity(existing.key, rawKey) >= .955) {
+          key = existing.key;
+          break;
+        }
+      }
+      final old = frameComponents[key];
+      if (old == null) {
+        frameComponents[key] = component;
+        continue;
+      }
+      final semanticallySame =
+          _semanticSimilarity(
+            searchText(old.ingredient),
+            searchText(component.ingredient),
+          ) >=
+          .955;
+      final cleanerIngredient =
+          semanticallySame &&
+          component.ingredient.length < old.ingredient.length;
+      if (cleanerIngredient || component.confidence > old.confidence + .03) {
+        frameComponents[key] = component;
+      }
+    }
     for (final component in frameComponents.values) {
       rememberComponent(component);
     }
@@ -440,6 +481,78 @@ List<String> _compositionWindows(List<_SemanticLine> lines) {
   return result;
 }
 
+List<_ComponentCandidate> _unlabelledCompositionCandidates(
+  List<_SemanticLine> lines,
+  double quality,
+) {
+  final result = <_ComponentCandidate>[];
+  for (var index = 0; index < lines.length; index++) {
+    final raw = lines[index].text.trim();
+    if (raw.length < 5 || raw.length > 120) continue;
+    final normalized = searchText(raw);
+    if (normalized.isEmpty ||
+        _compositionCue.hasMatch(normalized) ||
+        _brandLabel.hasMatch(normalized) ||
+        _genericLabel.hasMatch(normalized) ||
+        _semanticLegalNoise.hasMatch(normalized) ||
+        _semanticDateNoise.hasMatch(normalized) ||
+        _manufacturerNoise.hasMatch(normalized) ||
+        _unlabelledCompositionNoise.hasMatch(normalized)) {
+      continue;
+    }
+
+    // One dose per line gives a deterministic ingredient↔strength alignment.
+    // Multi-dose/FDC lines still require a composition cue so a brand variant
+    // cannot accidentally be decomposed into active ingredients.
+    final strengths = _strengthPattern.allMatches(raw).take(2).toList();
+    if (strengths.length != 1) continue;
+    final match = strengths.single;
+    if (match.start <= 0) continue;
+    final prefix = raw.substring(0, match.start).trim();
+    if (!RegExp(r'[A-Za-z]').hasMatch(prefix)) continue;
+    final ingredient = _cleanIngredient(prefix);
+    if (ingredient.length < 4 || ingredient.length > 88) continue;
+
+    final ingredientKey = searchText(ingredient);
+    final tokens = ingredientKey
+        .split(' ')
+        .where((value) => value.length >= 2)
+        .toList(growable: false);
+    if (tokens.isEmpty) continue;
+
+    final pharmacopoeial = _pharmacopoeiaHint.hasMatch(prefix);
+    final chemical = _genericChemistryHint.hasMatch(ingredientKey);
+    final genericMorphology = _genericDrugMorphology.hasMatch(ingredientKey);
+    final multiWordNaturalCase =
+        tokens.length >= 2 &&
+        _uppercaseRatio(prefix) < .78 &&
+        lines[index].prominence < .055 &&
+        index >= 2;
+    if (!pharmacopoeial &&
+        !chemical &&
+        !genericMorphology &&
+        !multiWordNaturalCase) {
+      continue;
+    }
+
+    final strength = _normalizeStrength(match.group(0) ?? '');
+    if (strength.isEmpty) continue;
+    var confidence = .77 + quality * .08;
+    if (pharmacopoeial) confidence += .065;
+    if (chemical) confidence += .035;
+    if (genericMorphology) confidence += .025;
+    if (multiWordNaturalCase) confidence += .015;
+    result.add(
+      _ComponentCandidate(
+        ingredient,
+        strength,
+        confidence.clamp(.78, .93).toDouble(),
+      ),
+    );
+  }
+  return result;
+}
+
 List<_ComponentCandidate> _parseComposition(String raw, double quality) {
   final source = raw.replaceAll('\r', '\n');
   final matches = _strengthPattern
@@ -598,6 +711,22 @@ final _semanticDateNoise = RegExp(
 );
 final _manufacturerNoise = RegExp(
   r'\b(?:manufactured\s+by|manufacturer|made\s+by)\b',
+  caseSensitive: false,
+);
+final _unlabelledCompositionNoise = RegExp(
+  r'(?:₹|\brs\.?\b|\bmrp\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bexp(?:iry)?\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b)',
+  caseSensitive: false,
+);
+final _pharmacopoeiaHint = RegExp(
+  r'\b(?:I\.?\s*P\.?|B\.?\s*P\.?|U\.?\s*S\.?\s*P\.?|Ph\.?\s*Eur\.?)\b',
+  caseSensitive: false,
+);
+final _genericChemistryHint = RegExp(
+  r'\b(?:hydrochloride|hcl|dihydrate|trihydrate|monohydrate|sodium|potassium|calcium|magnesium|maleate|besylate|mesylate|succinate|tartrate|citrate|phosphate|sulphate|sulfate|nitrate|acetate|clavulanate|clavulanic\s+acid)\b',
+  caseSensitive: false,
+);
+final _genericDrugMorphology = RegExp(
+  r'(?:cillin|cycline|floxacin|mycin|micin|azole|prazole|pril|sartan|olol|statin|caine|dipine|terol|tadine|oxetine|zepam|vir|mab|nib|gliptin|gliflozin|formin|profen|coxib|semide|thiazide)\b',
   caseSensitive: false,
 );
 final _strengthPattern = RegExp(
