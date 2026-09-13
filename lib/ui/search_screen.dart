@@ -41,18 +41,31 @@ class _SearchScreenState extends State<SearchScreen> {
   String _error = '', _catalogError = '';
   int _generation = 0, _catalogGeneration = 0;
   ScanResult? _scan;
+  late InventorySnapshot _observedSnapshot;
+  late DateTime _observedDay;
 
   @override
   void initState() {
     super.initState();
+    _observedSnapshot = widget.controller.snapshot;
+    _observedDay = widget.controller.today;
     widget.controller.addListener(_changed);
     unawaited(_search());
   }
 
   void _changed() {
+    if (!mounted) return;
+    final currentSnapshot = widget.controller.snapshot;
+    final currentDay = widget.controller.today;
+    if (identical(currentSnapshot, _observedSnapshot) &&
+        currentDay == _observedDay) {
+      return;
+    }
+    _observedSnapshot = currentSnapshot;
+    _observedDay = currentDay;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
-    if (mounted) unawaited(_search());
+    unawaited(_search());
   }
 
   Future<void> _search() async {
