@@ -83,8 +83,6 @@ List<MedicineDateMatch> extractMedicineDateMatches(
       )) {
         continue;
       }
-      // Reserve invalid full dates too: 32/02/2027 must not become 02/2027.
-      occupied.add((match.start, match.end));
       final before = text.substring(0, match.start);
       final after = text.substring(match.end);
       if (RegExp(r'[A-Za-z0-9]$').hasMatch(before) &&
@@ -92,6 +90,11 @@ List<MedicineDateMatch> extractMedicineDateMatches(
         continue;
       }
       if (RegExp(r'^[A-Za-z0-9]').hasMatch(after)) continue;
+      // Reserve only a token with valid lexical boundaries. Invalid complete
+      // calendar values are still reserved so 32/02/2027 cannot degrade into
+      // a misleading 02/2027 month, but a boundary-invalid bridge can no
+      // longer suppress a legitimate neighbouring date token.
+      occupied.add((match.start, match.end));
       final date = parse(match);
       if (date != null) {
         result.add(
@@ -101,7 +104,13 @@ List<MedicineDateMatch> extractMedicineDateMatches(
     }
   }
 
-  const sep = r'[\s,./-]+';
+  // A whitespace-only separator is deliberately bounded. OCR/layout mergers
+  // often render two printed columns as "04/2026       04/2028"; unlimited
+  // whitespace previously allowed the tail of the first value and head of the
+  // second to be parsed as a synthetic cross-column date. Punctuation may
+  // still have arbitrary surrounding whitespace because it is an explicit
+  // separator on the package.
+  const sep = r'(?:\s{1,3}|\s*[,./-]\s*)';
   add(
     RegExp('(?<!\\d)(20\\d{2})$sep(\\d{1,2})$sep(\\d{1,2})(?!\\d)'),
     (m) => _date(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!)),
