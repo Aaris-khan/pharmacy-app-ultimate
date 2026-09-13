@@ -1,6 +1,7 @@
 import 'package:aaris_pharmacy/domain/medicine_resolution_v2.dart';
 import 'package:aaris_pharmacy/domain/medicine_semantic_roles.dart';
 import 'package:aaris_pharmacy/domain/medicine_understanding.dart';
+import 'package:aaris_pharmacy/domain/offline_evidence_graph.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -91,6 +92,28 @@ BATCH AB500''',
       expect(result.components, hasLength(1));
       expect(result.components.single.ingredient.toLowerCase(), 'paracetamol');
       expect(result.components.single.strength, '650 mg');
+    });
+
+    test('layout-only OCR remains an independent graph observation', () {
+      final graph = buildOfflineEvidenceGraph(const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 7,
+          quality: .91,
+          layoutLines: <MedicineTextLineEvidence>[
+            MedicineTextLineEvidence(
+              text: 'EXP 04/2028',
+              left: 12,
+              top: 20,
+              width: 120,
+              height: 18,
+            ),
+          ],
+        ),
+      ]);
+
+      expect(graph.observedFrames, 1);
+      expect(graph.independentObservations, 1);
+      expect(graph.groups.single.representative.sequence, 7);
     });
 
     test('V2 keeps semantic recovery aligned with physical lot dates', () {
