@@ -94,6 +94,16 @@ class MedicineReviewPreparation {
   final String routeLabel;
 }
 
+/// Backoff policy for a local-model lease that is temporarily owned by another
+/// turn. The review pipeline must never hot-spin on a synchronous "busy" error:
+/// eight bounded waits cost at most 1.88 s, after which the caller falls back to
+/// the deterministic offline draft instead of freezing the scanner journey.
+Duration? medicineReviewContentionDelay(int attempt) {
+  if (attempt < 0 || attempt >= 8) return null;
+  final step = attempt > 3 ? 3 : attempt;
+  return Duration(milliseconds: 40 * (1 << step));
+}
+
 /// One authoritative preparation pipeline for every medicine-review entrypoint.
 ///
 /// Capture sources may differ, but review semantics do not. Prepared durable
@@ -404,6 +414,7 @@ class MedicineReviewPipeline {
     MedicineScanDraft draft,
   ) async {
     var transportRecovered = false;
+    var contentionAttempt = 0;
     while (true) {
       try {
         return await local.understand(draft);
@@ -412,12 +423,20 @@ class MedicineReviewPipeline {
           if (!await _routeStillOwnsScan(local, routedModelId)) {
             throw StateError('Local AI route changed while this scan was waiting.');
           }
+          final delay = medicineReviewContentionDelay(contentionAttempt++);
+          if (delay == null) {
+            throw StateError(
+              'Local AI stayed busy. Aaris will use the offline scan result.',
+            );
+          }
+          await Future<void>.delayed(delay);
           continue;
         }
         if (transportRecovered || !_recoverableLocalTransportFailure(error)) {
           Error.throwWithStackTrace(error, stack);
         }
         transportRecovered = true;
+        var suspendAttempt = 0;
         while (true) {
           try {
             await local.suspend();
@@ -427,11 +446,17 @@ class MedicineReviewPipeline {
                 !await _routeStillOwnsScan(local, routedModelId)) {
               Error.throwWithStackTrace(error, stack);
             }
+            final delay = medicineReviewContentionDelay(suspendAttempt++);
+            if (delay == null) {
+              Error.throwWithStackTrace(error, stack);
+            }
+            await Future<void>.delayed(delay);
           }
         }
         if (!await _routeStillOwnsScan(local, routedModelId)) {
           throw StateError('Local AI route changed while recovering this scan.');
         }
+        contentionAttempt = 0;
       }
     }
   }
