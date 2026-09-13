@@ -572,6 +572,7 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
         _semanticLegalNoise.hasMatch(normalized) ||
         _semanticDateNoise.hasMatch(normalized) ||
         _manufacturerNoise.hasMatch(normalized) ||
+        _equivalentToHint.hasMatch(normalized) ||
         _unlabelledCompositionNoise.hasMatch(normalized)) {
       continue;
     }
@@ -628,6 +629,7 @@ List<_ComponentCandidate> _splitUnlabelledCompositionCandidates(
         _semanticLegalNoise.hasMatch(normalized) ||
         _semanticDateNoise.hasMatch(normalized) ||
         _manufacturerNoise.hasMatch(normalized) ||
+        _equivalentToHint.hasMatch(normalized) ||
         _unlabelledCompositionNoise.hasMatch(normalized) ||
         _strengthPattern.hasMatch(raw)) {
       continue;
@@ -673,8 +675,9 @@ List<_ComponentCandidate> _parseComposition(String raw, double quality) {
     var segment = source.substring(previousEnd, match.start);
     previousEnd = match.end;
     segment = segment.split(RegExp(r'[+;,]')).last;
-    final equivalent = RegExp(r'\bequivalent\s+to\b', caseSensitive: false);
-    if (equivalent.hasMatch(segment)) segment = segment.split(equivalent).last;
+    if (_equivalentToHint.hasMatch(segment)) {
+      segment = segment.split(_equivalentToHint).last;
+    }
     final ingredient = _cleanIngredient(segment);
     if (ingredient.isEmpty) continue;
     final strength = _normalizeStrength(match.group(0) ?? '');
@@ -901,6 +904,10 @@ final _genericChemistryHint = RegExp(
 );
 final _genericDrugMorphology = RegExp(
   r'(?:cillin|cycline|floxacin|mycin|micin|azole|prazole|pril|sartan|olol|statin|caine|dipine|terol|tadine|oxetine|zepam|vir|mab|nib|gliptin|gliflozin|formin|profen|coxib|semide|thiazide)\b',
+  caseSensitive: false,
+);
+final _equivalentToHint = RegExp(
+  r'\bequivalent\s+to\b',
   caseSensitive: false,
 );
 final _strengthPattern = RegExp(
