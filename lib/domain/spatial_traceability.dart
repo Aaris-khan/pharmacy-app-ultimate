@@ -66,6 +66,32 @@ class _SpatialObservation {
   final double confidence;
 }
 
+class _SpatialValueCandidate {
+  const _SpatialValueCandidate({
+    required this.value,
+    required this.start,
+    required this.end,
+    required this.anchor,
+  });
+
+  final String value;
+  final int start;
+  final int end;
+  final MedicineTextLineEvidence anchor;
+}
+
+class _SpatialProposal {
+  const _SpatialProposal({
+    required this.labelId,
+    required this.candidateId,
+    required this.observation,
+  });
+
+  final int labelId;
+  final String candidateId;
+  final _SpatialObservation observation;
+}
+
 final _labelPattern = RegExp(
   '${medicineManufacturingLabel.pattern}|${medicineExpiryLabel.pattern}|${medicineNonDateLabel.pattern}',
   caseSensitive: false,
@@ -86,15 +112,19 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
   if (lines.length < 2) return const <_SpatialObservation>[];
 
   final result = <_SpatialObservation>[];
+  final proposals = <_SpatialProposal>[];
   final quality = frame.quality.clamp(0, 1).toDouble();
+  var nextLabelId = 0;
+
   for (var labelIndex = 0; labelIndex < lines.length; labelIndex++) {
     final labelLine = lines[labelIndex];
-    final matches = _labelPattern.allMatches(labelLine.text).toList();
+    final matches = _labelPattern.allMatches(labelLine.text).take(12).toList();
     if (matches.isEmpty) continue;
     for (var markerIndex = 0; markerIndex < matches.length; markerIndex++) {
       final match = matches[markerIndex];
       final kind = _kind(match.group(0) ?? '');
       if (kind == null) continue;
+      final labelId = nextLabelId++;
       final segmentEnd = markerIndex + 1 < matches.length
           ? matches[markerIndex + 1].start
           : labelLine.text.length;
@@ -111,34 +141,76 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
         continue;
       }
 
-      _SpatialObservation? best;
+      // Bind geometry to the actual marker span instead of the whole OCR line.
+      // ML Kit may merge "MFG     EXP" into one line; using the full box makes
+      // both labels appear to occupy the same place and can swap their values.
+      final labelAnchor = _sliceAnchor(
+        labelLine,
+        match.start,
+        match.end,
+        match.group(0) ?? '',
+      );
+
       for (
         var candidateIndex = 0;
         candidateIndex < lines.length;
         candidateIndex++
       ) {
         if (candidateIndex == labelIndex) continue;
-        final candidate = lines[candidateIndex];
-        if (_labelPattern.hasMatch(candidate.text)) continue;
-        final value = _extractValue(kind, candidate.text);
-        if (value.isEmpty) continue;
-        final geometry = _geometryScore(labelLine, candidate);
-        if (geometry < .78) continue;
-        final confidence = (geometry * (.92 + quality * .08))
-            .clamp(0, .95)
-            .toDouble();
-        final observation = _SpatialObservation(
-          field: _field(kind),
-          value: value,
-          confidence: confidence,
-        );
-        if (best == null || observation.confidence > best.confidence) {
-          best = observation;
+        final candidateLine = lines[candidateIndex];
+        if (_labelPattern.hasMatch(candidateLine.text)) continue;
+        final values = _valueCandidates(kind, candidateLine);
+        for (final candidate in values) {
+          final geometry = _geometryScore(labelAnchor, candidate.anchor);
+          if (geometry < .78) continue;
+          final confidence = (geometry * (.92 + quality * .08))
+              .clamp(0, .95)
+              .toDouble();
+          proposals.add(
+            _SpatialProposal(
+              labelId: labelId,
+              // A printed substring is a finite piece of evidence. Do not let
+              // MFG and EXP independently consume the exact same OCR token.
+              candidateId:
+                  '$candidateIndex:${candidate.start}:${candidate.end}',
+              observation: _SpatialObservation(
+                field: _field(kind),
+                value: candidate.value,
+                confidence: confidence,
+              ),
+            ),
+          );
         }
       }
-      if (best != null) result.add(best);
     }
   }
+
+  // Resolve all non-inline labels together. Previous per-label greedy matching
+  // allowed one nearby date to be reused for MFG and EXP while a second date was
+  // visible a little farther away. A global confidence ordering with one-to-one
+  // token ownership preserves the strongest geometry and forces the remaining
+  // label to use independent evidence (or abstain).
+  proposals.sort((a, b) {
+    final confidence = b.observation.confidence.compareTo(
+      a.observation.confidence,
+    );
+    if (confidence != 0) return confidence;
+    final label = a.labelId.compareTo(b.labelId);
+    if (label != 0) return label;
+    return a.candidateId.compareTo(b.candidateId);
+  });
+  final usedLabels = <int>{};
+  final usedCandidates = <String>{};
+  for (final proposal in proposals) {
+    if (usedLabels.contains(proposal.labelId) ||
+        usedCandidates.contains(proposal.candidateId)) {
+      continue;
+    }
+    usedLabels.add(proposal.labelId);
+    usedCandidates.add(proposal.candidateId);
+    result.add(proposal.observation);
+  }
+
   return result;
 }
 
@@ -163,6 +235,68 @@ String _extractValue(_TraceKind kind, String text) => switch (kind) {
   _TraceKind.mfg || _TraceKind.expiry => _extractDate(text),
 };
 
+List<_SpatialValueCandidate> _valueCandidates(
+  _TraceKind kind,
+  MedicineTextLineEvidence line,
+) {
+  if (kind == _TraceKind.batch) {
+    final match = RegExp(
+      r'[A-Za-z0-9][A-Za-z0-9._/-]{2,19}',
+    ).firstMatch(line.text);
+    if (match == null) return const <_SpatialValueCandidate>[];
+    final value = match.group(0) ?? '';
+    if (!_isSafeBatchValue(value)) return const <_SpatialValueCandidate>[];
+    return <_SpatialValueCandidate>[
+      _SpatialValueCandidate(
+        value: value,
+        start: match.start,
+        end: match.end,
+        anchor: _sliceAnchor(line, match.start, match.end, value),
+      ),
+    ];
+  }
+
+  final matches = extractMedicineDateMatches(
+    line.text,
+    allowCompact: true,
+  ).take(6);
+  return matches
+      .map(
+        (match) => _SpatialValueCandidate(
+          value: match.date.value,
+          start: match.start,
+          end: match.end,
+          anchor: _sliceAnchor(
+            line,
+            match.start,
+            match.end,
+            line.text.substring(match.start, match.end),
+          ),
+        ),
+      )
+      .toList(growable: false);
+}
+
+MedicineTextLineEvidence _sliceAnchor(
+  MedicineTextLineEvidence line,
+  int start,
+  int end,
+  String text,
+) {
+  final length = max(1, line.text.length);
+  final boundedStart = start.clamp(0, length).toInt();
+  final boundedEnd = end.clamp(boundedStart, length).toInt();
+  final leftRatio = boundedStart / length;
+  final widthRatio = max(1, boundedEnd - boundedStart) / length;
+  return MedicineTextLineEvidence(
+    text: text,
+    left: line.left + line.width * leftRatio,
+    top: line.top,
+    width: max(.5, line.width * widthRatio),
+    height: line.height,
+  );
+}
+
 String _extractBatch(String raw) {
   var value = raw
       .replaceAll(
@@ -175,12 +309,16 @@ String _extractBatch(String raw) {
   final match = RegExp(r'[A-Za-z0-9][A-Za-z0-9._/-]{2,19}').firstMatch(value);
   if (match == null) return '';
   value = match.group(0) ?? '';
-  if (!RegExp(r'\d').hasMatch(value)) return '';
+  return _isSafeBatchValue(value) ? value : '';
+}
+
+bool _isSafeBatchValue(String value) {
+  if (!RegExp(r'\d').hasMatch(value)) return false;
   if (RegExp(r'^\d{1,2}[-/.]\d{2,4}$').hasMatch(value) ||
       RegExp(r'^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$').hasMatch(value)) {
-    return '';
+    return false;
   }
-  return value;
+  return true;
 }
 
 String _extractDate(String raw) {
@@ -198,11 +336,22 @@ double _geometryScore(
   final vertical = (labelCenterY - candidateCenterY).abs() / height;
   final labelRight = label.left + label.width;
   final candidateRight = candidate.left + candidate.width;
+  final labelCenterX = label.left + label.width / 2;
+  final candidateCenterX = candidate.left + candidate.width / 2;
 
   // Same-row value to the right of the label is the strongest geometric cue.
-  if (vertical <= .72 && candidate.left >= label.left - height * .3) {
+  if (vertical <= .72 && candidateCenterX >= labelCenterX - height * .25) {
     final gap = max(0.0, candidate.left - labelRight) / height;
-    return (.94 - min(.12, gap * .025)).clamp(0, 1).toDouble();
+    return (.95 - min(.13, gap * .025)).clamp(0, 1).toDouble();
+  }
+
+  // Reverse same-row layouts ("04/2028  EXP") are common on narrow blister
+  // strips. They are useful, but slightly weaker than conventional label→value.
+  if (vertical <= .72 && candidateCenterX < labelCenterX) {
+    final reverseGap = max(0.0, label.left - candidateRight) / height;
+    if (reverseGap <= 4.8) {
+      return (.89 - min(.10, reverseGap * .02)).clamp(0, 1).toDouble();
+    }
   }
 
   final horizontalOverlap =
@@ -211,9 +360,13 @@ double _geometryScore(
         min(labelRight, candidateRight) - max(label.left, candidate.left),
       ) /
       max(1.0, min(label.width, candidate.width));
+  final centerDelta = (labelCenterX - candidateCenterX).abs() / height;
+  final aligned = horizontalOverlap >= .12 || centerDelta <= 1.8;
   final belowGap = (candidate.top - (label.top + label.height)) / height;
-  if (belowGap >= -.25 && belowGap <= 2.6 && horizontalOverlap >= .12) {
-    return (.88 - max(0.0, belowGap) * .035).clamp(0, 1).toDouble();
+  if (belowGap >= -.25 && belowGap <= 2.6 && aligned) {
+    return (.88 - max(0.0, belowGap) * .035 - min(.04, centerDelta * .01))
+        .clamp(0, 1)
+        .toDouble();
   }
 
   // Some packs print the value directly above a compact MFG/EXP label. Treat
@@ -221,8 +374,10 @@ double _geometryScore(
   // weaker than the conventional below-label layout so nearby unrelated dates
   // cannot outrank a normal same-row/below association.
   final aboveGap = (label.top - (candidate.top + candidate.height)) / height;
-  if (aboveGap >= -.25 && aboveGap <= 2.1 && horizontalOverlap >= .12) {
-    return (.86 - max(0.0, aboveGap) * .035).clamp(0, 1).toDouble();
+  if (aboveGap >= -.25 && aboveGap <= 2.1 && aligned) {
+    return (.86 - max(0.0, aboveGap) * .035 - min(.04, centerDelta * .01))
+        .clamp(0, 1)
+        .toDouble();
   }
   return 0;
 }
