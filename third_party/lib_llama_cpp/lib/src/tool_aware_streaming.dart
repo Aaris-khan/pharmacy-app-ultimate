@@ -64,7 +64,22 @@ Iterable<LlamaResponse> streamToolAwareMessageResponses({
       return;
     }
 
-    final text = contentFromParsedMessage(parsed);
+    var text = contentFromParsedMessage(parsed);
+    // Some chat-template parsers (notably tiny/new model families) can consume
+    // real assistant text during final parsing and return an empty content field.
+    // When no tools were supplied there is no hidden tool payload to protect, so
+    // silently dropping non-empty sampled text is always worse than preserving
+    // the model's actual assistant bytes for the caller's own strict validator.
+    // Only recover when nothing has crossed the streaming boundary; this cannot
+    // rewrite an already-visible prefix.
+    if (canStreamText &&
+        command.tools.isEmpty &&
+        emittedText.isEmpty &&
+        text.trim().isEmpty &&
+        generatedText.trim().isNotEmpty) {
+      text = generatedText;
+    }
+
     final delta = nextTextDelta(emittedText, text);
     if (delta == null) {
       // Partial chat-template parsers are allowed to withhold text while their
