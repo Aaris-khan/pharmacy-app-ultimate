@@ -80,6 +80,63 @@ void main() {
     expect(result.field('expiry').confidence, lessThan(.78));
     expect(result.needsReview, isTrue);
   });
+
+  test('month precision and exact day in same month are compatible', () {
+    final drafts = <MedicineScanDraft>[
+      _draft(
+        name: 'Dolo',
+        mfg: '2026-04',
+        expiry: '2028-04',
+        confidence: .91,
+        sequence: 0,
+      ),
+      _draft(
+        name: 'Dolo',
+        mfg: '2026-04-05',
+        expiry: '2028-04-30',
+        confidence: .90,
+        sequence: 1,
+      ),
+    ];
+
+    final result = normalizeMedicineReviewDrafts(
+      drafts,
+      singlePackExpected: true,
+    ).single;
+
+    expect(result.mfg, '2026-04-05');
+    expect(result.expiry, '2028-04-30');
+    expect(result.field('mfg').conflicted, isFalse);
+    expect(result.field('expiry').conflicted, isFalse);
+    expect(result.mfgMonthOnly, isFalse);
+    expect(result.expiryMonthOnly, isFalse);
+  });
+
+  test('two different exact days in the same month remain conflicting', () {
+    final drafts = <MedicineScanDraft>[
+      _draft(
+        name: 'Dolo',
+        expiry: '2028-04-05',
+        confidence: .92,
+        sequence: 0,
+      ),
+      _draft(
+        name: 'Dolo',
+        expiry: '2028-04-06',
+        confidence: .90,
+        sequence: 1,
+      ),
+    ];
+
+    final result = normalizeMedicineReviewDrafts(
+      drafts,
+      singlePackExpected: true,
+    ).single;
+
+    expect(result.field('expiry').conflicted, isTrue);
+    expect(result.field('expiry').confidence, lessThan(.78));
+    expect(result.needsReview, isTrue);
+  });
 }
 
 MedicineScanDraft _draft({
