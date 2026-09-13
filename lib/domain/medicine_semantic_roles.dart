@@ -163,54 +163,14 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
     final lines = _orderedFrameLines(frame);
     if (lines.isEmpty) continue;
 
-    final windows = _compositionWindows(lines);
     final frameComponents = <String, _ComponentCandidate>{};
-    for (final window in windows) {
-      for (final component in _parseComposition(window, quality)) {
-        final rawKey = searchText(component.ingredient);
-        if (rawKey.length < 3) continue;
-        String key = rawKey;
-        for (final existing in frameComponents.entries) {
-          final sameStrength =
-              _strengthKey(existing.value.strength) ==
-              _strengthKey(component.strength);
-          if (!sameStrength) continue;
-          if (_semanticSimilarity(existing.key, rawKey) >= .955) {
-            key = existing.key;
-            break;
-          }
-        }
-        final old = frameComponents[key];
-        if (old == null) {
-          frameComponents[key] = component;
-          continue;
-        }
-        final semanticallySame =
-            _semanticSimilarity(
-              searchText(old.ingredient),
-              searchText(component.ingredient),
-            ) >=
-            .955;
-        final cleanerIngredient =
-            semanticallySame &&
-            component.ingredient.length < old.ingredient.length;
-        if (cleanerIngredient || component.confidence > old.confidence + .03) {
-          frameComponents[key] = component;
-        }
-      }
-    }
 
-    // Packaging OCR frequently loses the COMPOSITION/CONTAINS heading while
-    // still reading a clinically useful ingredient + dose line perfectly. A
-    // second, conservative semantic lane recovers only structurally strong
-    // single-strength generic lines. It deliberately abstains on ordinary
-    // trade-name + dose lines (for example "CROCIN 500 mg") unless the text
-    // itself carries pharmaceutical morphology such as I.P. or a chemical salt
-    // descriptor. This raises recall without turning every prominent brand into
-    // a hallucinated active ingredient.
-    for (final component in _unlabelledCompositionCandidates(lines, quality)) {
+    // All semantic lanes converge through one per-frame gate. A single camera
+    // frame therefore contributes at most one vote for the same ingredient and
+    // dose even if more than one deterministic rule recognizes it.
+    void rememberFrameComponent(_ComponentCandidate component) {
       final rawKey = searchText(component.ingredient);
-      if (rawKey.length < 3) continue;
+      if (rawKey.length < 3) return;
       String key = rawKey;
       for (final existing in frameComponents.entries) {
         final sameStrength =
@@ -225,7 +185,7 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       final old = frameComponents[key];
       if (old == null) {
         frameComponents[key] = component;
-        continue;
+        return;
       }
       final semanticallySame =
           _semanticSimilarity(
@@ -240,6 +200,36 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
         frameComponents[key] = component;
       }
     }
+
+    for (final window in _compositionWindows(lines)) {
+      for (final component in _parseComposition(window, quality)) {
+        rememberFrameComponent(component);
+      }
+    }
+
+    // Generic/Salt labels are high-authority packaging evidence. OCR often
+    // emits label, value and dose as separate rows, so preserve bounded
+    // adjacency rather than requiring all three to survive on one OCR line.
+    for (final component in _labelledCompositionCandidates(lines, quality)) {
+      rememberFrameComponent(component);
+    }
+
+    // Packaging OCR frequently loses the COMPOSITION/CONTAINS heading while
+    // still reading a clinically useful ingredient + dose line perfectly.
+    for (final component in _unlabelledCompositionCandidates(lines, quality)) {
+      rememberFrameComponent(component);
+    }
+
+    // Also recover the common split "PARACETAMOL I.P." / "650 mg" shape. A
+    // pharmaceutical morphology gate plus a dose-only adjacent line prevents a
+    // trade heading such as "CROCIN" / "650 mg" becoming an invented salt.
+    for (final component in _splitUnlabelledCompositionCandidates(
+      lines,
+      quality,
+    )) {
+      rememberFrameComponent(component);
+    }
+
     for (final component in frameComponents.values) {
       rememberComponent(component);
     }
@@ -249,13 +239,17 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       final normalized = searchText(raw);
       if (normalized.isEmpty) continue;
 
-      final explicitBrand = _afterSemanticLabel(raw, _brandLabel);
+      final explicitBrand = _semanticLabelValue(lines, index, _brandLabel);
       if (explicitBrand.isNotEmpty) {
         rememberText(brandVotes, _stripPresentation(explicitBrand), .97);
       }
-      final explicitGeneric = _afterSemanticLabel(raw, _genericLabel);
+      final explicitGeneric = _semanticLabelValue(lines, index, _genericLabel);
       if (explicitGeneric.isNotEmpty) {
-        rememberText(genericVotes, _stripPresentation(explicitGeneric), .965);
+        rememberText(
+          genericVotes,
+          _stripGenericPresentation(explicitGeneric),
+          .965,
+        );
       }
 
       if (_compositionCue.hasMatch(normalized) ||
@@ -269,8 +263,9 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       if (raw.length < 3 || raw.length > 72) continue;
 
       var candidate = _stripPresentation(raw);
-      if (candidate.length < 3 || _semanticNoiseOnly(searchText(candidate)))
+      if (candidate.length < 3 || _semanticNoiseOnly(searchText(candidate))) {
         continue;
+      }
       if (_strengthPattern.hasMatch(candidate) &&
           candidate.replaceAll(_strengthPattern, '').trim().length < 3) {
         continue;
@@ -300,8 +295,9 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       final uppercase = _uppercaseRatio(raw);
       score += min(.07, uppercase * .08);
       score += lines[index].prominence.clamp(0, .12);
-      if (score >= .72)
+      if (score >= .72) {
         rememberText(brandVotes, candidate, score.clamp(0, .94));
+      }
     }
   }
 
@@ -489,6 +485,7 @@ List<String> _compositionWindows(List<_SemanticLine> lines) {
     if (!_compositionCue.hasMatch(normalized)) continue;
     final parts = <String>[lines[index].text];
     var consumedThrough = index;
+    var characters = parts.first.length;
     for (
       var next = index + 1;
       next < lines.length && next <= index + 7;
@@ -496,13 +493,65 @@ List<String> _compositionWindows(List<_SemanticLine> lines) {
     ) {
       final value = searchText(lines[next].text);
       if (_compositionStop.hasMatch(value)) break;
-      parts.add(lines[next].text);
+      final nextText = lines[next].text;
+      if (characters + 1 + nextText.length > 420) break;
+      parts.add(nextText);
+      characters += 1 + nextText.length;
       consumedThrough = next;
-      if (parts.fold<int>(0, (sum, value) => sum + value.length) > 420) break;
     }
     final window = parts.join('\n');
     if (_strengthPattern.hasMatch(window)) result.add(window);
     index = consumedThrough;
+  }
+  return result;
+}
+
+List<_ComponentCandidate> _labelledCompositionCandidates(
+  List<_SemanticLine> lines,
+  double quality,
+) {
+  final result = <_ComponentCandidate>[];
+  for (var index = 0; index < lines.length; index++) {
+    if (!_genericLabel.hasMatch(lines[index].text)) continue;
+    final located = _semanticLabelValueWithIndex(lines, index, _genericLabel);
+    if (located == null) continue;
+    final valueRaw = located.$1;
+    final inlineStrengths = _strengthPattern
+        .allMatches(valueRaw)
+        .take(3)
+        .toList(growable: false);
+    if (inlineStrengths.length > 1) {
+      for (final component in _parseComposition(valueRaw, quality)) {
+        result.add(
+          _ComponentCandidate(
+            component.ingredient,
+            component.strength,
+            max(component.confidence, .93),
+          ),
+        );
+      }
+      continue;
+    }
+
+    final strengthMatch = inlineStrengths.firstOrNull;
+    String strengthRaw = strengthMatch?.group(0) ?? '';
+    final ingredientRaw = strengthMatch == null
+        ? valueRaw
+        : '${valueRaw.substring(0, strengthMatch.start)} ${valueRaw.substring(strengthMatch.end)}';
+
+    if (strengthRaw.isEmpty && located.$2 + 1 < lines.length) {
+      final adjacent = lines[located.$2 + 1].text.trim();
+      if (_isDoseOnlyLine(adjacent)) {
+        strengthRaw = _strengthPattern.firstMatch(adjacent)?.group(0) ?? '';
+      }
+    }
+    if (strengthRaw.isEmpty) continue;
+
+    final ingredient = _cleanIngredient(ingredientRaw);
+    final strength = _normalizeStrength(strengthRaw);
+    if (ingredient.length < 3 || strength.isEmpty) continue;
+    final confidence = (.925 + quality * .05).clamp(.925, .98).toDouble();
+    result.add(_ComponentCandidate(ingredient, strength, confidence));
   }
   return result;
 }
@@ -527,9 +576,6 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
       continue;
     }
 
-    // One dose per line gives a deterministic ingredient↔strength alignment.
-    // Multi-dose/FDC lines still require a composition cue so a brand variant
-    // cannot accidentally be decomposed into active ingredients.
     final strengths = _strengthPattern.allMatches(raw).take(2).toList();
     if (strengths.length != 1) continue;
     final match = strengths.single;
@@ -557,6 +603,57 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
         ingredient,
         strength,
         confidence.clamp(.78, .93).toDouble(),
+      ),
+    );
+  }
+  return result;
+}
+
+List<_ComponentCandidate> _splitUnlabelledCompositionCandidates(
+  List<_SemanticLine> lines,
+  double quality,
+) {
+  final result = <_ComponentCandidate>[];
+  for (var index = 0; index + 1 < lines.length; index++) {
+    final raw = lines[index].text.trim();
+    final doseRaw = lines[index + 1].text.trim();
+    if (raw.length < 4 || raw.length > 100 || !_isDoseOnlyLine(doseRaw)) {
+      continue;
+    }
+    final normalized = searchText(raw);
+    if (normalized.isEmpty ||
+        _compositionCue.hasMatch(normalized) ||
+        _brandLabel.hasMatch(normalized) ||
+        _genericLabel.hasMatch(normalized) ||
+        _semanticLegalNoise.hasMatch(normalized) ||
+        _semanticDateNoise.hasMatch(normalized) ||
+        _manufacturerNoise.hasMatch(normalized) ||
+        _unlabelledCompositionNoise.hasMatch(normalized) ||
+        _strengthPattern.hasMatch(raw)) {
+      continue;
+    }
+
+    final ingredient = _cleanIngredient(raw);
+    if (ingredient.length < 4 || ingredient.length > 88) continue;
+    final ingredientKey = searchText(ingredient);
+    final pharmacopoeial = _pharmacopoeiaHint.hasMatch(raw);
+    final chemical = _genericChemistryHint.hasMatch(ingredientKey);
+    final genericMorphology = _genericDrugMorphology.hasMatch(ingredientKey);
+    if (!pharmacopoeial && !chemical && !genericMorphology) continue;
+
+    final strength = _normalizeStrength(
+      _strengthPattern.firstMatch(doseRaw)?.group(0) ?? '',
+    );
+    if (strength.isEmpty) continue;
+    var confidence = .79 + quality * .075;
+    if (pharmacopoeial) confidence += .055;
+    if (chemical) confidence += .03;
+    if (genericMorphology) confidence += .02;
+    result.add(
+      _ComponentCandidate(
+        ingredient,
+        strength,
+        confidence.clamp(.80, .93).toDouble(),
       ),
     );
   }
@@ -597,13 +694,7 @@ String _cleanIngredient(String raw) {
     ),
     ' ',
   );
-  value = value.replaceAll(
-    RegExp(
-      r'\b(?:I\.?P\.?|B\.?P\.?|U\.?S\.?P\.?|Ph\.?\s*Eur\.?)\b',
-      caseSensitive: false,
-    ),
-    ' ',
-  );
+  value = value.replaceAll(_pharmacopoeiaHint, ' ');
   value = value.replaceAll(
     RegExp(r'^\s*(?:and|plus|with|as)\s+', caseSensitive: false),
     ' ',
@@ -634,8 +725,76 @@ String _afterSemanticLabel(String raw, RegExp pattern) {
       .trim();
 }
 
+(String, int)? _semanticLabelValueWithIndex(
+  List<_SemanticLine> lines,
+  int index,
+  RegExp pattern,
+) {
+  final raw = lines[index].text;
+  final inline = _afterSemanticLabel(raw, pattern);
+  if (inline.isNotEmpty && _isSemanticValueCandidate(inline)) {
+    return (inline, index);
+  }
+  if (!_isStandaloneSemanticLabel(raw, pattern) || index + 1 >= lines.length) {
+    return null;
+  }
+  final adjacent = lines[index + 1].text.trim();
+  if (!_isSemanticValueCandidate(adjacent)) return null;
+  return (adjacent, index + 1);
+}
+
+String _semanticLabelValue(
+  List<_SemanticLine> lines,
+  int index,
+  RegExp pattern,
+) =>
+    _semanticLabelValueWithIndex(lines, index, pattern)?.$1 ?? '';
+
+bool _isStandaloneSemanticLabel(String raw, RegExp pattern) {
+  final match = pattern.firstMatch(raw);
+  if (match == null) return false;
+  bool emptyPresentation(String value) => value
+      .replaceAll(RegExp(r'[\s:#._\-/]+'), '')
+      .trim()
+      .isEmpty;
+  return emptyPresentation(raw.substring(0, match.start)) &&
+      emptyPresentation(raw.substring(match.end));
+}
+
+bool _isSemanticValueCandidate(String raw) {
+  final value = raw.trim();
+  if (value.length < 3 || value.length > 120) return false;
+  if (!RegExp(r'[A-Za-z].*[A-Za-z]|[A-Za-z]{2,}').hasMatch(value)) {
+    return false;
+  }
+  final normalized = searchText(value);
+  return normalized.isNotEmpty &&
+      !_compositionCue.hasMatch(normalized) &&
+      !_brandLabel.hasMatch(normalized) &&
+      !_genericLabel.hasMatch(normalized) &&
+      !_semanticLegalNoise.hasMatch(normalized) &&
+      !_semanticDateNoise.hasMatch(normalized) &&
+      !_manufacturerNoise.hasMatch(normalized);
+}
+
+bool _isDoseOnlyLine(String raw) {
+  final matches = _strengthPattern.allMatches(raw).take(2).toList();
+  if (matches.length != 1) return false;
+  var remainder = raw.replaceRange(matches.single.start, matches.single.end, ' ');
+  remainder = remainder.replaceAll(
+    RegExp(
+      r'\b(?:per|each|tablet|tablets|capsule|capsules|dose|5\s*ml|ml)\b',
+      caseSensitive: false,
+    ),
+    ' ',
+  );
+  remainder = remainder.replaceAll(RegExp(r'[\s:;,.()\-/]+'), ' ').trim();
+  return remainder.isEmpty;
+}
+
 String _stripPresentation(String raw) {
   var value = raw.replaceAll(RegExp(r'[®™]'), ' ');
+  value = value.replaceAll(_pharmacopoeiaHint, ' ');
   value = value.replaceAll(
     RegExp(
       r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|drops?|spray|inhaler|powder|sachets?)\b',
@@ -646,6 +805,11 @@ String _stripPresentation(String raw) {
   value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   return value;
 }
+
+String _stripGenericPresentation(String raw) => _stripPresentation(raw)
+    .replaceAll(_strengthPattern, ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
 
 String _cleanSemanticText(String raw) => raw
     .replaceAll(RegExp(r'^[\s:#.-]+|[\s:#.-]+$'), '')
