@@ -81,8 +81,13 @@ MedicineDateResolution inferMedicineDateIntelligence({
 
           if (labelled == null && labels.isEmpty && standalone) {
             if (index > 0) {
-              final previousRole = _labelOnlyRole(orderedLines[index - 1]);
-              if (previousRole != null) labelled = (previousRole, 24);
+              final previousLine = orderedLines[index - 1];
+              final previousRole = _labelOnlyRole(previousLine);
+              if (previousRole != null) {
+                labelled = (previousRole, 24);
+              } else if (_labelOnlyNonDate(previousLine)) {
+                continue;
+              }
             }
             if (labelled == null && index + 1 < orderedLines.length) {
               final followingRole = _labelOnlyRole(orderedLines[index + 1]);
