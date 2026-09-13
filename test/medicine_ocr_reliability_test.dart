@@ -14,34 +14,9 @@ void main() {
     expect(usableMedicineOcrConfidence(2), 1);
   });
 
-  test('frame OCR confidence is bounded and duplicate-safe', () {
-    final score = robustMedicineOcrConfidence(const [
-      MedicineOcrConfidenceSample(text: 'Paracetamol 650 mg', confidence: .91),
-      MedicineOcrConfidenceSample(text: ' paracetamol  650 mg ', confidence: .74),
-      MedicineOcrConfidenceSample(text: 'EXP 10/2027', confidence: .62),
-      MedicineOcrConfidenceSample(text: 'BATCH A12', confidence: .84),
-    ]);
-    expect(score, isNotNull);
-    expect(score!, inInclusiveRange(0, 1));
-    expect(score, greaterThan(.65));
-    expect(score, lessThan(.92));
-  });
-
-  test('unavailable detector sentinel cannot drag robust score to zero', () {
-    final score = robustMedicineOcrConfidence(const [
-      MedicineOcrConfidenceSample(text: 'DOLO 650', confidence: 0),
-      MedicineOcrConfidenceSample(text: 'Paracetamol 650 mg', confidence: .88),
-    ]);
-    expect(score, .88);
-  });
-
-  test('all unavailable detector confidences remain unknown', () {
-    expect(
-      robustMedicineOcrConfidence(const [
-        MedicineOcrConfidenceSample(text: 'DOLO 650', confidence: null),
-        MedicineOcrConfidenceSample(text: 'EXP 10/2027', confidence: 0),
-      ]),
-      isNull,
-    );
+  test('non-finite detector confidence stays unavailable', () {
+    expect(usableMedicineOcrConfidence(double.nan), isNull);
+    expect(usableMedicineOcrConfidence(double.infinity), isNull);
+    expect(usableMedicineOcrConfidence(double.negativeInfinity), isNull);
   });
 }

@@ -75,12 +75,12 @@ OfflineEvidenceGraph buildOfflineEvidenceGraph(
     if (a != b) parent[b] = a;
   }
 
-  // O(n²) is intentional and bounded: at most twelve frames enter this graph.
-  // It avoids maintaining another mutable index and keeps isolate behavior fully
-  // deterministic.
+  // Preserve the long-standing .74 near-duplicate calibration for OCR text.
+  // Machine-readable conflicts are handled inside _frameCorrelation and return
+  // zero before this threshold can merge different products or physical lots.
   for (var left = 0; left < frames.length; left++) {
     for (var right = left + 1; right < frames.length; right++) {
-      if (_frameCorrelation(signatures[left], signatures[right]) >= .82) {
+      if (_frameCorrelation(signatures[left], signatures[right]) >= .74) {
         union(left, right);
       }
     }

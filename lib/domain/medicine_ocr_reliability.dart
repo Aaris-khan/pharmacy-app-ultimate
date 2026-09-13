@@ -1,73 +1,13 @@
-import 'dart:math';
-
-/// One detector-reported OCR confidence sample.
-///
-/// This is evidence quality, never a probability that the medicine identity is
-/// correct. The medicine resolver still owns semantic conflicts and abstention.
-class MedicineOcrConfidenceSample {
-  const MedicineOcrConfidenceSample({
-    required this.text,
-    required this.confidence,
-  });
-
-  final String text;
-  final double? confidence;
-}
-
-/// Normalizes a detector confidence without inventing certainty.
+/// Normalizes detector confidence without inventing medicine certainty.
 ///
 /// Some ML Kit Android configurations report exactly 0 when per-line confidence
 /// is unavailable. Treat that sentinel as unknown instead of as proof that a
 /// perfectly readable line is bad. Positive detector scores remain bounded.
+/// This signal is used only to choose between duplicate OCR layout readings; it
+/// never rewrites physical capture quality or authorizes a medicine decision.
 double? usableMedicineOcrConfidence(num? raw) {
   if (raw == null || !raw.isFinite) return null;
   final value = raw.toDouble();
   if (value <= 0) return null;
   return value.clamp(0.0, 1.0).toDouble();
-}
-
-/// Produces a bounded, conservative frame-level OCR certainty diagnostic.
-///
-/// This score is deliberately NOT written into MedicineFrameEvidence.quality:
-/// that field is the physical capture-quality channel (focus/contrast/exposure).
-/// Keeping detector certainty separate prevents one noisy model score from
-/// rewriting physical camera evidence. Exact duplicate text from multiple script
-/// recognizers contributes only its strongest usable detector confidence.
-double? robustMedicineOcrConfidence(
-  Iterable<MedicineOcrConfidenceSample> samples,
-) {
-  final byText = <String, double>{};
-  for (final sample in samples.take(500)) {
-    final confidence = usableMedicineOcrConfidence(sample.confidence);
-    if (confidence == null) continue;
-    final text = sample.text.trim();
-    if (text.length < 2) continue;
-    final key = text.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
-    final previous = byText[key];
-    if (previous == null || confidence > previous) {
-      byText[key] = confidence;
-    }
-  }
-  if (byText.isEmpty) return null;
-
-  final values = byText.entries.toList(growable: false);
-  var weightedTotal = 0.0;
-  var weightTotal = 0.0;
-  for (final entry in values) {
-    // Long legal paragraphs must not drown a short but important strength/date
-    // line. Text length helps only inside a deliberately tight bounded range.
-    final weight = .55 + min(entry.key.length, 48) / 48 * .45;
-    weightedTotal += entry.value * weight;
-    weightTotal += weight;
-  }
-  final weightedMean = weightedTotal / max(weightTotal, .0001);
-
-  final ordered = values.map((entry) => entry.value).toList(growable: false)
-    ..sort();
-  // Blend toward the lower quartile so several uncertain lines cannot be hidden
-  // by one perfect heading. This is diagnostic/ranking evidence only.
-  final lowerQuartile = ordered[((ordered.length - 1) * .25).round()];
-  return (weightedMean * .76 + lowerQuartile * .24)
-      .clamp(0.0, 1.0)
-      .toDouble();
 }
