@@ -41,7 +41,9 @@ Future<String> runLocalChatTurn({
   for (var round = 0; round <= 4; round++) {
     var budget = outputTokens;
     var adjustedOutput = false;
-    String raw;
+    var responseRepairUsed = false;
+    late Map<String, dynamic> answer;
+
     while (true) {
       checkCurrent();
       onRound?.call(round);
@@ -67,10 +69,11 @@ Future<String> runLocalChatTurn({
           onStreamReset?.call();
         } catch (_) {}
       }
+
+      String raw;
       try {
         raw = await generate(input, budget);
         checkCurrent();
-        break;
       } on LocalContextBudgetFailure catch (error) {
         checkCurrent();
         if (history.isNotEmpty) {
@@ -94,8 +97,43 @@ Future<String> runLocalChatTurn({
           'This request or its inventory results exceed the loaded ${error.contextTokens}-token local context even in a fresh chat. Ask a shorter/narrower question. The model is still available; no inventory changes were made.',
         );
       }
+
+      // A native generation that reaches Done with no visible assistant bytes is
+      // not a valid JSON/chat answer. Tiny quantized models can occasionally emit
+      // EOS immediately, especially after Android memory pressure or a cold model
+      // reload. Never pass that empty string into jsonDecode(). Retry this exact
+      // read-only round once; if old chat exists, drop only that expendable history
+      // first so the current owner request and verified inventory facts stay intact.
+      if (raw.trim().isEmpty) {
+        if (!responseRepairUsed) {
+          responseRepairUsed = true;
+          if (history.isNotEmpty) forgetHistory();
+          continue;
+        }
+        throw StateError(
+          'Local model finished twice without returning an answer. The model is still installed; try the request again or use a different quantization.',
+        );
+      }
+
+      try {
+        answer = localChatObject(raw);
+        break;
+      } on FormatException {
+        // A truncated/invalid structured answer is also safe to regenerate once:
+        // this layer is read-only and no inventory mutation has been applied.
+        // Do not repair braces or guess JSON fields; let the model regenerate a
+        // complete answer under the same authoritative validators.
+        if (!responseRepairUsed) {
+          responseRepairUsed = true;
+          if (history.isNotEmpty) forgetHistory();
+          continue;
+        }
+        throw const FormatException(
+          'Local model returned incomplete structured output twice. No inventory changes were made.',
+        );
+      }
     }
-    final answer = localChatObject(raw);
+
     if (!answer.containsKey('tool')) return context.finish(answer);
     if (round == 4) {
       throw StateError(
