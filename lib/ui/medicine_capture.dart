@@ -29,6 +29,7 @@ Future<void> openMedicineCapture(
 
     // Capture never waits behind optional AI setup. Every source eventually
     // enters the same medicine-review contract; only evidence preparation differs.
+    // Safety invariant: every AI field remains review-only until Confirm/Add.
     final choice = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
