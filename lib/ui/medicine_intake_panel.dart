@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/medicine.dart';
 import '../domain/medicine_intake.dart';
+import '../domain/medicine_review_cardinality.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
 import '../services/medicine_intake_service.dart';
@@ -53,14 +54,25 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
       .replaceFirst(RegExp(r'^(Exception|Bad state|StateError):\s*'), '')
       .trim();
 
+  bool _singlePackExpected(MedicineIntakeJob job) =>
+      job.kind == 'photo' || job.kind == 'evidence';
+
+  List<MedicineScanDraft> _reviewDrafts(MedicineIntakeJob job) =>
+      normalizeMedicineReviewDrafts(
+        job.drafts,
+        singlePackExpected: _singlePackExpected(job),
+      );
+
   Future<void> _review(MedicineIntakeJob job) async {
+    final drafts = _reviewDrafts(job);
     final completed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => MedicineReviewScreen(
           controller: widget.controller,
           input: MedicineReviewInput.prepared(
-            List<MedicineScanDraft>.of(job.drafts),
+            drafts,
+            singlePackExpected: _singlePackExpected(job),
           ),
         ),
       ),
@@ -157,7 +169,8 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   Widget _jobCard(MedicineIntakeJob job) {
     final processing = !job.terminal;
     final failedWithoutDraft = job.status == 'failed' && job.drafts.isEmpty;
-    final preview = job.drafts.isEmpty ? null : job.drafts.first;
+    final reviewDrafts = _reviewDrafts(job);
+    final preview = reviewDrafts.isEmpty ? null : reviewDrafts.first;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -240,7 +253,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
               ),
             ] else ...[
               if (preview != null) _draftCard(preview, 0),
-              if (job.drafts.length > 1)
+              if (reviewDrafts.length > 1)
                 Container(
                   margin: const EdgeInsets.only(top: 2, bottom: 4),
                   padding:
@@ -259,7 +272,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '${job.drafts.length} medicines found · Next reviews them one at a time.',
+                          '${reviewDrafts.length} medicines found · Next reviews them one at a time.',
                           style: const TextStyle(
                             color: primary,
                             fontSize: 11.5,
@@ -314,7 +327,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                       ),
                     ),
                   ),
-                  onPressed: job.drafts.isEmpty ? null : () => _review(job),
+                  onPressed: reviewDrafts.isEmpty ? null : () => _review(job),
                   icon: const Icon(Icons.arrow_forward_rounded),
                   label: const Text(
                     'Next',

@@ -10,12 +10,15 @@ void main() {
     final review = File('lib/ui/medicine_review_screen.dart').readAsStringSync();
     final pipeline = File('lib/services/medicine_review_pipeline.dart')
         .readAsStringSync();
+    final cardinality = File('lib/domain/medicine_review_cardinality.dart')
+        .readAsStringSync();
 
     expect(panel, contains('MedicineReviewScreen('));
     expect(panel, contains('MedicineReviewInput.prepared('));
-    expect(panel, contains('final preview = job.drafts.isEmpty'));
+    expect(panel, contains('final reviewDrafts = _reviewDrafts(job);'));
     expect(panel, isNot(contains('job.drafts.take(3)')));
     expect(panel, contains('Next reviews them one at a time.'));
+    expect(panel, contains("job.kind == 'photo' || job.kind == 'evidence'"));
 
     expect(import, contains('MedicineReviewInput.localEvidence('));
     expect(import, isNot(contains('ImportInboxScreen')));
@@ -36,6 +39,9 @@ void main() {
     expect(pipeline, contains('MedicineReviewInputKind.prepared'));
     expect(pipeline, contains('MedicineReviewInputKind.localEvidence'));
     expect(pipeline, contains('MedicineReviewInputKind.cloudEvidence'));
+    expect(pipeline, contains('normalizeMedicineReviewDrafts('));
+    expect(cardinality, contains('singlePackExpected'));
+    expect(cardinality, contains('overallConfidence: min(primary.overallConfidence, .74)'));
     expect(File('lib/ui/prepared_medicine_review_screen.dart').existsSync(), isFalse);
     expect(File('lib/ui/cloud_scan_review_screen.dart').existsSync(), isFalse);
   });

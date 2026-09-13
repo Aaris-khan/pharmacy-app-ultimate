@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/medicine.dart';
 import '../domain/medicine_resolution_v2.dart';
+import '../domain/medicine_review_cardinality.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
 import 'ai_service.dart';
@@ -21,38 +22,52 @@ class MedicineReviewInput {
     required this.evidence,
     required this.preparedDrafts,
     required this.autoSaveReadyDrafts,
+    required this.singlePackExpected,
   });
 
-  const MedicineReviewInput.prepared(List<MedicineScanDraft> drafts)
-      : this._(
+  const MedicineReviewInput.prepared(
+    List<MedicineScanDraft> drafts, {
+    bool singlePackExpected = false,
+  }) : this._(
           kind: MedicineReviewInputKind.prepared,
           evidence: const <MedicineFrameEvidence>[],
           preparedDrafts: drafts,
           autoSaveReadyDrafts: false,
+          singlePackExpected: singlePackExpected,
         );
 
-  const MedicineReviewInput.localEvidence(
+  MedicineReviewInput.localEvidence(
     List<MedicineFrameEvidence> evidence, {
     bool autoSaveReadyDrafts = false,
+    bool? singlePackExpected,
   }) : this._(
           kind: MedicineReviewInputKind.localEvidence,
           evidence: evidence,
           preparedDrafts: const <MedicineScanDraft>[],
           autoSaveReadyDrafts: autoSaveReadyDrafts,
+          // Structured list imports mark explicit row boundaries. Camera scans
+          // do not, so they naturally become one-physical-pack review sessions
+          // without every caller needing source-specific UI logic.
+          singlePackExpected:
+              singlePackExpected ?? !evidence.any((item) => item.startsNewItem),
         );
 
-  const MedicineReviewInput.cloudEvidence(List<MedicineFrameEvidence> evidence)
-      : this._(
+  const MedicineReviewInput.cloudEvidence(
+    List<MedicineFrameEvidence> evidence, {
+    bool singlePackExpected = true,
+  }) : this._(
           kind: MedicineReviewInputKind.cloudEvidence,
           evidence: evidence,
           preparedDrafts: const <MedicineScanDraft>[],
           autoSaveReadyDrafts: false,
+          singlePackExpected: singlePackExpected,
         );
 
   final MedicineReviewInputKind kind;
   final List<MedicineFrameEvidence> evidence;
   final List<MedicineScanDraft> preparedDrafts;
   final bool autoSaveReadyDrafts;
+  final bool singlePackExpected;
 }
 
 class PreparedMedicineReviewDraft {
@@ -82,10 +97,11 @@ class MedicineReviewPreparation {
 /// One authoritative preparation pipeline for every medicine-review entrypoint.
 ///
 /// Capture sources may differ, but review semantics do not. Prepared durable
-/// queue drafts are never reinterpreted. Local evidence keeps the existing
-/// Offline Core + optional Local AI route. Explicit cloud evidence keeps the
-/// strict bounded-evidence privacy boundary. All three routes return the same
-/// review model consumed by one UI.
+/// queue drafts are never reinterpreted semantically. Local evidence keeps the
+/// existing Offline Core + optional Local AI route. Explicit cloud evidence keeps
+/// the strict bounded-evidence privacy boundary. A single physical-pack lane is
+/// normalized here before AI refinement, so OCR segmentation noise can never
+/// become several pharmacist-facing medicines.
 class MedicineReviewPipeline {
   MedicineReviewPipeline({CloudScanAiService? cloud})
       : _cloud = cloud ?? CloudScanAiService();
@@ -102,19 +118,23 @@ class MedicineReviewPipeline {
   ) async {
     switch (input.kind) {
       case MedicineReviewInputKind.prepared:
+        final normalized = normalizeMedicineReviewDrafts(
+          input.preparedDrafts,
+          singlePackExpected: input.singlePackExpected,
+        );
         return MedicineReviewPreparation(
           drafts: List<PreparedMedicineReviewDraft>.unmodifiable(
-            input.preparedDrafts.map(
+            normalized.map(
               (draft) => PreparedMedicineReviewDraft(draft: draft),
             ),
           ),
         );
       case MedicineReviewInputKind.localEvidence:
         _validateEvidence(input.evidence);
-        return _prepareLocal(input.evidence, records);
+        return _prepareLocal(input, records);
       case MedicineReviewInputKind.cloudEvidence:
         _validateEvidence(input.evidence);
-        return _prepareCloud(input.evidence, records);
+        return _prepareCloud(input, records);
     }
   }
 
@@ -128,9 +148,10 @@ class MedicineReviewPipeline {
   }
 
   Future<MedicineReviewPreparation> _prepareLocal(
-    List<MedicineFrameEvidence> evidence,
+    MedicineReviewInput input,
     Iterable<Medicine> records,
   ) async {
+    final evidence = input.evidence;
     final local = LocalAiService.instance;
     var warning = '';
     String? scanModelId;
@@ -174,7 +195,11 @@ class MedicineReviewPipeline {
       },
     );
     final understanding = MedicineUnderstandingResult.fromMessage(payload);
-    if (understanding.drafts.isEmpty) {
+    final reviewDrafts = normalizeMedicineReviewDrafts(
+      understanding.drafts,
+      singlePackExpected: input.singlePackExpected,
+    );
+    if (reviewDrafts.isEmpty) {
       throw const FormatException(
         'No medicine could be read. Take a closer, steadier scan.',
       );
@@ -182,7 +207,7 @@ class MedicineReviewPipeline {
 
     final prepared = <PreparedMedicineReviewDraft>[];
     var localBrainUsed = false;
-    for (final original in understanding.drafts) {
+    for (final original in reviewDrafts) {
       var draft = original;
       ScanAutoSaveVerifier? autoSaveVerifier;
       final leasedModelId = scanModelId;
@@ -253,9 +278,10 @@ class MedicineReviewPipeline {
   }
 
   Future<MedicineReviewPreparation> _prepareCloud(
-    List<MedicineFrameEvidence> evidence,
+    MedicineReviewInput input,
     Iterable<Medicine> records,
   ) async {
+    final evidence = input.evidence;
     var warning = '';
     var routeLabel = '';
     AiConfiguration? config;
@@ -300,14 +326,18 @@ class MedicineReviewPipeline {
       },
     );
     final deterministic = MedicineUnderstandingResult.fromMessage(payload);
-    if (deterministic.drafts.isEmpty) {
+    final reviewDrafts = normalizeMedicineReviewDrafts(
+      deterministic.drafts,
+      singlePackExpected: input.singlePackExpected,
+    );
+    if (reviewDrafts.isEmpty) {
       throw const FormatException(
         'No medicine could be read. Take a closer, steadier scan.',
       );
     }
 
     final prepared = <PreparedMedicineReviewDraft>[];
-    for (final original in deterministic.drafts) {
+    for (final original in reviewDrafts) {
       if (config == null) {
         prepared.add(PreparedMedicineReviewDraft(draft: original));
         continue;
