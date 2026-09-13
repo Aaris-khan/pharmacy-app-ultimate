@@ -395,6 +395,81 @@ InventorySnapshot nextSnapshot(
   );
 }
 
+/// Converts one persisted Activity row into its safe runtime projection.
+///
+/// Audit history is useful but not authoritative stock. A single malformed
+/// legacy `detail` JSON must therefore never make otherwise-valid medicines,
+/// sales and settings impossible to open. SQL columns remain the witnesses for
+/// event identity/revision/SOLD aggregates, and malformed rows are left on disk
+/// untouched for forensic/manual recovery. Missing Undo payloads merely disable
+/// Undo for that row instead of inventing a before-image.
+Map<String, dynamic>? decodeStoredInventoryEvent(Map<String, Object?> row) {
+  try {
+    final rowId = row['id'];
+    final rowRevision = row['revision'];
+    final soldValue = row['sold_value'];
+    final unknownSold = row['unknown_sold'];
+    final undone = row['undone'];
+    final raw = row['detail'];
+    if (rowId is! String ||
+        rowId.trim().isEmpty ||
+        rowRevision is! int ||
+        rowRevision < 1 ||
+        soldValue is! int ||
+        soldValue < 0 ||
+        unknownSold is! int ||
+        unknownSold < 0 ||
+        undone is! int ||
+        (undone != 0 && undone != 1) ||
+        raw is! String) {
+      return null;
+    }
+
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    final event = Map<String, dynamic>.from(decoded);
+    final label = event['label'];
+    final timeRaw = event['time'];
+    final time = timeRaw is String ? DateTime.tryParse(timeRaw) : null;
+    if (event['id'] != rowId ||
+        event['revision'] != rowRevision ||
+        label is! String ||
+        label.trim().isEmpty ||
+        label.length > 1200 ||
+        time == null ||
+        time.year < 2000 ||
+        time.year > 2200) {
+      return null;
+    }
+
+    final beforeRaw = event['before'];
+    final salesBeforeRaw = event['salesBefore'];
+    final settingsBeforeRaw = event['settingsBefore'];
+    final canUndo =
+        event['undoable'] == true &&
+        beforeRaw is Map &&
+        settingsBeforeRaw is Map;
+
+    return <String, dynamic>{
+      ...event,
+      'soldValue': soldValue,
+      'unknownSold': unknownSold,
+      'undoable': canUndo,
+      'undone': undone == 1,
+      'before': beforeRaw is Map
+          ? Map<String, dynamic>.from(beforeRaw)
+          : <String, dynamic>{},
+      'salesBefore': salesBeforeRaw is Map
+          ? Map<String, dynamic>.from(salesBeforeRaw)
+          : <String, dynamic>{},
+      if (settingsBeforeRaw is Map)
+        'settingsBefore': Map<String, dynamic>.from(settingsBeforeRaw),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 class SqliteInventoryStorage implements InventoryStorage {
   SqliteInventoryStorage({this.path, this.factory});
   final String? path;
@@ -468,12 +543,17 @@ class SqliteInventoryStorage implements InventoryStorage {
     final meta = (await db.query('meta', where: 'id=1')).single;
     final records = await db.query('medicines');
     final sales = await db.query('sales');
-    final events = await db.query(
+    final eventRows = await db.query(
       'events',
       orderBy: 'revision DESC',
       limit: 200,
     );
     final receipts = await db.query('receipts');
+    final events = <Map<String, dynamic>>[];
+    for (final row in eventRows) {
+      final event = decodeStoredInventoryEvent(row);
+      if (event != null) events.add(event);
+    }
     return InventorySnapshot(
       revision: meta['revision'] as int,
       settings: WarningSettings.fromJson(
@@ -492,14 +572,7 @@ class SqliteInventoryStorage implements InventoryStorage {
           ),
       },
       receipts: receipts.map((r) => r['request_id'] as String).toSet(),
-      events: events
-          .map(
-            (r) => {
-              ...jsonDecode(r['detail'] as String) as Map<String, dynamic>,
-              'undone': r['undone'] == 1,
-            },
-          )
-          .toList(),
+      events: events,
       soldValue: meta['sold_value'] as int,
       unknownSold: meta['unknown_sold'] as int,
     );
