@@ -105,11 +105,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
     final quality = frame.quality.clamp(0, 1).toDouble();
     final observed = <String>{};
 
-    // Raw OCR reading order and spatial OCR reading order are separate evidence
-    // channels. Merging them into one Set can destroy sequence-local adjacency,
-    // create false adjacency at the channel boundary and discard a repeated
-    // physical line. Process each bounded sequence independently, then
-    // de-duplicate role/date evidence per physical frame through [observed].
     for (final orderedLines in _dateLineStreams(frame)) {
       for (var index = 0; index < orderedLines.length; index++) {
         final line = orderedLines[index];
@@ -119,12 +114,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
         for (final match in matches.take(6)) {
           var labelled = _nearestRole(match.start, match.end, labels);
 
-          // A line break in OCR must not destroy a label/value association. A
-          // clean label-only line immediately above the date remains strongest.
-          // A clean label-only line immediately below is also accepted when it
-          // cannot instead be the heading for another standalone date. This
-          // covers common foil/carton layouts while refusing ambiguous
-          // date -> label -> date sandwiches.
           if (labelled == null &&
               labels.isEmpty &&
               matches.length == 1 &&
@@ -146,8 +135,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
 
           final role = labelled?.$1 ?? MedicineDateRole.unknown;
           if (labelled != null && role == MedicineDateRole.unknown) continue;
-          // Bare compact digits are indistinguishable from lot/serial identifiers.
-          // They need a date label (inline/adjacent or supplied by spatial OCR).
           if (match.compact && labelled == null) continue;
           if (!observed.add('${role.name}|${match.date.value}')) continue;
           final distance = labelled?.$2 ?? 999;
@@ -191,14 +178,13 @@ MedicineDateResolution inferMedicineDateIntelligence({
               item.role == role && item.explicitLabel && item.confidence >= .84,
         )) {
           final start = item.date.start, end = item.date.end;
-          if (latestStart == null || start.isAfter(latestStart))
+          if (latestStart == null || start.isAfter(latestStart)) {
             latestStart = start;
-          if (earliestEnd == null || end.isBefore(earliestEnd))
+          }
+          if (earliestEnd == null || end.isBefore(earliestEnd)) {
             earliestEnd = end;
+          }
         }
-        // Printed month precision and a GS1 full day in that same month agree.
-        // Require a common calendar interval, not identical formatted strings.
-        // Two different full days still conflict even alongside a broad month.
         return latestStart != null && latestStart.isAfter(earliestEnd!);
       });
   var conflicted = labelConflict;
@@ -248,8 +234,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
       if (!earlier.date.start.isAfter(today.add(const Duration(days: 31)))) {
         score += .035;
       }
-      // Future expiry is useful evidence, but an already-expired later date is
-      // still completely valid and therefore only receives less bonus, no veto.
       score += later.date.end.isAfter(today) ? .045 : .015;
       score += min(.035, (earlier.support + later.support - 2) * .012);
       pairs.add(_DatePair(earlier, later, score.clamp(0, .99).toDouble()));
@@ -286,8 +270,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
     }
   }
 
-  // A future date is only a review hint. A missing label or OCR error does not
-  // prove EXP; this must stay below the .78 field-application threshold.
   if (expiry == null && unique.length == 1) {
     final only = unique.single;
     final future = only.date.end.isAfter(today);
@@ -308,8 +290,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
     if (gap < 21 || gap > 8 * 366) conflicted = true;
   }
 
-  // Preserve an explicitly printed future MFG as MFG, but require review of the
-  // pack/clock. Never silently rename it EXP because it lies in the future.
   if (manufacturing != null && manufacturing.date.start.isAfter(today)) {
     conflicted = true;
   }
@@ -346,11 +326,31 @@ List<List<String>> _dateLineStreams(MedicineFrameEvidence frame) {
       .toList(growable: false);
 
   final raw = clean(frame.text.split(RegExp(r'[\r\n]+')));
-  final layout = clean(frame.layoutLines.map((line) => line.text));
+  final layoutEvidence = frame.layoutLines.take(120).toList(growable: false)
+    ..sort(_compareDateLayoutReadingOrder);
+  final layout = clean(layoutEvidence.map((line) => line.text));
   return <List<String>>[
     if (raw.isNotEmpty) raw,
     if (layout.isNotEmpty) layout,
   ];
+}
+
+int _compareDateLayoutReadingOrder(
+  MedicineTextLineEvidence left,
+  MedicineTextLineEvidence right,
+) {
+  final leftCenterY = left.top + left.height / 2;
+  final rightCenterY = right.top + right.height / 2;
+  final rowTolerance = max(3.0, min(left.height, right.height) * .65);
+  if ((leftCenterY - rightCenterY).abs() > rowTolerance) {
+    final vertical = left.top.compareTo(right.top);
+    if (vertical != 0) return vertical;
+  }
+  final horizontal = left.left.compareTo(right.left);
+  if (horizontal != 0) return horizontal;
+  final vertical = left.top.compareTo(right.top);
+  if (vertical != 0) return vertical;
+  return left.text.compareTo(right.text);
 }
 
 MedicineDateRole? _labelOnlyRole(String line) {
@@ -391,8 +391,6 @@ List<(MedicineDateRole, int, int)> _dateLabels(String line) {
   List<(MedicineDateRole, int, int)> labels,
 ) {
   (MedicineDateRole, int)? best;
-  // Preceding field labels delimit the value. A following EXP must not steal
-  // the MFG value just because its text happens to be a few characters closer.
   final preceding = labels.where((label) => label.$3 <= start).lastOrNull;
   if (preceding != null) {
     final distance = start - preceding.$3;
