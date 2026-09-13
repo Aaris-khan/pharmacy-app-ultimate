@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../domain/import_text_guard.dart';
+import '../domain/medicine_understanding.dart';
 import '../services/backup_service.dart';
 import '../services/media_import_service.dart';
 import '../services/medicine_intake_service.dart';
@@ -16,6 +17,8 @@ import 'medicine_capture.dart';
 import 'medicine_intake_panel.dart';
 import 'medicine_review_screen.dart';
 import 'scanner_screen.dart';
+
+export 'medicine_review_legacy_entry.dart';
 
 class ImportCenterScreen extends StatefulWidget {
   const ImportCenterScreen({super.key, required this.controller});
