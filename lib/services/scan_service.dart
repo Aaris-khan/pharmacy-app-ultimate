@@ -97,13 +97,14 @@ class MedicineVisionService {
               : 'Medicine recognition is temporarily unavailable.',
         );
       }
+
       final lines = mergeMedicineOcrLines([
         if (latin is RecognizedText)
           ...(latin as RecognizedText).text.split('\n'),
         if (hindi is RecognizedText)
           ...(hindi as RecognizedText).text.split('\n'),
       ]);
-      final layout = _mergeLayoutLines([
+      final layoutLines = _mergeLayoutLines([
         if (latin is RecognizedText)
           ..._layoutEvidence(latin as RecognizedText),
         if (hindi is RecognizedText)
@@ -117,22 +118,19 @@ class MedicineVisionService {
             )
           : const <String>[];
 
-      // Physical image quality remains the majority signal. ML Kit line
-      // confidence is a bounded second opinion that helps downstream fusion rank
-      // equally sharp views. Missing confidence preserves historical behavior.
-      final evidenceQuality = confidenceAwareMedicineEvidenceQuality(
-        captureQuality: measuredQuality,
-        ocrConfidence: layout.ocrConfidence,
-      );
+      // Keep physical camera quality semantically pure. Detector confidence is
+      // used only to choose among duplicate OCR layout lines. Downstream capture,
+      // date and evidence-graph logic therefore continues to read `quality` as
+      // focus/contrast/exposure, never as a model correctness probability.
       return ScanEvidence(
         barcode: barcodes.isEmpty ? '' : barcodes.first,
         barcodes: barcodes,
-        layoutLines: layout.lines,
+        layoutLines: layoutLines,
         text: lines.join('\n'),
         source: source,
         sequence: sequence,
         timestampMs: timestampMs,
-        quality: evidenceQuality,
+        quality: measuredQuality,
       );
     } finally {
       _inFlight--;
@@ -190,23 +188,12 @@ class _OcrLayoutLine {
   final double? confidence;
 }
 
-class _MergedOcrLayout {
-  const _MergedOcrLayout({required this.lines, required this.ocrConfidence});
-
-  final List<MedicineTextLineEvidence> lines;
-  final double? ocrConfidence;
-}
-
 Iterable<_OcrLayoutLine> _layoutEvidence(RecognizedText result) sync* {
   for (final block in result.blocks) {
     for (final line in block.lines) {
       final text = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
       final box = line.boundingBox;
       if (text.isEmpty || box.width <= 0 || box.height <= 0) continue;
-      final rawConfidence = line.confidence;
-      final confidence = rawConfidence != null && rawConfidence.isFinite
-          ? rawConfidence.clamp(0.0, 1.0).toDouble()
-          : null;
       yield _OcrLayoutLine(
         evidence: MedicineTextLineEvidence(
           text: text,
@@ -215,16 +202,17 @@ Iterable<_OcrLayoutLine> _layoutEvidence(RecognizedText result) sync* {
           width: box.width,
           height: box.height,
         ),
-        confidence: confidence,
+        // ML Kit may use zero as an unavailable-confidence sentinel. The domain
+        // helper converts it to null so older detector paths remain neutral.
+        confidence: usableMedicineOcrConfidence(line.confidence),
       );
     }
   }
 }
 
-List<MedicineTextLineEvidence> _plainLines(Iterable<_OcrLayoutLine> values) =>
-    values.map((value) => value.evidence).toList(growable: false);
-
-_MergedOcrLayout _mergeLayoutLines(Iterable<_OcrLayoutLine> raw) {
+List<MedicineTextLineEvidence> _mergeLayoutLines(
+  Iterable<_OcrLayoutLine> raw,
+) {
   final values = <_OcrLayoutLine>[];
   final positions = <String, int>{};
   for (final item in raw.take(500)) {
@@ -241,18 +229,10 @@ _MergedOcrLayout _mergeLayoutLines(Iterable<_OcrLayoutLine> raw) {
       values[existing] = item;
     }
   }
-  final bounded = values.take(240).toList(growable: false);
-  return _MergedOcrLayout(
-    lines: _plainLines(bounded),
-    ocrConfidence: robustMedicineOcrConfidence(
-      bounded.map(
-        (item) => MedicineOcrConfidenceSample(
-          text: item.evidence.text,
-          confidence: item.confidence,
-        ),
-      ),
-    ),
-  );
+  return values
+      .take(240)
+      .map((value) => value.evidence)
+      .toList(growable: false);
 }
 
 double _layoutPreference(_OcrLayoutLine item) {

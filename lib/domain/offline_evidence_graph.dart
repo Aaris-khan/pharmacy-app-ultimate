@@ -1,16 +1,17 @@
 import 'dart:math';
 
 import 'medicine_understanding.dart';
+import 'regulatory_medicine_code.dart';
 import 'search.dart';
 
-/// A bounded correlation graph over OCR frames.
+/// A bounded correlation graph over OCR/barcode frames.
 ///
 /// Adjacent video frames are often almost the same observation. Counting each
 /// frame as independent evidence makes long videos look more certain than one
-/// good photograph. This graph connects near-duplicate text observations and
-/// exposes one best representative per connected component. Downstream product
-/// reasoning can then reward genuinely different views without rewarding frame
-/// count itself.
+/// good photograph. This graph connects near-duplicate observations and exposes
+/// one best representative per connected component. Machine-readable medicine
+/// identifiers are first-class evidence, but a shared GTIN proves only product
+/// identity — not that two different pack sides are the same visual observation.
 class OfflineEvidenceGroup {
   const OfflineEvidenceGroup({
     required this.representative,
@@ -46,8 +47,8 @@ OfflineEvidenceGraph buildOfflineEvidenceGraph(
   int maxFrames = 12,
 }) {
   final frames = source
+      .where(_hasGraphEvidence)
       .take(max(1, maxFrames))
-      .where((frame) => searchText(frame.text).isNotEmpty)
       .toList(growable: false);
   if (frames.isEmpty) {
     return const OfflineEvidenceGraph(
@@ -79,7 +80,7 @@ OfflineEvidenceGraph buildOfflineEvidenceGraph(
   // deterministic.
   for (var left = 0; left < frames.length; left++) {
     for (var right = left + 1; right < frames.length; right++) {
-      if (_frameCorrelation(signatures[left], signatures[right]) >= .74) {
+      if (_frameCorrelation(signatures[left], signatures[right]) >= .82) {
         union(left, right);
       }
     }
@@ -126,8 +127,16 @@ OfflineEvidenceGraph buildOfflineEvidenceGraph(
   );
 }
 
+bool _hasGraphEvidence(MedicineFrameEvidence frame) =>
+    searchText(frame.text).isNotEmpty || frame.allBarcodes.isNotEmpty;
+
 class _FrameSignature {
-  const _FrameSignature(this.tokens, this.trigrams, this.richness);
+  const _FrameSignature(
+    this.tokens,
+    this.trigrams,
+    this.richness,
+    this.machine,
+  );
 
   factory _FrameSignature.fromFrame(MedicineFrameEvidence frame) {
     final normalized = searchText(frame.text);
@@ -146,24 +155,121 @@ class _FrameSignature {
       trigrams.add(compact.substring(index, index + 3));
     }
     final richness = (tokens.length / 24).clamp(0, 1).toDouble();
-    return _FrameSignature(tokens, trigrams, richness);
+    return _FrameSignature(
+      tokens,
+      trigrams,
+      richness,
+      _MachineAnchor.fromFrame(frame),
+    );
   }
 
   final Set<String> tokens;
   final Set<String> trigrams;
   final double richness;
+  final _MachineAnchor machine;
+
+  bool get hasText => tokens.isNotEmpty || trigrams.isNotEmpty;
+}
+
+class _MachineAnchor {
+  const _MachineAnchor({
+    required this.gtins,
+    required this.lots,
+    required this.serials,
+  });
+
+  factory _MachineAnchor.fromFrame(MedicineFrameEvidence frame) {
+    final gtins = <String>{};
+    final lots = <String>{};
+    final serials = <String>{};
+    for (final raw in frame.allBarcodes.take(8)) {
+      final structured = parseRegulatoryMedicineCode(raw);
+      if (structured != null) {
+        if (structured.gtin.isNotEmpty) gtins.add(structured.gtin);
+        final lot = searchText(structured.batchLot);
+        if (lot.isNotEmpty) lots.add(lot);
+        final serial = searchText(structured.serial);
+        if (serial.isNotEmpty) serials.add(serial);
+      }
+      final plain = _canonicalPlainGtin(raw);
+      if (plain.isNotEmpty) gtins.add(plain);
+    }
+    return _MachineAnchor(gtins: gtins, lots: lots, serials: serials);
+  }
+
+  final Set<String> gtins;
+  final Set<String> lots;
+  final Set<String> serials;
+
+  bool get hasTrustedProductId => gtins.isNotEmpty;
 }
 
 double _frameUtility(MedicineFrameEvidence frame, _FrameSignature signature) {
   final quality = frame.quality.clamp(0, 1).toDouble();
-  return quality * .72 + signature.richness * .28;
+  final machineBonus = signature.machine.hasTrustedProductId ? .10 : 0.0;
+  return (quality * .60 + signature.richness * .30 + machineBonus)
+      .clamp(0, 1)
+      .toDouble();
 }
 
 double _frameCorrelation(_FrameSignature left, _FrameSignature right) {
+  final leftMachine = left.machine;
+  final rightMachine = right.machine;
+
+  // Two independently checksum/GS1-validated product identifiers that disagree
+  // are a hard anti-correlation boundary. Similar box artwork cannot merge two
+  // different medicines into one evidence component.
+  if (leftMachine.gtins.isNotEmpty && rightMachine.gtins.isNotEmpty) {
+    final shared = leftMachine.gtins.intersection(rightMachine.gtins);
+    if (shared.isEmpty) return 0;
+
+    // A shared product may still be a different physical lot/serial. Preserve
+    // that contradiction instead of hiding it behind near-identical packaging.
+    if (_explicitAnchorConflict(leftMachine.lots, rightMachine.lots) ||
+        _explicitAnchorConflict(leftMachine.serials, rightMachine.serials)) {
+      return 0;
+    }
+  }
+
   final tokenSimilarity = _jaccard(left.tokens, right.tokens);
   final trigramSimilarity = _jaccard(left.trigrams, right.trigrams);
-  // Tokens are robust to spacing; trigrams recover small tokenization drift.
-  return max(tokenSimilarity, trigramSimilarity * .96);
+  final visualTextSimilarity = max(tokenSimilarity, trigramSimilarity * .96);
+
+  if (leftMachine.gtins.isNotEmpty && rightMachine.gtins.isNotEmpty) {
+    // Same GTIN plus no OCR on either frame is a repeated barcode observation.
+    if (!left.hasText && !right.hasText) return .99;
+    // Same GTIN is not sufficient to collapse front/back complementary views.
+    // It only strengthens an already-similar visual observation.
+    if (visualTextSimilarity >= .52) {
+      return max(.90, visualTextSimilarity);
+    }
+  }
+  return visualTextSimilarity;
+}
+
+bool _explicitAnchorConflict(Set<String> left, Set<String> right) =>
+    left.isNotEmpty && right.isNotEmpty && left.intersection(right).isEmpty;
+
+String _canonicalPlainGtin(String raw) {
+  final value = raw.trim();
+  if (!RegExp(r'^\d+$').hasMatch(value) ||
+      !const {8, 12, 13, 14}.contains(value.length) ||
+      !_validGtin(value)) {
+    return '';
+  }
+  return value.padLeft(14, '0');
+}
+
+bool _validGtin(String digits) {
+  var sum = 0;
+  for (
+    var index = digits.length - 2, position = 1;
+    index >= 0;
+    index--, position++
+  ) {
+    sum += int.parse(digits[index]) * (position.isOdd ? 3 : 1);
+  }
+  return (10 - sum % 10) % 10 == int.parse(digits[digits.length - 1]);
 }
 
 double _jaccard(Set<String> left, Set<String> right) {

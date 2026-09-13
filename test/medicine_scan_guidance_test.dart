@@ -12,6 +12,7 @@ MedicineScanDraft _draft({
   String strength = '650 mg',
   String form = 'Tablet',
   String expiry = '2027-10',
+  String batch = '',
   String barcode = '',
   double overall = .91,
 }) => MedicineScanDraft(
@@ -21,13 +22,25 @@ MedicineScanDraft _draft({
     if (strength.isNotEmpty) 'strength': _field(strength),
     if (form.isNotEmpty) 'form': _field(form),
     if (expiry.isNotEmpty) 'expiry': _field(expiry),
+    if (batch.isNotEmpty) 'batchNumber': _field(batch),
     if (barcode.isNotEmpty) 'barcode': _field(barcode),
   },
-  rawText: '$brand\n$salt $strength\n$form\nEXP $expiry',
+  rawText: '$brand\n$salt $strength\n$form\nEXP $expiry\nBATCH $batch',
   searchKeywords: '',
   frameSequences: const [0],
   expiryMonthOnly: expiry.length == 7,
   overallConfidence: overall,
+);
+
+MedicineFrameEvidence _frame(
+  String barcode, {
+  int sequence = 0,
+  String text = 'medicine pack',
+}) => MedicineFrameEvidence(
+  text: text,
+  barcode: barcode,
+  sequence: sequence,
+  quality: .8,
 );
 
 void main() {
@@ -75,8 +88,8 @@ void main() {
     expect(guidance.message, contains('Move closer'));
   });
 
-  test('verified GTIN can move to review without invented OCR identity', () {
-    final guidance = nextBestMedicineScanGuidance(
+  test('identity-only GTIN asks once for physical lot evidence', () {
+    final first = nextBestMedicineScanGuidance(
       _draft(
         brand: '',
         salt: '',
@@ -88,7 +101,96 @@ void main() {
       ),
       captureAttempts: 1,
     );
+    expect(first.readyForAutomaticHandoff, isFalse);
+    expect(first.focus, MedicineScanFocus.lotDetails);
+    expect(first.message, contains('Batch'));
+
+    final second = nextBestMedicineScanGuidance(
+      _draft(
+        brand: '',
+        salt: '',
+        strength: '',
+        form: '',
+        expiry: '',
+        barcode: '09504000059118',
+        overall: .4,
+      ),
+      captureAttempts: 2,
+    );
+    expect(second.readyForAutomaticHandoff, isTrue);
+    expect(second.focus, MedicineScanFocus.ready);
+  });
+
+  test('GTIN plus trusted batch and expiry can hand off immediately', () {
+    final guidance = nextBestMedicineScanGuidance(
+      _draft(
+        brand: '',
+        salt: '',
+        strength: '',
+        form: '',
+        expiry: '2027-10',
+        batch: 'LOT7',
+        barcode: '09504000059118',
+        overall: .4,
+      ),
+      captureAttempts: 1,
+    );
     expect(guidance.readyForAutomaticHandoff, isTrue);
     expect(guidance.focus, MedicineScanFocus.ready);
+  });
+
+  test('different trusted GTIN starts a fresh single-pack window', () {
+    final window = mergeSinglePackMedicineEvidence(
+      [_frame('09504000059118', sequence: 1)],
+      _frame('09501101530003', sequence: 2),
+    );
+    expect(window.startedNewPack, isTrue);
+    expect(window.frames, hasLength(1));
+    expect(window.frames.single.barcode, '09501101530003');
+  });
+
+  test('same GTIN with a different explicit lot starts a fresh window', () {
+    final window = mergeSinglePackMedicineEvidence(
+      [
+        _frame(
+          '(01)09504000059118(17)271031(10)LOT7',
+          sequence: 1,
+        ),
+      ],
+      _frame(
+        '(01)09504000059118(17)271031(10)LOT8',
+        sequence: 2,
+      ),
+    );
+    expect(window.startedNewPack, isTrue);
+    expect(window.frames, hasLength(1));
+  });
+
+  test('same GTIN and lot keeps complementary evidence', () {
+    final window = mergeSinglePackMedicineEvidence(
+      [
+        _frame(
+          '(01)09504000059118(17)271031(10)LOT7',
+          sequence: 1,
+          text: 'front name',
+        ),
+      ],
+      _frame(
+        '(01)09504000059118(17)271031(10)LOT7',
+        sequence: 2,
+        text: 'composition side',
+      ),
+    );
+    expect(window.startedNewPack, isFalse);
+    expect(window.frames, hasLength(2));
+  });
+
+  test('untrusted barcode noise cannot force a pack reset', () {
+    final window = mergeSinglePackMedicineEvidence(
+      [_frame('09504000059118', sequence: 1)],
+      _frame('PROMO-QR-NOT-GTIN', sequence: 2),
+    );
+    expect(window.startedNewPack, isFalse);
+    expect(window.frames, hasLength(2));
   });
 }

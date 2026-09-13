@@ -258,9 +258,17 @@ class _ScannerScreenState extends State<ScannerScreen>
               ? 'Try a closer, steadier photo with even light.'
               : '');
       if (result.text.isNotEmpty || result.barcode.isNotEmpty) {
-        final evidence = <ScanEvidence>[..._evidence, result];
-        if (evidence.length > 18) {
-          evidence.removeRange(0, evidence.length - 18);
+        final window = mergeSinglePackMedicineEvidence(
+          _evidence,
+          result,
+          maxFrames: 18,
+        );
+        final evidence = window.frames;
+        if (window.startedNewPack) {
+          // Live preview can cross from one medicine to another before a still is
+          // taken. Restart the bounded recapture budget with the new trusted pack
+          // instead of letting attempts from the old medicine force early review.
+          _captureAttempts = _capturing ? 1 : 0;
         }
         final payload = await compute(
           // Keep live preview on the same evidence-safety pipeline as photo,

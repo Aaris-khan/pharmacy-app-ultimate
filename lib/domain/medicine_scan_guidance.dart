@@ -1,24 +1,20 @@
 import 'medicine_scan_commit.dart';
 import 'medicine_understanding.dart';
 import 'regulatory_medicine_code.dart';
+import 'search.dart';
 
 enum MedicineScanFocus {
   ready,
   imageQuality,
-  frontIdentity,
+  medicineIdentity,
   composition,
   strength,
   dosageForm,
-  machineCode,
   lotDetails,
+  machineCode,
   review,
 }
 
-/// A small active-perception decision: either hand the evidence to review or
-/// request the single next view most likely to remove uncertainty.
-///
-/// This never authorizes persistence. Existing review/commit gates remain the
-/// only stock-writing authority.
 class MedicineScanGuidance {
   const MedicineScanGuidance({
     required this.focus,
@@ -31,153 +27,268 @@ class MedicineScanGuidance {
   final bool readyForAutomaticHandoff;
 }
 
+class MedicineScanEvidenceWindow {
+  const MedicineScanEvidenceWindow({
+    required this.frames,
+    required this.startedNewPack,
+  });
+
+  final List<MedicineFrameEvidence> frames;
+  final bool startedNewPack;
+}
+
+/// Maintains the evidence window for the explicit "scan one pack" camera lane.
+///
+/// A validated machine identifier is a safe session-boundary signal. If a new
+/// frame proves that the camera is now looking at a different GTIN, or at an
+/// explicitly different lot/serial of the same product, old OCR is retired
+/// instead of being allowed to contaminate the new pack. Frames without a trusted
+/// machine anchor cannot force a reset; ambiguity remains review-only.
+MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
+  Iterable<MedicineFrameEvidence> existing,
+  MedicineFrameEvidence incoming, {
+  int maxFrames = 18,
+}) {
+  final prior = existing.take(maxFrames).toList(growable: false);
+  final incomingAnchor = _machineAnchor(incoming);
+  _ScanMachineAnchor? currentAnchor;
+  for (final frame in prior.reversed) {
+    final candidate = _machineAnchor(frame);
+    if (candidate.gtin.isNotEmpty) {
+      currentAnchor = candidate;
+      break;
+    }
+  }
+
+  final switched = currentAnchor != null &&
+      incomingAnchor.gtin.isNotEmpty &&
+      _differentPhysicalPack(currentAnchor, incomingAnchor);
+  if (switched) {
+    return MedicineScanEvidenceWindow(
+      frames: List<MedicineFrameEvidence>.unmodifiable([incoming]),
+      startedNewPack: true,
+    );
+  }
+
+  final values = <MedicineFrameEvidence>[...prior, incoming];
+  if (values.length > maxFrames) {
+    values.removeRange(0, values.length - maxFrames);
+  }
+  return MedicineScanEvidenceWindow(
+    frames: List<MedicineFrameEvidence>.unmodifiable(values),
+    startedNewPack: false,
+  );
+}
+
+/// Chooses the highest-value next observation for a one-pack camera session.
+///
+/// This is active perception, not another medicine classifier. It never fills a
+/// field and never authorizes an inventory write. It only decides whether the
+/// current evidence is sufficient to move to the normal review pipeline or what
+/// physical pack region would reduce uncertainty most. At most one targeted
+/// follow-up still is requested; after that Aaris fails closed to review.
 MedicineScanGuidance nextBestMedicineScanGuidance(
   MedicineScanDraft? draft, {
-  double evidenceQuality = .65,
+  double evidenceQuality = 1,
   String physicalGuidance = '',
   int captureAttempts = 0,
 }) {
-  final quality = evidenceQuality.isFinite
-      ? evidenceQuality.clamp(0.0, 1.0).toDouble()
-      : .65;
-  final physical = physicalGuidance.trim();
-
   if (draft == null) {
-    return MedicineScanGuidance(
-      focus: physical.isNotEmpty
-          ? MedicineScanFocus.imageQuality
-          : MedicineScanFocus.frontIdentity,
-      message: physical.isNotEmpty
-          ? physical
-          : 'Show the medicine name or barcode clearly.',
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.medicineIdentity,
+      message: 'Show the medicine name or barcode clearly.',
       readyForAutomaticHandoff: false,
     );
   }
 
-  // A checksum-valid GTIN or structured GS1 carrier is strong enough to move
-  // into the review pipeline, where local/master identity knowledge can resolve
-  // the product. It is never proof of authenticity and never bypasses review.
-  if (_trustedMachineReadableIdentity(draft.barcode)) {
+  // Physical focus/lighting is an independent channel. Fix it before asking a
+  // semantic question because another view of the same blurry label adds little
+  // information. MedicineFrameEvidence.quality is intentionally physical only.
+  if (physicalGuidance.trim().isNotEmpty && evidenceQuality < .48) {
+    return MedicineScanGuidance(
+      focus: MedicineScanFocus.imageQuality,
+      message: physicalGuidance.trim(),
+      readyForAutomaticHandoff: false,
+    );
+  }
+
+  final machineIdentity = _trustedMachineReadableIdentity(draft.barcode);
+  if (machineIdentity) {
+    final trustedBatch = _trustedField(draft, 'batchNumber', .82);
+    final trustedExpiry = _trustedField(draft, 'expiry', .78);
+
+    // A checksum/GS1-valid GTIN is authoritative product identity, but stock is
+    // lot-aware. Give the first deliberate still one chance to collect Batch +
+    // EXP instead of ending the session at product identity alone. After the
+    // bounded second still, hand off to review rather than trapping the user.
+    if (captureAttempts < 2 && (!trustedBatch || !trustedExpiry)) {
+      return const MedicineScanGuidance(
+        focus: MedicineScanFocus.lotDetails,
+        message: 'Product found. Now show Batch/Lot and EXP clearly.',
+        readyForAutomaticHandoff: false,
+      );
+    }
     return const MedicineScanGuidance(
       focus: MedicineScanFocus.ready,
-      message: 'Medicine code captured. Ready to review.',
+      message: 'Medicine code captured. Review the details.',
       readyForAutomaticHandoff: true,
     );
   }
 
-  // Physical readability problems outrank semantic requests on the first try:
-  // asking for a composition side while the frame is blurred/glared is not useful.
-  if ((physical.isNotEmpty && quality < .58) || quality < .30) {
-    if (captureAttempts >= 2) {
-      return const MedicineScanGuidance(
-        focus: MedicineScanFocus.review,
-        message: 'Some details are still unclear. Continue and confirm them in review.',
-        readyForAutomaticHandoff: true,
-      );
-    }
+  // One targeted recapture is the maximum. A camera loop must never hold the
+  // pharmacist hostage trying to manufacture certainty from missing evidence.
+  if (captureAttempts >= 2) {
     return MedicineScanGuidance(
-      focus: MedicineScanFocus.imageQuality,
-      message: physical.isNotEmpty
-          ? physical
-          : 'Move closer, hold steady and use even light.',
+      focus: MedicineScanFocus.review,
+      message: draft.overallConfidence >= .78
+          ? 'Review the captured details before saving.'
+          : 'Some details are still uncertain. Review them before saving.',
+      readyForAutomaticHandoff: true,
+    );
+  }
+
+  final salt = draft.field('salt');
+  if (_weakOrConflicted(salt, .78)) {
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.composition,
+      message: 'Show the Composition / Each tablet contains side clearly.',
+      readyForAutomaticHandoff: false,
+    );
+  }
+
+  final strength = draft.field('strength');
+  if (_weakOrConflicted(strength, .78)) {
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.strength,
+      message: 'Show the printed strength, for example 500 mg or 5 mg/ml.',
       readyForAutomaticHandoff: false,
     );
   }
 
   final brand = draft.field('brand');
   final name = draft.field('name');
-  final salt = draft.field('salt');
-  final strength = draft.field('strength');
-  final form = draft.field('form');
-  final expiry = draft.field('expiry');
-
-  bool weak(ExtractedMedicineField field, {double minimum = .78}) =>
-      field.value.trim().isEmpty ||
-      field.conflicted ||
-      field.confidence < minimum;
-
-  MedicineScanGuidance ask(MedicineScanFocus focus, String message) {
-    // Two deliberate still captures are a bounded acquisition budget. After
-    // that, move to the existing fail-closed review instead of trapping the user
-    // in an endless scanning loop or guessing a missing medicine fact.
-    if (captureAttempts >= 2) {
-      return const MedicineScanGuidance(
-        focus: MedicineScanFocus.review,
-        message: 'Some details still need checking. Continue to review.',
-        readyForAutomaticHandoff: true,
-      );
-    }
-    return MedicineScanGuidance(
-      focus: focus,
-      message: message,
+  if (_weakOrConflicted(brand, .78) && _weakOrConflicted(name, .78)) {
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.medicineIdentity,
+      message: 'Show the front side with the medicine or brand name.',
       readyForAutomaticHandoff: false,
     );
   }
 
-  if (weak(brand) && weak(name)) {
-    return ask(
-      MedicineScanFocus.frontIdentity,
-      'Show the front with the medicine name clearly.',
-    );
-  }
-  if (weak(salt)) {
-    return ask(
-      MedicineScanFocus.composition,
-      salt.conflicted
-          ? 'Show the composition/salt side clearly to resolve the conflict.'
-          : 'Show the composition or salt side.',
-    );
-  }
-  if (weak(strength)) {
-    return ask(
-      MedicineScanFocus.strength,
-      strength.conflicted
-          ? 'Show the printed strength (mg/ml) clearly to resolve the conflict.'
-          : 'Show the printed strength (mg/ml) clearly.',
-    );
-  }
-  if (weak(form) || confirmedScanForm(draft).isEmpty) {
-    return ask(
-      MedicineScanFocus.dosageForm,
-      'Show where Tablet, Capsule, Syrup or the dosage form is printed.',
+  final form = draft.field('form');
+  if (_weakOrConflicted(form, .78)) {
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.dosageForm,
+      message: 'Show where Tablet, Capsule, Syrup, Injection or form is printed.',
+      readyForAutomaticHandoff: false,
     );
   }
 
   final identityIssue = scanQuickIdentityIssue(draft);
   if (identityIssue.isNotEmpty) {
-    return ask(
-      MedicineScanFocus.machineCode,
-      'Show the barcode/QR/DataMatrix, or another clear identity side.',
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.machineCode,
+      message: 'Show the barcode/DataMatrix or another clear identity side.',
+      readyForAutomaticHandoff: false,
     );
   }
 
-  // Expiry is not required to identify a product, but it is high-value pharmacy
-  // stock evidence. Spend at most one extra still trying to capture it; review
-  // remains available immediately through the existing Use scan action.
-  if (weak(expiry) && captureAttempts < 2) {
+  final mfg = draft.field('mfg');
+  final expiry = draft.field('expiry');
+  final batch = draft.field('batchNumber');
+  if (mfg.conflicted || expiry.conflicted || batch.conflicted) {
     return const MedicineScanGuidance(
       focus: MedicineScanFocus.lotDetails,
-      message: 'For better stock tracking, show the Batch + EXP side.',
+      message: 'Show Batch/Lot, MFG and EXP together in one clear view.',
+      readyForAutomaticHandoff: false,
+    );
+  }
+
+  // Expiry is especially valuable for pharmacy stock lifecycle. It is optional
+  // for manual editing, but a first camera still should actively seek it before
+  // an automatic handoff when the rest of identity is already coherent.
+  if (!_trustedField(draft, 'expiry', .78)) {
+    return const MedicineScanGuidance(
+      focus: MedicineScanFocus.lotDetails,
+      message: 'Show the EXP/Expiry date clearly.',
       readyForAutomaticHandoff: false,
     );
   }
 
   return const MedicineScanGuidance(
     focus: MedicineScanFocus.ready,
-    message: 'Medicine details are clear. Ready to review.',
+    message: 'Details captured. Continue to review.',
     readyForAutomaticHandoff: true,
   );
 }
 
-bool _trustedMachineReadableIdentity(String raw) {
+bool _weakOrConflicted(ExtractedMedicineField field, double minimum) =>
+    field.value.trim().isEmpty || field.conflicted || field.confidence < minimum;
+
+bool _trustedField(MedicineScanDraft draft, String key, double minimum) {
+  final field = draft.field(key);
+  return field.value.trim().isNotEmpty &&
+      !field.conflicted &&
+      field.confidence >= minimum;
+}
+
+bool _trustedMachineReadableIdentity(String raw) =>
+    _canonicalTrustedGtin(raw).isNotEmpty;
+
+class _ScanMachineAnchor {
+  const _ScanMachineAnchor({
+    required this.gtin,
+    required this.lot,
+    required this.serial,
+  });
+
+  final String gtin;
+  final String lot;
+  final String serial;
+}
+
+_ScanMachineAnchor _machineAnchor(MedicineFrameEvidence frame) {
+  var gtin = '';
+  var lot = '';
+  var serial = '';
+  for (final raw in frame.allBarcodes.take(8)) {
+    final structured = parseRegulatoryMedicineCode(raw);
+    if (structured != null) {
+      if (gtin.isEmpty && structured.gtin.isNotEmpty) gtin = structured.gtin;
+      if (lot.isEmpty && structured.batchLot.isNotEmpty) {
+        lot = searchText(structured.batchLot);
+      }
+      if (serial.isEmpty && structured.serial.isNotEmpty) {
+        serial = searchText(structured.serial);
+      }
+    }
+    if (gtin.isEmpty) gtin = _canonicalTrustedGtin(raw);
+  }
+  return _ScanMachineAnchor(gtin: gtin, lot: lot, serial: serial);
+}
+
+bool _differentPhysicalPack(_ScanMachineAnchor left, _ScanMachineAnchor right) {
+  if (left.gtin != right.gtin) return true;
+  if (left.lot.isNotEmpty && right.lot.isNotEmpty && left.lot != right.lot) {
+    return true;
+  }
+  if (left.serial.isNotEmpty &&
+      right.serial.isNotEmpty &&
+      left.serial != right.serial) {
+    return true;
+  }
+  return false;
+}
+
+String _canonicalTrustedGtin(String raw) {
   final value = raw.trim();
-  if (value.isEmpty) return false;
+  if (value.isEmpty) return '';
   final structured = parseRegulatoryMedicineCode(value);
-  if (structured?.hasVerifiedProductIdentifier == true) return true;
+  if (structured != null && structured.gtin.isNotEmpty) return structured.gtin;
 
   final digits = value.replaceAll(RegExp(r'\D'), '');
   if (digits != value || !const {8, 12, 13, 14}.contains(digits.length)) {
-    return false;
+    return '';
   }
   var sum = 0;
   for (
@@ -187,5 +298,8 @@ bool _trustedMachineReadableIdentity(String raw) {
   ) {
     sum += int.parse(digits[index]) * (position.isOdd ? 3 : 1);
   }
-  return (10 - sum % 10) % 10 == int.parse(digits[digits.length - 1]);
+  if ((10 - sum % 10) % 10 != int.parse(digits[digits.length - 1])) {
+    return '';
+  }
+  return digits.padLeft(14, '0');
 }

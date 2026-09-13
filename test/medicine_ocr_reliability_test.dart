@@ -3,28 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/domain/medicine_ocr_reliability.dart';
 
 void main() {
-  test('missing OCR confidence preserves historical capture score', () {
-    expect(
-      confidenceAwareMedicineEvidenceQuality(
-        captureQuality: .63,
-        ocrConfidence: null,
-      ),
-      .63,
-    );
+  test('zero detector confidence is unavailable rather than bad OCR', () {
+    expect(usableMedicineOcrConfidence(0), isNull);
+    expect(usableMedicineOcrConfidence(0.0), isNull);
+    expect(usableMedicineOcrConfidence(null), isNull);
   });
 
-  test('detector confidence changes evidence weight conservatively', () {
-    final low = confidenceAwareMedicineEvidenceQuality(
-      captureQuality: .8,
-      ocrConfidence: .25,
-    );
-    final high = confidenceAwareMedicineEvidenceQuality(
-      captureQuality: .8,
-      ocrConfidence: .95,
-    );
-    expect(low, lessThan(.8));
-    expect(high, greaterThan(low));
-    expect(high, lessThanOrEqualTo(.85));
+  test('positive detector confidence is safely bounded', () {
+    expect(usableMedicineOcrConfidence(.73), .73);
+    expect(usableMedicineOcrConfidence(2), 1);
   });
 
   test('frame OCR confidence is bounded and duplicate-safe', () {
@@ -40,10 +27,19 @@ void main() {
     expect(score, lessThan(.92));
   });
 
-  test('unknown detector confidence stays unknown instead of becoming zero', () {
+  test('unavailable detector sentinel cannot drag robust score to zero', () {
+    final score = robustMedicineOcrConfidence(const [
+      MedicineOcrConfidenceSample(text: 'DOLO 650', confidence: 0),
+      MedicineOcrConfidenceSample(text: 'Paracetamol 650 mg', confidence: .88),
+    ]);
+    expect(score, .88);
+  });
+
+  test('all unavailable detector confidences remain unknown', () {
     expect(
       robustMedicineOcrConfidence(const [
         MedicineOcrConfidenceSample(text: 'DOLO 650', confidence: null),
+        MedicineOcrConfidenceSample(text: 'EXP 10/2027', confidence: 0),
       ]),
       isNull,
     );
