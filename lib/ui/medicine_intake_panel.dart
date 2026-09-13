@@ -7,9 +7,10 @@ import '../domain/medicine_intake.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
 import '../services/medicine_intake_service.dart';
+import '../services/medicine_review_pipeline.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
-import 'prepared_medicine_review_screen.dart';
+import 'medicine_review_screen.dart';
 
 class MedicineIntakePanel extends StatefulWidget {
   const MedicineIntakePanel({super.key, required this.controller, this.onAsk});
@@ -56,9 +57,11 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     final completed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => PreparedMedicineReviewScreen(
+        builder: (_) => MedicineReviewScreen(
           controller: widget.controller,
-          drafts: List<MedicineScanDraft>.of(job.drafts),
+          input: MedicineReviewInput.prepared(
+            List<MedicineScanDraft>.of(job.drafts),
+          ),
         ),
       ),
     );
@@ -102,54 +105,54 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   }
 
   Future<void> _retry(MedicineIntakeJob job) => _run(
-    () => job.canRescanVideo
-        ? queue.retry(job, rescanVideo: true)
-        : queue.retry(job),
-  );
+        () => job.canRescanVideo
+            ? queue.retry(job, rescanVideo: true)
+            : queue.retry(job),
+      );
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: queue,
-    builder: (context, _) {
-      if (!queue.supported || (queue.jobs.isEmpty && error.isEmpty)) {
-        return const SizedBox.shrink();
-      }
+        animation: queue,
+        builder: (context, _) {
+          if (!queue.supported || (queue.jobs.isEmpty && error.isEmpty)) {
+            return const SizedBox.shrink();
+          }
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 16),
-          const Text(
-            'Medicine preview',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'Your scan is read automatically. Check the details, then tap Next.',
-            style: TextStyle(color: muted, fontSize: 12, height: 1.35),
-          ),
-          if (queue.persistenceError.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Saved scan processing needs attention. Your medicine database was not changed.',
-              style: TextStyle(color: red, fontSize: 12),
-            ),
-          ],
-          if (error.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(error, style: const TextStyle(color: red, fontSize: 12)),
-          ],
-          const SizedBox(height: 8),
-          for (final job in queue.jobs.reversed.take(visible)) _jobCard(job),
-          if (queue.jobs.length > visible)
-            TextButton(
-              onPressed: () => setState(() => visible += 10),
-              child: const Text('Show more'),
-            ),
-        ],
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 16),
+              const Text(
+                'Medicine preview',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'Your scan is read automatically. Check the details, then tap Next.',
+                style: TextStyle(color: muted, fontSize: 12, height: 1.35),
+              ),
+              if (queue.persistenceError.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Saved scan processing needs attention. Your medicine database was not changed.',
+                  style: TextStyle(color: red, fontSize: 12),
+                ),
+              ],
+              if (error.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(error, style: const TextStyle(color: red, fontSize: 12)),
+              ],
+              const SizedBox(height: 8),
+              for (final job in queue.jobs.reversed.take(visible)) _jobCard(job),
+              if (queue.jobs.length > visible)
+                TextButton(
+                  onPressed: () => setState(() => visible += 10),
+                  child: const Text('Show more'),
+                ),
+            ],
+          );
+        },
       );
-    },
-  );
 
   Widget _jobCard(MedicineIntakeJob job) {
     final processing = !job.terminal;
@@ -205,8 +208,8 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                 value: job.status == 'reasoning' && job.drafts.isNotEmpty
                     ? job.aiIndex / job.drafts.length
                     : job.kind == 'video'
-                    ? job.videoProgress
-                    : null,
+                        ? job.videoProgress
+                        : null,
                 minHeight: 5,
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -232,14 +235,16 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
               OutlinedButton.icon(
                 onPressed: () => _retry(job),
                 icon: const Icon(Icons.refresh_rounded),
-                label: Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
+                label:
+                    Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
               ),
             ] else ...[
               if (preview != null) _draftCard(preview, 0),
               if (job.drafts.length > 1)
                 Container(
                   margin: const EdgeInsets.only(top: 2, bottom: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
                   decoration: BoxDecoration(
                     color: primary.withValues(alpha: .055),
                     borderRadius: BorderRadius.circular(12),
@@ -430,30 +435,30 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
       confirmedScanForm(draft).isEmpty;
 
   Widget _factRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 7),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 82,
-          child: Text(
-            label,
-            style: const TextStyle(color: muted, fontSize: 12.5),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: value == 'Not found' ? amber : ink,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w800,
+        padding: const EdgeInsets.only(bottom: 7),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 82,
+              child: Text(
+                label,
+                style: const TextStyle(color: muted, fontSize: 12.5),
+              ),
             ),
-          ),
+            Expanded(
+              child: Text(
+                value,
+                style: TextStyle(
+                  color: value == 'Not found' ? amber : ink,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Future<void> _dismiss(MedicineIntakeJob job) async {
     final confirmed = await showDialog<bool>(

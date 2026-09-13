@@ -9,89 +9,134 @@ import '../domain/medicine.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
 import '../domain/search.dart';
+import '../services/medicine_review_pipeline.dart';
 import '../services/offline_recognition_memory_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
 import 'editor_screen.dart';
 
-/// Simple, one-medicine-at-a-time review for durable photo/video intake.
+/// The one pharmacist-facing review surface for every medicine intake source.
 ///
-/// The intelligence underneath remains unchanged: Resolver V2 produced the
-/// draft, IntakeResolution owns duplicate/lot semantics and fuzzy search only
-/// nominates related inventory. This screen deliberately translates those
-/// layers into a small pharmacist-facing journey instead of exposing technical
-/// confidence/debug text.
-class PreparedMedicineReviewScreen extends StatefulWidget {
-  const PreparedMedicineReviewScreen({
+/// Camera, durable photo/video, rapid capture, text/file/paste and explicit
+/// cloud assistance all enter through MedicineReviewPipeline, then land here.
+/// Source-specific intelligence stays underneath; the visible journey is always
+/// one extracted medicine, one Next action and a ranked list of saved matches.
+class MedicineReviewScreen extends StatefulWidget {
+  const MedicineReviewScreen({
     super.key,
     required this.controller,
-    required this.drafts,
+    required this.input,
   });
 
   final PharmacyController controller;
-  final List<MedicineScanDraft> drafts;
+  final MedicineReviewInput input;
 
   @override
-  State<PreparedMedicineReviewScreen> createState() =>
-      _PreparedMedicineReviewScreenState();
+  State<MedicineReviewScreen> createState() => _MedicineReviewScreenState();
 }
 
-class _PreparedMedicineReviewScreenState
-    extends State<PreparedMedicineReviewScreen> {
+class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
+  late final MedicineReviewPipeline _pipeline;
+  List<PreparedMedicineReviewDraft> _drafts =
+      const <PreparedMedicineReviewDraft>[];
   int _index = 0;
-  int _generation = 0;
+  int _sourceGeneration = 0;
+  int _matchGeneration = 0;
   int _inventoryRevision = -1;
-  bool _loading = true;
+  bool _sourceLoading = true;
+  bool _matchLoading = false;
   bool _busy = false;
+  bool _autoSaveAttempted = false;
   String _error = '';
-  _PreparedReview? _review;
+  String _warning = '';
+  String _routeLabel = '';
+  int _ignoredFrames = 0;
+  _MedicineReview? _review;
 
   @override
   void initState() {
     super.initState();
+    _pipeline = MedicineReviewPipeline();
     _inventoryRevision = widget.controller.snapshot.revision;
     widget.controller.addListener(_inventoryChanged);
-    if (widget.drafts.isEmpty) {
-      _loading = false;
-      _error = 'No medicine was available to review.';
-    } else {
-      unawaited(_prepare());
-    }
+    unawaited(_loadSource());
   }
 
   @override
   void dispose() {
-    ++_generation;
+    ++_sourceGeneration;
+    ++_matchGeneration;
     widget.controller.removeListener(_inventoryChanged);
+    _pipeline.cancel();
     super.dispose();
   }
-
-  MedicineScanDraft get _draft => widget.drafts[_index];
 
   void _inventoryChanged() {
     if (!mounted) return;
     final revision = widget.controller.snapshot.revision;
     if (revision == _inventoryRevision) return;
     _inventoryRevision = revision;
-    if (_busy) return;
-    unawaited(_prepare());
+    if (_sourceLoading || _busy || _drafts.isEmpty) return;
+    unawaited(_prepareMatches());
   }
 
-  IntakeResolution _resolve(MedicineScanDraft draft) => resolveIntakeDraft(
-    draft: draft,
-    records: widget.controller.records,
-    today: widget.controller.today,
-  );
-
-  Future<void> _prepare() async {
-    if (widget.drafts.isEmpty || _index >= widget.drafts.length) return;
-    final generation = ++_generation;
+  Future<void> _loadSource() async {
+    final generation = ++_sourceGeneration;
     setState(() {
-      _loading = true;
+      _sourceLoading = true;
+      _matchLoading = false;
+      _error = '';
+      _warning = '';
+      _review = null;
+    });
+    try {
+      final preparation = await _pipeline.prepare(
+        widget.input,
+        widget.controller.records,
+      );
+      if (!mounted || generation != _sourceGeneration) return;
+      setState(() {
+        _drafts = preparation.drafts;
+        _ignoredFrames = preparation.ignoredFrames;
+        _warning = preparation.warning;
+        _routeLabel = preparation.routeLabel;
+        _sourceLoading = false;
+        _index = 0;
+      });
+      if (_drafts.isEmpty) {
+        setState(() => _error = 'No medicine was available to review.');
+        return;
+      }
+      await _prepareMatches();
+    } catch (error) {
+      if (!mounted || generation != _sourceGeneration) return;
+      setState(() {
+        _sourceLoading = false;
+        _error = _cleanError(error).isEmpty
+            ? 'Medicine review could not be prepared. Try again.'
+            : _cleanError(error);
+      });
+    }
+  }
+
+  PreparedMedicineReviewDraft get _current => _drafts[_index];
+
+  IntakeResolution _resolve(MedicineScanDraft draft) => resolveIntakeDraft(
+        draft: draft,
+        records: widget.controller.records,
+        today: widget.controller.today,
+      );
+
+  Future<void> _prepareMatches() async {
+    if (_drafts.isEmpty || _index >= _drafts.length) return;
+    final generation = ++_matchGeneration;
+    setState(() {
+      _matchLoading = true;
       _error = '';
     });
     try {
-      final draft = _draft;
+      final prepared = _current;
+      final draft = prepared.draft;
       final resolution = _resolve(draft);
       final found = <String, SearchHit>{};
 
@@ -104,9 +149,8 @@ class _PreparedMedicineReviewScreenState
         }
       }
 
-      // Search only identity-bearing facts. Raw OCR contains addresses, prices,
-      // warnings and pack text that are useful evidence but noisy match inputs.
-      // Resolver V2 already owns exact physical-lot semantics.
+      // Raw OCR contains legal text, addresses, prices and storage directions.
+      // It stays evidence, not a fuzzy inventory query. Match only identity facts.
       final identityParts = <String>{
         confirmedScanName(draft),
         draft.brand,
@@ -114,6 +158,7 @@ class _PreparedMedicineReviewScreenState
         draft.strength,
         confirmedScanForm(draft),
         draft.manufacturer,
+        draft.batchNumber,
       }.where((value) => value.trim().isNotEmpty).toList(growable: false);
       if (identityParts.isNotEmpty) {
         final query = identityParts.join('\n');
@@ -128,33 +173,77 @@ class _PreparedMedicineReviewScreenState
         }
       }
 
-      if (!mounted || generation != _generation) return;
+      if (!mounted || generation != _matchGeneration) return;
       final hits = found.values.toList(growable: false)
         ..sort((a, b) => b.score.compareTo(a.score));
       final matches = rankIntakeMatches(resolution, hits, limit: 8);
       setState(() {
-        _review = _PreparedReview(
-          draft: draft,
+        _review = _MedicineReview(
+          prepared: prepared,
           resolution: resolution,
           matches: matches,
         );
-        _loading = false;
+        _matchLoading = false;
       });
+
+      if (widget.input.autoSaveReadyDrafts &&
+          _drafts.length == 1 &&
+          !_autoSaveAttempted) {
+        _autoSaveAttempted = true;
+        unawaited(_attemptAutoSave());
+      }
     } catch (_) {
-      if (!mounted || generation != _generation) return;
+      if (!mounted || generation != _matchGeneration) return;
       setState(() {
-        _loading = false;
+        _matchLoading = false;
         _error = 'Saved medicines could not be checked. Try again.';
       });
     }
   }
 
-  Future<void> _next() async {
-    if (_busy || _loading) return;
-    final review = _review;
-    if (review == null) return;
+  Future<void> _attemptAutoSave() async {
+    if (!mounted || _busy || _review == null) return;
+    final review = _review!;
+    var resolution = _resolve(review.draft);
+    var decision = scanAutoSaveDecision(
+      review.draft,
+      resolution,
+      verifier: review.prepared.autoSaveVerifier,
+    );
+    if (!decision.allowed) return;
 
+    setState(() => _busy = true);
+    try {
+      resolution = _resolve(review.draft);
+      decision = scanAutoSaveDecision(
+        review.draft,
+        resolution,
+        verifier: review.prepared.autoSaveVerifier,
+      );
+      if (!decision.allowed) return;
+      final expectedRevision = widget.controller.snapshot.revision;
+      final medicine = medicineFromConfirmedScan(review.draft);
+      await widget.controller.save(
+        medicine,
+        expectedRevision: expectedRevision,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${medicine.title} saved.')),
+      );
+      Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) await _prepareMatches();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _next() async {
+    if (_busy || _sourceLoading || _matchLoading || _review == null) return;
+    final review = _review!;
     final liveResolution = _resolve(review.draft);
+
     if (liveResolution.kind == IntakeResolutionKind.exactLot) {
       final id = liveResolution.exactStockId;
       if (id == null) {
@@ -166,7 +255,7 @@ class _PreparedMedicineReviewScreenState
       } else {
         final record = widget.controller.snapshot.records[id];
         if (record == null || record.archived) {
-          await _prepare();
+          await _prepareMatches();
           return;
         }
         final before = widget.controller.snapshot.revision;
@@ -175,7 +264,7 @@ class _PreparedMedicineReviewScreenState
         if (widget.controller.snapshot.revision != before) {
           await _advanceOrFinish();
         } else {
-          await _prepare();
+          await _prepareMatches();
         }
       }
       return;
@@ -197,8 +286,6 @@ class _PreparedMedicineReviewScreenState
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      // Re-resolve immediately before the global CAS. A match that changed while
-      // the review was open must fail closed instead of creating a duplicate.
       final liveResolution = _resolve(draft);
       final liveDecision = scanQuickAddDecision(draft, liveResolution);
       if (!liveDecision.allowed ||
@@ -242,24 +329,24 @@ class _PreparedMedicineReviewScreenState
     if (widget.controller.snapshot.revision != before) {
       await _advanceOrFinish();
     } else {
-      await _prepare();
+      await _prepareMatches();
     }
   }
 
   Future<void> _advanceOrFinish() async {
     if (!mounted) return;
-    if (_index + 1 >= widget.drafts.length) {
+    if (_index + 1 >= _drafts.length) {
       Navigator.pop(context, true);
       return;
     }
     setState(() {
       _index++;
       _review = null;
-      _loading = true;
       _error = '';
+      _autoSaveAttempted = true;
     });
     _inventoryRevision = widget.controller.snapshot.revision;
-    await _prepare();
+    await _prepareMatches();
   }
 
   Future<void> _receiveExactLot(
@@ -270,12 +357,12 @@ class _PreparedMedicineReviewScreenState
     if (!resolution.hasExactLot ||
         resolution.exactStockId != expectedId ||
         !resolution.safeToReceive) {
-      await _prepare();
+      await _prepareMatches();
       return;
     }
     final current = widget.controller.snapshot.records[expectedId];
     if (current == null || current.archived) {
-      await _prepare();
+      await _prepareMatches();
       return;
     }
 
@@ -342,7 +429,7 @@ class _PreparedMedicineReviewScreenState
         resolution.exactStockId != expectedId ||
         !resolution.safeToReceive) {
       showError(context, 'Saved stock changed. Check this medicine again.');
-      await _prepare();
+      await _prepareMatches();
       return;
     }
 
@@ -396,20 +483,26 @@ class _PreparedMedicineReviewScreenState
     if (raw.isEmpty) return false;
     try {
       final value = parseDate(raw, monthEnd: draft.expiryMonthOnly);
-      return value != null &&
-          value.isBefore(civilDay(widget.controller.today));
+      return value != null && value.isBefore(civilDay(widget.controller.today));
     } on FormatException {
       return false;
     }
   }
 
+  String _cleanError(Object error) => error
+      .toString()
+      .replaceFirst(
+        RegExp(r'^(Exception|FormatException|Bad state|StateError):\s*'),
+        '',
+      )
+      .trim();
+
   @override
   Widget build(BuildContext context) {
+    final loading = _sourceLoading || _matchLoading;
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm medicine')),
-      body: widget.drafts.isEmpty
-          ? const Center(child: Text('No medicine to review.'))
-          : _loading
+      body: _sourceLoading
           ? const Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -417,36 +510,43 @@ class _PreparedMedicineReviewScreenState
                   CircularProgressIndicator(),
                   SizedBox(height: 14),
                   Text(
-                    'Checking your saved medicines…',
+                    'Reading medicine…',
                     style: TextStyle(color: muted, fontSize: 12),
                   ),
                 ],
               ),
             )
           : RefreshIndicator(
-              onRefresh: _prepare,
+              onRefresh: _drafts.isEmpty ? _loadSource : _prepareMatches,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 32),
                 children: [
-                  if (widget.drafts.length > 1) _progressCard(),
+                  if (_drafts.length > 1) _progressCard(),
+                  if (_warning.isNotEmpty) ...[
+                    _smallNotice(_warning, amber),
+                    const SizedBox(height: 10),
+                  ],
                   if (_error.isNotEmpty) ...[
-                    Surface(
-                      color: errorSoft,
-                      child: Text(
-                        _error,
-                        style: const TextStyle(color: red),
-                      ),
-                    ),
+                    _smallNotice(_error, red),
                     const SizedBox(height: 12),
                   ],
+                  if (_drafts.isEmpty && _error.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: Text(
+                        'No medicine to review.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: muted),
+                      ),
+                    ),
                   if (_review != null) ...[
                     _scannedMedicineCard(_review!.draft),
                     const SizedBox(height: 10),
                     SizedBox(
                       height: 54,
                       child: FilledButton.icon(
-                        onPressed: _busy ? null : _next,
+                        onPressed: _busy || loading ? null : _next,
                         icon: _busy
                             ? const SizedBox(
                                 width: 18,
@@ -468,6 +568,25 @@ class _PreparedMedicineReviewScreenState
                     ),
                     const SizedBox(height: 24),
                     _matchingSection(_review!),
+                  ] else if (_matchLoading) ...[
+                    const SizedBox(height: 30),
+                    const Center(child: CircularProgressIndicator()),
+                  ],
+                  if (_ignoredFrames > 0) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      '$_ignoredFrames duplicate or unclear capture${_ignoredFrames == 1 ? '' : 's'} ignored automatically.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: muted, fontSize: 10.5),
+                    ),
+                  ],
+                  if (_routeLabel.isNotEmpty && _warning.isEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _routeLabel,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: muted, fontSize: 10),
+                    ),
                   ],
                 ],
               ),
@@ -475,35 +594,53 @@ class _PreparedMedicineReviewScreenState
     );
   }
 
-  Widget _progressCard() => Container(
-    margin: const EdgeInsets.only(bottom: 12),
-    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-    decoration: BoxDecoration(
-      color: primary.withValues(alpha: .06),
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Row(
-      children: [
-        const Icon(Icons.medication_outlined, color: primary, size: 19),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Medicine ${_index + 1} of ${widget.drafts.length}',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+  Widget _smallNotice(String message, Color tone) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: .07),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          message,
+          style: TextStyle(
+            color: tone,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        const Text(
-          'One at a time',
-          style: TextStyle(color: muted, fontSize: 11),
+      );
+
+  Widget _progressCard() => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+        decoration: BoxDecoration(
+          color: primary.withValues(alpha: .06),
+          borderRadius: BorderRadius.circular(14),
         ),
-      ],
-    ),
-  );
+        child: Row(
+          children: [
+            const Icon(Icons.medication_outlined, color: primary, size: 19),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Medicine ${_index + 1} of ${_drafts.length}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+            const Text(
+              'One at a time',
+              style: TextStyle(color: muted, fontSize: 11),
+            ),
+          ],
+        ),
+      );
 
   Widget _scannedMedicineCard(MedicineScanDraft draft) {
-    final name = confirmedScanName(draft).trim().isEmpty
-        ? 'Medicine'
-        : confirmedScanName(draft).trim();
+    final confirmedName = confirmedScanName(draft).trim();
+    final name = confirmedName.isEmpty ? 'Medicine' : confirmedName;
     final form = confirmedScanForm(draft);
     final expired = _expired(draft);
     final ready = scanQuickIdentityIssue(draft).isEmpty && !expired;
@@ -601,8 +738,8 @@ class _PreparedMedicineReviewScreenState
                   expired
                       ? Icons.warning_amber_rounded
                       : ready
-                      ? Icons.check_circle_rounded
-                      : Icons.info_outline_rounded,
+                          ? Icons.check_circle_rounded
+                          : Icons.info_outline_rounded,
                   color: expired ? red : ready ? green : amber,
                   size: 19,
                 ),
@@ -612,8 +749,8 @@ class _PreparedMedicineReviewScreenState
                     expired
                         ? 'Expired medicine — check the EXP date.'
                         : ready
-                        ? 'Details look good'
-                        : 'Check the details before saving',
+                            ? 'Details look good'
+                            : 'Check the details before saving',
                     style: TextStyle(
                       color: expired ? red : ready ? green : amber,
                       fontWeight: FontWeight.w800,
@@ -630,32 +767,32 @@ class _PreparedMedicineReviewScreenState
   }
 
   Widget _factRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 94,
-          child: Text(
-            label,
-            style: const TextStyle(color: muted, fontSize: 12),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: ink,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w800,
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 94,
+              child: Text(
+                label,
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
             ),
-          ),
+            Expanded(
+              child: Text(
+                value,
+                style: const TextStyle(
+                  color: ink,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
-  Widget _matchingSection(_PreparedReview review) {
+  Widget _matchingSection(_MedicineReview review) {
     final visibleMatches = <(IntakeMatchCandidate, Medicine)>[];
     for (final match in review.matches) {
       final record = widget.controller.snapshot.records[match.id];
@@ -810,7 +947,11 @@ class _PreparedMedicineReviewScreenState
                     color: tone.withValues(alpha: .10),
                     borderRadius: BorderRadius.circular(13),
                   ),
-                  child: Icon(Icons.medication_outlined, color: tone, size: 22),
+                  child: Icon(
+                    Icons.medication_outlined,
+                    color: tone,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 11),
                 Expanded(
@@ -861,14 +1002,14 @@ class _PreparedMedicineReviewScreenState
                         ),
                       ],
                       if (lot.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         Text(
                           lot,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: ink,
-                            fontSize: 10.8,
+                            fontSize: 11,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -876,7 +1017,7 @@ class _PreparedMedicineReviewScreenState
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 const Icon(Icons.chevron_right_rounded, color: muted),
               ],
             ),
@@ -887,14 +1028,16 @@ class _PreparedMedicineReviewScreenState
   }
 }
 
-class _PreparedReview {
-  const _PreparedReview({
-    required this.draft,
+class _MedicineReview {
+  const _MedicineReview({
+    required this.prepared,
     required this.resolution,
     required this.matches,
   });
 
-  final MedicineScanDraft draft;
+  final PreparedMedicineReviewDraft prepared;
   final IntakeResolution resolution;
   final List<IntakeMatchCandidate> matches;
+
+  MedicineScanDraft get draft => prepared.draft;
 }

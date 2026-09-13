@@ -3,23 +3,36 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('normal import inbox has no implicit cloud scan transport', () {
+  test('normal and explicit cloud intake share UI but keep privacy routes distinct', () {
     final normal = File('lib/ui/import_screen.dart').readAsStringSync();
-    final explicitCloud = File('lib/ui/cloud_scan_review_screen.dart')
-        .readAsStringSync();
     final capture = File('lib/ui/medicine_capture.dart').readAsStringSync();
+    final pipeline = File('lib/services/medicine_review_pipeline.dart')
+        .readAsStringSync();
     final scanner = File('lib/ui/scanner_screen.dart').readAsStringSync();
     final commitPolicy = File('lib/domain/medicine_scan_commit.dart')
         .readAsStringSync();
 
+    expect(normal, contains('MedicineReviewInput.localEvidence('));
     expect(normal, isNot(contains('CloudScanAiService')));
-    expect(normal, isNot(contains("../services/cloud_scan_ai_service.dart")));
-    expect(normal, contains('understandMedicineEvidenceV2Message'));
-    expect(normal, contains('CanonicalMedicineCatalogService.instance'));
-    expect(normal, contains("'catalog': catalogue"));
-    expect(explicitCloud, contains('CloudScanAiService'));
+    expect(capture, contains('MedicineReviewInput.cloudEvidence('));
     expect(capture, contains('Scan with cloud AI'));
-    expect(capture, contains('CloudScanReviewScreen'));
+    expect(capture, isNot(contains('CloudScanReviewScreen')));
+
+    expect(pipeline, contains('CloudScanAiService'));
+    expect(pipeline, contains('MedicineReviewInputKind.localEvidence'));
+    expect(pipeline, contains('MedicineReviewInputKind.cloudEvidence'));
+    expect(pipeline, contains('medicineKnowledgeFromRecords(records)'));
+    expect(
+      pipeline,
+      contains("config == null\n        ? medicineKnowledgeFromRecords(records)\n        : const <MedicineKnowledgeEntry>[]"),
+    );
+    expect(
+      pipeline,
+      contains("config == null\n        ? await OfflineRecognitionMemoryService.instance.enrichKnowledge"),
+    );
+    expect(pipeline, contains("'knowledge': knowledge"));
+    expect(pipeline, contains("'catalog': catalogue"));
+
     expect(scanner, contains('understandMedicineEvidenceV2Message'));
     expect(scanner, contains("'knowledge': const <Object?>[]"));
     expect(scanner, contains("'catalog': const <Object?>[]"));

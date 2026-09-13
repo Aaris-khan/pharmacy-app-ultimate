@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import '../domain/medicine_understanding.dart';
 import '../services/media_import_service.dart';
 import '../services/medicine_intake_service.dart';
+import '../services/medicine_review_pipeline.dart';
 import '../services/scan_service.dart';
 import '../state/pharmacy_controller.dart';
-import 'cloud_scan_review_screen.dart';
 import 'design.dart';
+import 'medicine_review_screen.dart';
 import 'scanner_screen.dart';
 
 Future<void> openMedicineCapture(
@@ -26,11 +27,8 @@ Future<void> openMedicineCapture(
       );
     }
 
-    // Capture must never wait behind optional AI setup. The normal lane remains
-    // privacy-first and local: OCR -> deterministic extractor -> active Local AI
-    // when explicitly enabled -> review. Cloud camera/photo routes are separate
-    // owner-selected actions so OCR can never start leaving the device merely
-    // because an API key happens to be saved for chat.
+    // Capture never waits behind optional AI setup. Every source eventually
+    // enters the same medicine-review contract; only evidence preparation differs.
     final choice = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
@@ -65,13 +63,13 @@ Future<void> openMedicineCapture(
                 title: Text(item.$2),
                 subtitle: item.$1 == 'cloud' || item.$1 == 'cloudPhoto'
                     ? const Text(
-                        'OCR/barcode reading happens on-device first. Only bounded scan evidence may be sent; inventory stays local and every AI field remains review-only until Confirm/Add.',
+                        'OCR/barcode reading happens on-device first. Only bounded scan evidence may be sent; inventory stays local.',
                       )
                     : item.$1 == 'scan'
-                    ? const Text(
-                        'On-device OCR + barcode + deterministic medicine reasoning. No model download, API key or internet is required.',
-                      )
-                    : null,
+                        ? const Text(
+                            'On-device OCR + barcode + deterministic medicine reasoning. No model download, API key or internet is required.',
+                          )
+                        : null,
                 onTap: () => Navigator.pop(context, item.$1),
               ),
           ],
@@ -81,8 +79,7 @@ Future<void> openMedicineCapture(
     if (choice == null || !context.mounted) return;
 
     // Interactive cloud review does not consume durable queue capacity. A full
-    // local photo/video queue must therefore never block an explicitly requested
-    // cloud camera/photo review.
+    // local photo/video queue must never block an explicitly requested cloud lane.
     if (choice != 'cloud' && choice != 'cloudPhoto' && queue.full) {
       throw StateError('The queue is full. Review/dismiss captures first.');
     }
@@ -114,12 +111,12 @@ Future<void> openMedicineCapture(
                 source: 'Cloud AI camera scan',
               ),
             ];
-      await Navigator.push<void>(
+      await Navigator.push<bool>(
         context,
         MaterialPageRoute(
-          builder: (_) => CloudScanReviewScreen(
+          builder: (_) => MedicineReviewScreen(
             controller: controller,
-            evidence: evidence,
+            input: MedicineReviewInput.cloudEvidence(evidence),
           ),
         ),
       );
@@ -132,9 +129,9 @@ Future<void> openMedicineCapture(
         return;
       }
 
-      // Gallery media never goes to the configured AI provider. Read the image
-      // with the same local OCR/barcode engine as the live scanner, retire the
-      // temporary picker file, then hand only bounded evidence to cloud review.
+      // Gallery media never goes directly to the configured provider. Read it
+      // locally, retire the picker file, then pass only bounded OCR/barcode
+      // evidence to the explicit cloud preparation branch.
       final vision = MedicineVisionService();
       MedicineFrameEvidence? evidence;
       try {
@@ -150,12 +147,14 @@ Future<void> openMedicineCapture(
         }
       }
       if (!context.mounted) return;
-      await Navigator.push<void>(
+      await Navigator.push<bool>(
         context,
         MaterialPageRoute(
-          builder: (_) => CloudScanReviewScreen(
+          builder: (_) => MedicineReviewScreen(
             controller: controller,
-            evidence: <MedicineFrameEvidence>[evidence!],
+            input: MedicineReviewInput.cloudEvidence(
+              <MedicineFrameEvidence>[evidence!],
+            ),
           ),
         ),
       );
@@ -186,9 +185,6 @@ Future<void> openMedicineCapture(
       try {
         await queue.addFile(source.path, kind: choice, title: source.name);
       } finally {
-        // Picker staging files are housekeeping only. MediaImportService makes
-        // cleanup best-effort so a cleanup failure can never turn a successfully
-        // queued capture into a false user-visible import failure.
         await media.cleanup([source.path]);
       }
     }
