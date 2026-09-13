@@ -227,25 +227,72 @@ List<MedicineTextLineEvidence> _mergeLayoutLines(
   Iterable<_OcrLayoutLine> raw,
 ) {
   final values = <_OcrLayoutLine>[];
-  final positions = <String, int>{};
+  final positions = <String, List<int>>{};
   for (final item in raw.take(500)) {
     final key = medicineOcrLineKey(item.evidence.text);
     if (key.length < 2) continue;
-    final existing = positions[key];
-    if (existing == null) {
-      positions[key] = values.length;
+
+    // Text identity is not physical identity. The same printed value can appear
+    // more than once on a carton/foil (for example repeated EXP/MFG panels).
+    // Collapse only Latin/Devanagari recognizer duplicates that overlap the same
+    // physical region; preserve identical text at distinct coordinates so the
+    // spatial resolver can still bind the correct label/value pair.
+    final candidates = positions.putIfAbsent(key, () => <int>[]);
+    int? duplicateIndex;
+    for (final index in candidates) {
+      if (_sameLayoutRegion(values[index].evidence, item.evidence)) {
+        duplicateIndex = index;
+        break;
+      }
+    }
+    if (duplicateIndex == null) {
+      candidates.add(values.length);
       values.add(item);
       continue;
     }
-    final current = values[existing];
+
+    final current = values[duplicateIndex];
     if (_layoutPreference(item) > _layoutPreference(current)) {
-      values[existing] = item;
+      values[duplicateIndex] = item;
     }
   }
   return values
       .take(240)
       .map((value) => value.evidence)
       .toList(growable: false);
+}
+
+bool _sameLayoutRegion(
+  MedicineTextLineEvidence first,
+  MedicineTextLineEvidence second,
+) {
+  final firstRight = first.left + first.width;
+  final secondRight = second.left + second.width;
+  final firstBottom = first.top + first.height;
+  final secondBottom = second.top + second.height;
+  final overlapX = max(
+    0.0,
+    min(firstRight, secondRight) - max(first.left, second.left),
+  );
+  final overlapY = max(
+    0.0,
+    min(firstBottom, secondBottom) - max(first.top, second.top),
+  );
+  final horizontal = overlapX / max(1.0, min(first.width, second.width));
+  final vertical = overlapY / max(1.0, min(first.height, second.height));
+  if (horizontal >= .55 && vertical >= .55) return true;
+
+  // Detector boxes for two scripts can be shifted slightly while representing
+  // the same glyph row. A tight center-distance fallback handles that jitter
+  // without merging repeated text printed elsewhere on the package.
+  final firstCenterX = first.left + first.width / 2;
+  final secondCenterX = second.left + second.width / 2;
+  final firstCenterY = first.top + first.height / 2;
+  final secondCenterY = second.top + second.height / 2;
+  return (firstCenterX - secondCenterX).abs() <=
+          max(first.width, second.width) * .18 &&
+      (firstCenterY - secondCenterY).abs() <=
+          max(first.height, second.height) * .45;
 }
 
 double _layoutPreference(_OcrLayoutLine item) {

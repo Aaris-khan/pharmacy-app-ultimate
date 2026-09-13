@@ -103,59 +103,68 @@ MedicineDateResolution inferMedicineDateIntelligence({
       : graph.groups.map((group) => group.representative);
   for (final frame in independentFrames) {
     final quality = frame.quality.clamp(0, 1).toDouble();
-    final lines = <String>{
-      ...frame.text.split(RegExp(r'[\r\n]+')),
-      ...frame.layoutLines.map((line) => line.text),
-    };
-    final orderedLines = lines
-        .where((line) => line.trim().isNotEmpty)
-        .take(160)
-        .toList();
     final observed = <String>{};
-    for (var index = 0; index < orderedLines.length; index++) {
-      final line = orderedLines[index];
-      final matches = extractMedicineDateMatches(line, allowCompact: true);
-      if (matches.isEmpty) continue;
-      final labels = _dateLabels(line);
-      for (final match in matches.take(6)) {
-        var labelled = _nearestRole(match.start, match.end, labels);
-        // A line break in OCR must not destroy a label/value association. Only
-        // a label-only immediately preceding line may lend its role; competing
-        // labels, batch/MRP fields and multi-date rows require spatial review.
-        if (labelled == null &&
-            labels.isEmpty &&
-            matches.length == 1 &&
-            index > 0) {
-          final previous = orderedLines[index - 1];
-          final previousLabels = _dateLabels(previous);
-          if (previousLabels.length == 1 &&
-              previousLabels.single.$1 != MedicineDateRole.unknown &&
-              !RegExp(r'[0-9०-९٠-٩۰-۹]').hasMatch(previous) &&
-              line.substring(0, match.start).trim().isEmpty &&
-              line.substring(match.end).trim().isEmpty) {
-            labelled = (previousLabels.single.$1, 24);
+
+    // Raw OCR reading order and spatial OCR reading order are separate evidence
+    // channels. Merging them into one Set can destroy sequence-local adjacency,
+    // create false adjacency at the channel boundary and discard a repeated
+    // physical line. Process each bounded sequence independently, then
+    // de-duplicate role/date evidence per physical frame through [observed].
+    for (final orderedLines in _dateLineStreams(frame)) {
+      for (var index = 0; index < orderedLines.length; index++) {
+        final line = orderedLines[index];
+        final matches = extractMedicineDateMatches(line, allowCompact: true);
+        if (matches.isEmpty) continue;
+        final labels = _dateLabels(line);
+        for (final match in matches.take(6)) {
+          var labelled = _nearestRole(match.start, match.end, labels);
+
+          // A line break in OCR must not destroy a label/value association. A
+          // clean label-only line immediately above the date remains strongest.
+          // A clean label-only line immediately below is also accepted when it
+          // cannot instead be the heading for another standalone date. This
+          // covers common foil/carton layouts while refusing ambiguous
+          // date -> label -> date sandwiches.
+          if (labelled == null &&
+              labels.isEmpty &&
+              matches.length == 1 &&
+              _isStandaloneDateMatch(line, match)) {
+            if (index > 0) {
+              final previousRole = _labelOnlyRole(orderedLines[index - 1]);
+              if (previousRole != null) labelled = (previousRole, 24);
+            }
+            if (labelled == null && index + 1 < orderedLines.length) {
+              final followingRole = _labelOnlyRole(orderedLines[index + 1]);
+              final followedByAnotherDate =
+                  index + 2 < orderedLines.length &&
+                  _isStandaloneDateLine(orderedLines[index + 2]);
+              if (followingRole != null && !followedByAnotherDate) {
+                labelled = (followingRole, 30);
+              }
+            }
           }
+
+          final role = labelled?.$1 ?? MedicineDateRole.unknown;
+          if (labelled != null && role == MedicineDateRole.unknown) continue;
+          // Bare compact digits are indistinguishable from lot/serial identifiers.
+          // They need a date label (inline/adjacent or supplied by spatial OCR).
+          if (match.compact && labelled == null) continue;
+          if (!observed.add('${role.name}|${match.date.value}')) continue;
+          final distance = labelled?.$2 ?? 999;
+          final explicit = labelled != null;
+          final base = explicit ? (distance <= 20 ? .955 : .91) : .61;
+          remember(
+            MedicineDateEvidence(
+              date: match.date,
+              role: role,
+              confidence: (base + quality * (explicit ? .035 : .055))
+                  .clamp(0, .99)
+                  .toDouble(),
+              support: 1,
+              explicitLabel: explicit,
+            ),
+          );
         }
-        final role = labelled?.$1 ?? MedicineDateRole.unknown;
-        if (labelled != null && role == MedicineDateRole.unknown) continue;
-        // Bare compact digits are indistinguishable from lot/serial identifiers.
-        // They need a date label (inline/adjacent or supplied by spatial OCR).
-        if (match.compact && labelled == null) continue;
-        if (!observed.add('${role.name}|${match.date.value}')) continue;
-        final distance = labelled?.$2 ?? 999;
-        final explicit = labelled != null;
-        final base = explicit ? (distance <= 20 ? .955 : .91) : .61;
-        remember(
-          MedicineDateEvidence(
-            date: match.date,
-            role: role,
-            confidence: (base + quality * (explicit ? .035 : .055))
-                .clamp(0, .99)
-                .toDouble(),
-            support: 1,
-            explicitLabel: explicit,
-          ),
-        );
       }
     }
   }
@@ -328,6 +337,38 @@ int _compareEvidence(MedicineDateEvidence a, MedicineDateEvidence b) {
   if (confidence != 0) return confidence;
   return b.support.compareTo(a.support);
 }
+
+List<List<String>> _dateLineStreams(MedicineFrameEvidence frame) {
+  List<String> clean(Iterable<String> source) => source
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .take(120)
+      .toList(growable: false);
+
+  final raw = clean(frame.text.split(RegExp(r'[\r\n]+')));
+  final layout = clean(frame.layoutLines.map((line) => line.text));
+  return <List<String>>[
+    if (raw.isNotEmpty) raw,
+    if (layout.isNotEmpty) layout,
+  ];
+}
+
+MedicineDateRole? _labelOnlyRole(String line) {
+  if (RegExp(r'[0-9०-९٠-٩۰-۹]').hasMatch(line)) return null;
+  final labels = _dateLabels(line);
+  if (labels.length != 1) return null;
+  final role = labels.single.$1;
+  return role == MedicineDateRole.unknown ? null : role;
+}
+
+bool _isStandaloneDateLine(String line) {
+  final matches = extractMedicineDateMatches(line, allowCompact: true);
+  return matches.length == 1 && _isStandaloneDateMatch(line, matches.single);
+}
+
+bool _isStandaloneDateMatch(String line, MedicineDateMatch match) =>
+    line.substring(0, match.start).trim().isEmpty &&
+    line.substring(match.end).trim().isEmpty;
 
 List<(MedicineDateRole, int, int)> _dateLabels(String line) {
   final result = <(MedicineDateRole, int, int)>[];

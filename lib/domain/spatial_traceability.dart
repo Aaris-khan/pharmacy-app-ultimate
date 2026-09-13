@@ -215,6 +215,15 @@ double _geometryScore(
   if (belowGap >= -.25 && belowGap <= 2.6 && horizontalOverlap >= .12) {
     return (.88 - max(0.0, belowGap) * .035).clamp(0, 1).toDouble();
   }
+
+  // Some packs print the value directly above a compact MFG/EXP label. Treat
+  // this reverse vertical layout as valid geometric evidence, but slightly
+  // weaker than the conventional below-label layout so nearby unrelated dates
+  // cannot outrank a normal same-row/below association.
+  final aboveGap = (label.top - (candidate.top + candidate.height)) / height;
+  if (aboveGap >= -.25 && aboveGap <= 2.1 && horizontalOverlap >= .12) {
+    return (.86 - max(0.0, aboveGap) * .035).clamp(0, 1).toDouble();
+  }
   return 0;
 }
 
