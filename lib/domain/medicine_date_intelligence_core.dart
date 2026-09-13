@@ -106,7 +106,15 @@ MedicineDateResolution inferMedicineDateIntelligence({
 
           final role = labelled?.$1 ?? MedicineDateRole.unknown;
           if (labelled != null && role == MedicineDateRole.unknown) continue;
-          if (match.compact &&
+          // A separator-less 8-digit full date is syntactically valid but can
+          // still be a batch/serial number. Without an owning date label, only
+          // a coherent two-date chronology may promote that identifier-like
+          // surface. Spaced/slashed full dates keep the existing future-expiry
+          // hint behaviour because their presentation itself supplies context.
+          final roleUnsafeBareToken =
+              match.compact ||
+              (standalone && _isBareSeparatorlessFullDate(line, match));
+          if (roleUnsafeBareToken &&
               labelled == null &&
               !acceptedBareCompact.contains(index)) {
             continue;
