@@ -42,14 +42,138 @@ class OfflineEvidenceGraph {
       : (groups.length / observedFrames).clamp(0, 1).toDouble();
 }
 
+/// Selects a small, information-rich evidence window before correlation.
+///
+/// The old first-N policy could let repeated live-preview frames consume the
+/// entire graph budget before a later deliberate photo of COMPOSITION/BATCH/EXP
+/// arrived. Selection now considers the whole already-bounded intake evidence
+/// (at most [maxMedicineEvidenceFrames]) and preserves recency, machine anchors,
+/// physical capture utility and visual-text novelty. It never invents facts,
+/// rewrites OCR or turns similarity into confidence; it only decides which raw
+/// observations deserve the finite downstream reasoning budget.
+List<MedicineFrameEvidence> selectOfflineEvidenceFrames(
+  Iterable<MedicineFrameEvidence> source, {
+  required int maxFrames,
+}) {
+  final limit = max(1, maxFrames);
+  final pool = source
+      .where(_hasGraphEvidence)
+      .take(maxMedicineEvidenceFrames)
+      .toList(growable: false);
+  if (pool.length <= limit) {
+    return List<MedicineFrameEvidence>.unmodifiable(pool);
+  }
+
+  final signatures = pool.map(_FrameSignature.fromFrame).toList(growable: false);
+  final selected = <int>{};
+
+  void keep(int index) {
+    if (index >= 0 && index < pool.length && selected.length < limit) {
+      selected.add(index);
+    }
+  }
+
+  // Always keep the newest usable observation. In live scanning this is the
+  // frame/still the pharmacist just presented after receiving targeted guidance.
+  keep(pool.length - 1);
+
+  // Keep one strong witness for each bounded machine-readable identity/lot/date
+  // anchor. This prevents an early run of repeated OCR frames from hiding a
+  // later conflicting GTIN/lot/serial/MFG/EXP, which must remain visible to
+  // fail-closed product and physical-lot reasoning.
+  final anchorRepresentatives = <String, int>{};
+  for (var index = 0; index < pool.length; index++) {
+    final machine = signatures[index].machine;
+    final key = machine.fingerprint;
+    if (key.isEmpty) continue;
+    final existing = anchorRepresentatives[key];
+    final utility = _selectionBaseUtility(pool[index], signatures[index]);
+    final existingUtility = existing == null
+        ? -1.0
+        : _selectionBaseUtility(pool[existing], signatures[existing]);
+    if (existing == null ||
+        utility > existingUtility ||
+        (utility == existingUtility && index > existing)) {
+      anchorRepresentatives[key] = index;
+    }
+  }
+  final machineWitnesses = anchorRepresentatives.values.toList(growable: false)
+    ..sort((a, b) {
+      final utility = _selectionBaseUtility(
+        pool[b],
+        signatures[b],
+      ).compareTo(_selectionBaseUtility(pool[a], signatures[a]));
+      if (utility != 0) return utility;
+      return b.compareTo(a);
+    });
+  // More than four distinct trusted machine anchors inside one bounded medicine
+  // window is already abnormal; four witnesses preserve a contradiction without
+  // allowing barcode-heavy noise to monopolize every OCR slot.
+  for (final index in machineWitnesses.take(min(4, limit))) {
+    keep(index);
+  }
+
+  // Preserve the strongest ordinary frame as an anchor for identity continuity.
+  var bestOverall = 0;
+  var bestOverallUtility = _selectionBaseUtility(pool[0], signatures[0]);
+  for (var index = 1; index < pool.length; index++) {
+    final utility = _selectionBaseUtility(pool[index], signatures[index]);
+    if (utility > bestOverallUtility ||
+        (utility == bestOverallUtility && index > bestOverall)) {
+      bestOverall = index;
+      bestOverallUtility = utility;
+    }
+  }
+  keep(bestOverall);
+
+  while (selected.length < limit) {
+    var bestIndex = -1;
+    var bestScore = -double.infinity;
+    for (var index = 0; index < pool.length; index++) {
+      if (selected.contains(index)) continue;
+      final base = _selectionBaseUtility(pool[index], signatures[index]);
+
+      var maxCorrelation = 0.0;
+      var nearestDistance = pool.length.toDouble();
+      for (final kept in selected) {
+        maxCorrelation = max(
+          maxCorrelation,
+          _frameCorrelation(signatures[index], signatures[kept]),
+        );
+        nearestDistance = min(nearestDistance, (index - kept).abs().toDouble());
+      }
+      final novelty = (1 - maxCorrelation).clamp(0, 1).toDouble();
+      final temporalDiversity = (nearestDistance / max(1, pool.length - 1))
+          .clamp(0, 1)
+          .toDouble();
+      final recency = index / max(1, pool.length - 1);
+
+      // Novelty deliberately outranks raw sharpness here. A slightly softer
+      // back-panel frame with the missing EXP/batch is usually more informative
+      // than the twelfth crystal-clear copy of the same front panel.
+      final score =
+          base * .35 + novelty * .45 + temporalDiversity * .12 + recency * .08;
+      if (score > bestScore ||
+          (score == bestScore && index > bestIndex)) {
+        bestIndex = index;
+        bestScore = score;
+      }
+    }
+    if (bestIndex < 0) break;
+    keep(bestIndex);
+  }
+
+  final ordered = selected.toList(growable: false)..sort();
+  return List<MedicineFrameEvidence>.unmodifiable(
+    ordered.map((index) => pool[index]),
+  );
+}
+
 OfflineEvidenceGraph buildOfflineEvidenceGraph(
   Iterable<MedicineFrameEvidence> source, {
   int maxFrames = 12,
 }) {
-  final frames = source
-      .where(_hasGraphEvidence)
-      .take(max(1, maxFrames))
-      .toList(growable: false);
+  final frames = selectOfflineEvidenceFrames(source, maxFrames: maxFrames);
   if (frames.isEmpty) {
     return const OfflineEvidenceGraph(
       groups: <OfflineEvidenceGroup>[],
@@ -176,12 +300,16 @@ class _MachineAnchor {
     required this.gtins,
     required this.lots,
     required this.serials,
+    required this.manufacturingDates,
+    required this.expiryDates,
   });
 
   factory _MachineAnchor.fromFrame(MedicineFrameEvidence frame) {
     final gtins = <String>{};
     final lots = <String>{};
     final serials = <String>{};
+    final manufacturingDates = <String>{};
+    final expiryDates = <String>{};
     for (final raw in frame.allBarcodes.take(8)) {
       final structured = parseRegulatoryMedicineCode(raw);
       if (structured != null) {
@@ -190,19 +318,51 @@ class _MachineAnchor {
         if (lot.isNotEmpty) lots.add(lot);
         final serial = searchText(structured.serial);
         if (serial.isNotEmpty) serials.add(serial);
+        if (structured.manufacturingYyMmDd.isNotEmpty) {
+          manufacturingDates.add(structured.manufacturingYyMmDd);
+        }
+        if (structured.expiryYyMmDd.isNotEmpty) {
+          expiryDates.add(structured.expiryYyMmDd);
+        }
       }
       final plain = _canonicalPlainGtin(raw);
       if (plain.isNotEmpty) gtins.add(plain);
     }
-    return _MachineAnchor(gtins: gtins, lots: lots, serials: serials);
+    return _MachineAnchor(
+      gtins: gtins,
+      lots: lots,
+      serials: serials,
+      manufacturingDates: manufacturingDates,
+      expiryDates: expiryDates,
+    );
   }
 
   final Set<String> gtins;
   final Set<String> lots;
   final Set<String> serials;
+  final Set<String> manufacturingDates;
+  final Set<String> expiryDates;
 
   bool get hasTrustedProductId => gtins.isNotEmpty;
+
+  String get fingerprint {
+    if (gtins.isEmpty &&
+        lots.isEmpty &&
+        serials.isEmpty &&
+        manufacturingDates.isEmpty &&
+        expiryDates.isEmpty) {
+      return '';
+    }
+    String ordered(Set<String> values) => (values.toList()..sort()).join(',');
+    return '${ordered(gtins)}|${ordered(lots)}|${ordered(serials)}|'
+        '${ordered(manufacturingDates)}|${ordered(expiryDates)}';
+  }
 }
+
+double _selectionBaseUtility(
+  MedicineFrameEvidence frame,
+  _FrameSignature signature,
+) => _frameUtility(frame, signature);
 
 double _frameUtility(MedicineFrameEvidence frame, _FrameSignature signature) {
   final quality = frame.quality.clamp(0, 1).toDouble();
@@ -223,10 +383,16 @@ double _frameCorrelation(_FrameSignature left, _FrameSignature right) {
     final shared = leftMachine.gtins.intersection(rightMachine.gtins);
     if (shared.isEmpty) return 0;
 
-    // A shared product may still be a different physical lot/serial. Preserve
-    // that contradiction instead of hiding it behind near-identical packaging.
+    // A shared product may still be a different physical lot/serial/date. GS1
+    // production identifiers are physical-pack evidence, so any explicit clash
+    // must remain independent instead of being hidden by near-identical artwork.
     if (_explicitAnchorConflict(leftMachine.lots, rightMachine.lots) ||
-        _explicitAnchorConflict(leftMachine.serials, rightMachine.serials)) {
+        _explicitAnchorConflict(leftMachine.serials, rightMachine.serials) ||
+        _explicitAnchorConflict(
+          leftMachine.manufacturingDates,
+          rightMachine.manufacturingDates,
+        ) ||
+        _explicitAnchorConflict(leftMachine.expiryDates, rightMachine.expiryDates)) {
       return 0;
     }
   }

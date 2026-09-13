@@ -39,7 +39,10 @@ SpatialTraceabilityHints inferSpatialTraceability(
   final graph = buildOfflineEvidenceGraph(source, maxFrames: 12);
   if (graph.groups.isEmpty) return const SpatialTraceabilityHints();
   final observations = <_SpatialObservation>[];
-  for (final group in graph.groups.take(8)) {
+  // The evidence graph is already hard-bounded to 12 diverse observations.
+  // A second top-8 quality cut could discard a unique, deliberately captured
+  // low-light EXP/BATCH side after the selector had correctly preserved it.
+  for (final group in graph.groups) {
     observations.addAll(_frameObservations(group.representative));
   }
   return SpatialTraceabilityHints(
