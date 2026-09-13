@@ -64,12 +64,18 @@ void main() {
       ),
     ]);
 
-    expect(overview.ranked.length, 2);
-    expect(overview.ranked.first.name, 'Paracetamol');
-    expect(overview.ranked.first.unitsSold, 10);
+    final ranked = overview.ranked;
+    expect(ranked.length, 2);
+    expect(ranked.first.name, 'Paracetamol');
+    expect(ranked.first.unitsSold, 10);
     expect(
-      overview.ranked.first.demandShare(overview.totalUnitsSold),
+      ranked.first.demandShare(overview.totalUnitsSold),
       closeTo(2 / 3, 0.0001),
+    );
+    expect(
+      identical(ranked, overview.ranked),
+      isTrue,
+      reason: 'A fixed SalesOverview must not re-sort the same demand set on every UI rebuild.',
     );
   });
 
