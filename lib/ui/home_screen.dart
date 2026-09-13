@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../state/pharmacy_controller.dart';
-import '../domain/home_projection.dart';
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import 'design.dart';
@@ -54,15 +53,10 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
-      // One authoritative, presentation-sized pass replaces five independent
-      // filter/sort scans plus a second full InventoryStats walk. The domain
-      // status engine still owns every expiry/SOLD rule; Home only renders its
-      // bounded projection.
-      final projection = HomeInventoryProjection.build(
-        medicines: controller.records,
-        settings: controller.settings,
-        today: controller.today,
-      );
+      // The controller memoizes this bounded projection by exact inventory
+      // snapshot + civil day. AI progress and other non-inventory notifications
+      // can repaint Home without rescanning the full Medicine Database.
+      final projection = controller.homeProjection;
       final attention = projection.attention;
       return ListView(
         key: const PageStorageKey('home-scroll'),
