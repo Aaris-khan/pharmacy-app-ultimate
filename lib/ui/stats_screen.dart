@@ -16,11 +16,7 @@ class StatsScreen extends StatelessWidget {
     animation: controller,
     builder: (context, _) {
       final inventory = controller.stats;
-      final sales = SalesOverview(
-        controller.sales,
-        medicines: controller.records,
-        events: controller.snapshot.events,
-      );
+      final sales = controller.salesOverview;
       final ranked = sales.ranked;
       final top = ranked.isEmpty ? null : ranked.first;
       final topShare = top?.demandShare(sales.totalUnitsSold) ?? 0;
@@ -282,11 +278,7 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
     body: AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final overview = SalesOverview(
-          controller.sales,
-          medicines: controller.records,
-          events: controller.snapshot.events,
-        );
+        final overview = controller.salesOverview;
         final ranked = overview.ranked;
         if (ranked.isEmpty) {
           return const EmptyState(
