@@ -55,6 +55,11 @@ MedicineDateResolution inferMedicineDateIntelligence({
 }) {
   final evidence = <MedicineDateEvidence>[];
   final grouped = <String, MedicineDateEvidence>{};
+  final today = DateTime.utc(
+    referenceDate.year,
+    referenceDate.month,
+    referenceDate.day,
+  );
 
   void remember(MedicineDateEvidence item) {
     final key = '${item.role.name}|${item.date.value}';
@@ -106,6 +111,10 @@ MedicineDateResolution inferMedicineDateIntelligence({
     final observed = <String>{};
 
     for (final orderedLines in _dateLineStreams(frame)) {
+      final acceptedBareCompact = _bareCompactDatePairIndexes(
+        orderedLines,
+        today,
+      );
       for (var index = 0; index < orderedLines.length; index++) {
         final line = orderedLines[index];
         final matches = extractMedicineDateMatches(line, allowCompact: true);
@@ -113,11 +122,10 @@ MedicineDateResolution inferMedicineDateIntelligence({
         final labels = _dateLabels(line);
         for (final match in matches.take(6)) {
           var labelled = _nearestRole(match.start, match.end, labels);
+          final standalone =
+              matches.length == 1 && _isStandaloneDateMatch(line, match);
 
-          if (labelled == null &&
-              labels.isEmpty &&
-              matches.length == 1 &&
-              _isStandaloneDateMatch(line, match)) {
+          if (labelled == null && labels.isEmpty && standalone) {
             if (index > 0) {
               final previousRole = _labelOnlyRole(orderedLines[index - 1]);
               if (previousRole != null) labelled = (previousRole, 24);
@@ -131,11 +139,19 @@ MedicineDateResolution inferMedicineDateIntelligence({
                 labelled = (followingRole, 30);
               }
             }
+            if (labelled == null &&
+                _adjacentNonDateLabel(orderedLines, index)) {
+              continue;
+            }
           }
 
           final role = labelled?.$1 ?? MedicineDateRole.unknown;
           if (labelled != null && role == MedicineDateRole.unknown) continue;
-          if (match.compact && labelled == null) continue;
+          if (match.compact &&
+              labelled == null &&
+              !acceptedBareCompact.contains(index)) {
+            continue;
+          }
           if (!observed.add('${role.name}|${match.date.value}')) continue;
           final distance = labelled?.$2 ?? 999;
           final explicit = labelled != null;
@@ -188,11 +204,6 @@ MedicineDateResolution inferMedicineDateIntelligence({
         return latestStart != null && latestStart.isAfter(earliestEnd!);
       });
   var conflicted = labelConflict;
-  final today = DateTime.utc(
-    referenceDate.year,
-    referenceDate.month,
-    referenceDate.day,
-  );
 
   if (manufacturing != null && expiry != null) {
     if (!manufacturing.date.start.isBefore(expiry.date.end)) {
@@ -359,6 +370,51 @@ MedicineDateRole? _labelOnlyRole(String line) {
   if (labels.length != 1) return null;
   final role = labels.single.$1;
   return role == MedicineDateRole.unknown ? null : role;
+}
+
+bool _labelOnlyNonDate(String line) {
+  if (RegExp(r'[0-9०-९٠-٩۰-۹]').hasMatch(line)) return false;
+  final labels = _dateLabels(line);
+  return labels.length == 1 && labels.single.$1 == MedicineDateRole.unknown;
+}
+
+bool _adjacentNonDateLabel(List<String> lines, int index) =>
+    (index > 0 && _labelOnlyNonDate(lines[index - 1])) ||
+    (index + 1 < lines.length && _labelOnlyNonDate(lines[index + 1]));
+
+Set<int> _bareCompactDatePairIndexes(List<String> lines, DateTime today) {
+  final candidates = <(int, ParsedMedicineDate)>[];
+  for (var index = 0; index < lines.length; index++) {
+    final matches = extractMedicineDateMatches(lines[index], allowCompact: true);
+    if (matches.length != 1) continue;
+    final match = matches.single;
+    if (!match.compact ||
+        !_isStandaloneDateMatch(lines[index], match) ||
+        _adjacentNonDateLabel(lines, index)) {
+      continue;
+    }
+    candidates.add((index, match.date));
+  }
+
+  // More than two unlabeled compact values are ambiguous (lot, serial, price,
+  // manufacture and expiry can all coexist). Only one clean pair is allowed to
+  // contribute to chronology; a singleton remains non-authoritative.
+  if (candidates.length != 2) return const <int>{};
+  final first = candidates[0];
+  final second = candidates[1];
+  final firstBeforeSecond = first.$2.start.isBefore(second.$2.start);
+  final earlier = firstBeforeSecond ? first : second;
+  final later = firstBeforeSecond ? second : first;
+  if (!earlier.$2.start.isBefore(later.$2.end)) return const <int>{};
+
+  final shelfLifeDays = later.$2.end.difference(earlier.$2.start).inDays;
+  if (shelfLifeDays < 60 || shelfLifeDays > 5 * 366) {
+    return const <int>{};
+  }
+  if (earlier.$2.start.isAfter(today.add(const Duration(days: 31)))) {
+    return const <int>{};
+  }
+  return Set<int>.unmodifiable(<int>{earlier.$1, later.$1});
 }
 
 bool _isStandaloneDateLine(String line) {
