@@ -74,7 +74,9 @@ Set<int> _bareCompactDatePairIndexes(List<String> lines, DateTime today) {
     final matches = extractMedicineDateMatches(lines[index], allowCompact: true);
     if (matches.length != 1) continue;
     final match = matches.single;
-    if (!match.compact ||
+    final roleUnsafeBareToken =
+        match.compact || _isBareSeparatorlessFullDate(lines[index], match);
+    if (!roleUnsafeBareToken ||
         !_isStandaloneDateMatch(lines[index], match) ||
         _adjacentNonDateLabel(lines, index)) {
       continue;
@@ -108,6 +110,17 @@ bool _isStandaloneDateLine(String line) {
 bool _isStandaloneDateMatch(String line, MedicineDateMatch match) =>
     line.substring(0, match.start).trim().isEmpty &&
     line.substring(match.end).trim().isEmpty;
+
+/// An 8-character separator-less full date is calendar-parseable but still
+/// identifier-like when no MFG/EXP evidence owns it. Keep the parser's compact
+/// flag unchanged (existing chronology contracts rely on it) and apply this
+/// stricter role-safety classification only in the semantic date engine.
+bool _isBareSeparatorlessFullDate(String line, MedicineDateMatch match) {
+  if (!_isStandaloneDateMatch(line, match)) return false;
+  final raw = line.substring(match.start, match.end).trim();
+  if (raw.length != 8) return false;
+  return RegExp(r'^[0-9०-९٠-٩۰-۹OoIlL]{8}$').hasMatch(raw);
+}
 
 List<(MedicineDateRole, int, int)> _dateLabels(String line) {
   final result = <(MedicineDateRole, int, int)>[];
