@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'medicine_date_parser.dart';
 import 'medicine_understanding.dart';
 import 'search.dart';
 
@@ -91,8 +92,8 @@ List<MedicineScanDraft> normalizeMedicineReviewDrafts(
     rawText: rawText,
     searchKeywords: keywords,
     frameSequences: sequences,
-    expiryMonthOnly: primary.expiryMonthOnly,
-    mfgMonthOnly: primary.mfgMonthOnly,
+    expiryMonthOnly: fields['expiry']?.value.length == 7,
+    mfgMonthOnly: fields['mfg']?.value.length == 7,
     printedPackSize: firstPrinted((draft) => draft.printedPackSize),
     printedMrp: firstPrinted((draft) => draft.printedMrp),
     // Multiple draft hypotheses from a source that promised one physical pack
@@ -190,6 +191,11 @@ ExtractedMedicineField? _mergeObservedField(
   String key,
   List<MedicineScanDraft> drafts,
 ) {
+  if (key == 'mfg' || key == 'expiry') {
+    final dateResult = _mergeObservedDateField(key, drafts);
+    if (dateResult != null) return dateResult;
+  }
+
   final buckets = <String, _ObservedFieldBucket>{};
   for (final draft in drafts) {
     final field = draft.field(key);
@@ -221,6 +227,57 @@ ExtractedMedicineField? _mergeObservedField(
     value: winner.value,
     confidence: confidence,
     support: min(winner.support, 999),
+    conflicted: contradiction,
+  );
+}
+
+/// MFG/EXP month precision and an exact day in that same month are compatible
+/// observations, not contradictory facts. The temporal resolver uses the same
+/// interval rule. If an exact day is available with reasonable OCR confidence,
+/// retain that more precise observation without borrowing confidence/support
+/// from a broader month-only witness. Two different exact days, or two different
+/// months, still fail closed as a real contradiction.
+ExtractedMedicineField? _mergeObservedDateField(
+  String key,
+  List<MedicineScanDraft> drafts,
+) {
+  final buckets = <String, _ObservedDateBucket>{};
+  var sawDate = false;
+  for (final draft in drafts) {
+    final field = draft.field(key);
+    if (field.isEmpty) continue;
+    final parsed = parseMedicineDateText(field.value);
+    if (parsed == null || parsed.value.length < 7) {
+      // Do not normalize malformed/unknown date syntax here. Falling back to
+      // the generic merger preserves the previous fail-closed behavior.
+      return null;
+    }
+    sawDate = true;
+    final monthKey = parsed.value.substring(0, 7);
+    buckets
+        .putIfAbsent(monthKey, () => _ObservedDateBucket(monthKey))
+        .add(field, parsed);
+  }
+  if (!sawDate || buckets.isEmpty) return null;
+
+  final ranked = buckets.values.toList(growable: false)
+    ..sort((a, b) {
+      final score = b.score.compareTo(a.score);
+      if (score != 0) return score;
+      return a.monthKey.compareTo(b.monthKey);
+    });
+  final winner = ranked.first;
+  final preferred = winner.preferred;
+  final contradiction =
+      ranked.length > 1 || winner.anyConflict || winner.distinctExactDays > 1;
+  final confidence = contradiction
+      ? min(preferred.bestConfidence, .74).toDouble()
+      : preferred.bestConfidence;
+
+  return ExtractedMedicineField(
+    value: preferred.value,
+    confidence: confidence,
+    support: min(preferred.support, 999),
     conflicted: contradiction,
   );
 }
@@ -277,5 +334,48 @@ class _ObservedFieldBucket {
     support += max(field.support, 1);
     anyConflict = anyConflict || field.conflicted;
     _rawValues.add(field.value.trim().toLowerCase());
+  }
+}
+
+class _ObservedDateBucket {
+  _ObservedDateBucket(this.monthKey);
+
+  final String monthKey;
+  final Map<String, _ObservedFieldBucket> _exact =
+      <String, _ObservedFieldBucket>{};
+  _ObservedFieldBucket? _month;
+  double score = 0;
+  bool anyConflict = false;
+
+  int get distinctExactDays => _exact.length;
+
+  void add(ExtractedMedicineField field, ParsedMedicineDate date) {
+    final target = date.monthOnly
+        ? (_month ??= _ObservedFieldBucket(date.value))
+        : _exact.putIfAbsent(
+            date.value,
+            () => _ObservedFieldBucket(date.value),
+          );
+    target.add(field);
+    score += field.confidence.clamp(0, 1).toDouble() *
+        (field.conflicted ? .55 : 1.0);
+    anyConflict = anyConflict || field.conflicted;
+  }
+
+  _ObservedFieldBucket get preferred {
+    if (_exact.length == 1) {
+      final exact = _exact.values.single;
+      if (_month == null || exact.bestConfidence >= .68) return exact;
+    }
+    if (_month != null) return _month!;
+    final values = _exact.values.toList(growable: false)
+      ..sort((a, b) {
+        final confidence = b.bestConfidence.compareTo(a.bestConfidence);
+        if (confidence != 0) return confidence;
+        final score = b.score.compareTo(a.score);
+        if (score != 0) return score;
+        return a.value.compareTo(b.value);
+      });
+    return values.first;
   }
 }
