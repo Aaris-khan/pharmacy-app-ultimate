@@ -138,6 +138,7 @@ class SalesOverview {
   int salesValuePaise = 0;
   int unknownValueSales = 0;
   final Map<String, SoldMedicineDemand> _byMedicine = {};
+  List<SoldMedicineDemand>? _rankedCache;
 
   int _positiveUnits(int? value) => value != null && value > 0 ? value : 1;
 
@@ -181,6 +182,8 @@ class SalesOverview {
   }
 
   List<SoldMedicineDemand> get ranked {
+    final cached = _rankedCache;
+    if (cached != null) return cached;
     final result = _byMedicine.values
         .where((item) => item.unitsSold > 0)
         .toList();
@@ -189,6 +192,6 @@ class SalesOverview {
       if (units != 0) return units;
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
-    return result;
+    return _rankedCache = List<SoldMedicineDemand>.unmodifiable(result);
   }
 }
