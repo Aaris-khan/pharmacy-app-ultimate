@@ -51,8 +51,8 @@ void main() {
 
     final parsed = PharmacyBackup.parse(encoded);
     expect(parsed.sourceRevision, 7);
-    expect(parsed.records.single.name, 'Dolo');
-    expect(parsed.sales.single.quantity, 2);
+    expect(parsed.records.values.single.name, 'Dolo');
+    expect(parsed.sales.values.single.quantity, 2);
     expect(parsed.soldValue, 1200);
     expect(parsed.integrityVerified, isTrue);
     expect(parsed.legacyFormat, isFalse);
@@ -72,8 +72,8 @@ void main() {
     legacy.remove('integrity');
 
     final parsed = PharmacyBackup.parse(jsonEncode(legacy));
-    expect(parsed.records.single.id, 'stock-a');
-    expect(parsed.sales.single.id, 'sale-a');
+    expect(parsed.records.values.single.id, 'stock-a');
+    expect(parsed.sales.values.single.id, 'sale-a');
     expect(parsed.integrityVerified, isFalse);
     expect(parsed.legacyFormat, isTrue);
   });
@@ -90,7 +90,7 @@ void main() {
     ];
 
     final parsed = PharmacyBackup.parse(jsonEncode(envelope));
-    expect(parsed.records.single.name, 'Dolo');
+    expect(parsed.records.values.single.name, 'Dolo');
   });
 
   test('restore impact explains stock, sale and settings consequences', () {
@@ -204,8 +204,8 @@ void main() {
   test('restore impact ignores record revision churn when facts are identical', () {
     final incoming = _backup();
     final current = Medicine.fromJson({
-      ...incoming.records.single.toJson(),
-      'revision': incoming.records.single.revision + 50,
+      ...incoming.records.values.single.toJson(),
+      'revision': incoming.records.values.single.revision + 50,
     });
     final impact = BackupImpact.compare(
       backup: incoming,

@@ -541,7 +541,9 @@ Set<String> _evidenceSaltAliasKeysFromText(String text) {
 
 String _storedSaltAliasKey(String alias) {
   final key = _saltAliasKey(alias);
-  return _validSaltAliasKey(key) ? '$_saltAliasPrefix$key' : '';
+  return _validSaltAliasKey(key)
+      ? '${OfflineRecognitionMemoryService._saltAliasPrefix}$key'
+      : '';
 }
 
 String _saltAliasKey(String value) => _ocrFoldIdentity(searchText(value))

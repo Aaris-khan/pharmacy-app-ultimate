@@ -41,7 +41,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _error = '', _catalogError = '';
   int _generation = 0, _catalogGeneration = 0;
   ScanResult? _scan;
-  late InventorySnapshot _observedSnapshot;
+  late Object _observedSnapshot;
   late DateTime _observedDay;
 
   @override
