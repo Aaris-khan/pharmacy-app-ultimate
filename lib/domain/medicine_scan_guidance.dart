@@ -1,6 +1,7 @@
 import 'medicine_machine_code_safety.dart';
 import 'medicine_scan_commit.dart';
 import 'medicine_understanding.dart';
+import 'offline_evidence_graph.dart';
 import 'regulatory_medicine_code.dart';
 import 'search.dart';
 
@@ -48,15 +49,16 @@ class MedicineScanEvidenceWindow {
 ///
 /// Exact duplicate observations are collapsed before the V2 resolver. The newer
 /// observation replaces the old one only when it carries better physical quality
-/// or richer geometry. This keeps live camera sampling bounded without allowing
-/// repeated identical frames to manufacture additional evidence authority.
+/// or richer geometry. The same diversity selector used by the offline evidence
+/// graph then keeps complementary front/composition/lot views inside the hard
+/// frame budget instead of using FIFO eviction.
 MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
   Iterable<MedicineFrameEvidence> existing,
   MedicineFrameEvidence incoming, {
   int maxFrames = 18,
 }) {
   final limit = maxFrames < 1 ? 1 : maxFrames;
-  final prior = existing.take(limit).toList(growable: false);
+  final prior = selectOfflineEvidenceFrames(existing, maxFrames: limit);
   final incomingAnchor = _machineAnchor(incoming);
   _ScanMachineAnchor? currentAnchor;
   for (final frame in prior.reversed) {
@@ -83,23 +85,33 @@ MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
   if (incomingFingerprint.isNotEmpty) {
     for (var index = prior.length - 1; index >= 0; index--) {
       if (_exactFrameFingerprint(prior[index]) != incomingFingerprint) continue;
-      final values = prior.toList(growable: true);
-      if (_preferIncomingDuplicate(incoming, prior[index])) {
-        values[index] = incoming;
+      if (!_preferIncomingDuplicate(incoming, prior[index])) {
+        return MedicineScanEvidenceWindow(
+          frames: prior,
+          startedNewPack: false,
+        );
       }
+
+      // A better duplicate is a newer observation, so keep chronology truthful:
+      // remove the older copy and append the replacement. In-place replacement
+      // at the old index would make later `reversed` boundary checks reason about
+      // list position rather than actual observation order.
+      final values = prior.toList(growable: true)
+        ..removeAt(index)
+        ..add(incoming);
       return MedicineScanEvidenceWindow(
-        frames: List<MedicineFrameEvidence>.unmodifiable(values),
+        frames: selectOfflineEvidenceFrames(values, maxFrames: limit),
         startedNewPack: false,
       );
     }
   }
 
-  final values = <MedicineFrameEvidence>[...prior, incoming];
-  if (values.length > limit) {
-    values.removeRange(0, values.length - limit);
-  }
+  final values = selectOfflineEvidenceFrames(
+    <MedicineFrameEvidence>[...prior, incoming],
+    maxFrames: limit,
+  );
   return MedicineScanEvidenceWindow(
-    frames: List<MedicineFrameEvidence>.unmodifiable(values),
+    frames: values,
     startedNewPack: false,
   );
 }

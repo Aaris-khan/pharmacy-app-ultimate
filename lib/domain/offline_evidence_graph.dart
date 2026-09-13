@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'medicine_machine_code_safety.dart';
 import 'medicine_understanding.dart';
 import 'regulatory_medicine_code.dart';
 import 'search.dart';
@@ -106,8 +107,8 @@ List<MedicineFrameEvidence> selectOfflineEvidenceFrames(
       if (utility != 0) return utility;
       return b.compareTo(a);
     });
-  // More than four distinct trusted machine anchors inside one bounded medicine
-  // window is already abnormal; four witnesses preserve a contradiction without
+  // More than four distinct machine anchors inside one bounded medicine window
+  // is already abnormal; four witnesses preserve a contradiction without
   // allowing barcode-heavy noise to monopolize every OCR slot.
   for (final index in machineWitnesses.take(min(4, limit))) {
     keep(index);
@@ -302,31 +303,29 @@ class _MachineAnchor {
     required this.serials,
     required this.manufacturingDates,
     required this.expiryDates,
+    required this.ambiguousProductIds,
   });
 
   factory _MachineAnchor.fromFrame(MedicineFrameEvidence frame) {
-    final gtins = <String>{};
+    final assessment = assessMedicineMachineCodes(frame.allBarcodes);
+    final gtins = assessment.trustedProductKeys.toSet();
     final lots = <String>{};
     final serials = <String>{};
     final manufacturingDates = <String>{};
     final expiryDates = <String>{};
     for (final raw in frame.allBarcodes.take(8)) {
       final structured = parseRegulatoryMedicineCode(raw);
-      if (structured != null) {
-        if (structured.gtin.isNotEmpty) gtins.add(structured.gtin);
-        final lot = searchText(structured.batchLot);
-        if (lot.isNotEmpty) lots.add(lot);
-        final serial = searchText(structured.serial);
-        if (serial.isNotEmpty) serials.add(serial);
-        if (structured.manufacturingYyMmDd.isNotEmpty) {
-          manufacturingDates.add(structured.manufacturingYyMmDd);
-        }
-        if (structured.expiryYyMmDd.isNotEmpty) {
-          expiryDates.add(structured.expiryYyMmDd);
-        }
+      if (structured == null) continue;
+      final lot = searchText(structured.batchLot);
+      if (lot.isNotEmpty) lots.add(lot);
+      final serial = searchText(structured.serial);
+      if (serial.isNotEmpty) serials.add(serial);
+      if (structured.manufacturingYyMmDd.isNotEmpty) {
+        manufacturingDates.add(structured.manufacturingYyMmDd);
       }
-      final plain = _canonicalPlainGtin(raw);
-      if (plain.isNotEmpty) gtins.add(plain);
+      if (structured.expiryYyMmDd.isNotEmpty) {
+        expiryDates.add(structured.expiryYyMmDd);
+      }
     }
     return _MachineAnchor(
       gtins: gtins,
@@ -334,6 +333,7 @@ class _MachineAnchor {
       serials: serials,
       manufacturingDates: manufacturingDates,
       expiryDates: expiryDates,
+      ambiguousProductIds: assessment.ambiguous,
     );
   }
 
@@ -342,8 +342,9 @@ class _MachineAnchor {
   final Set<String> serials;
   final Set<String> manufacturingDates;
   final Set<String> expiryDates;
+  final bool ambiguousProductIds;
 
-  bool get hasTrustedProductId => gtins.isNotEmpty;
+  bool get hasTrustedProductId => !ambiguousProductIds && gtins.length == 1;
 
   String get fingerprint {
     if (gtins.isEmpty &&
@@ -354,7 +355,8 @@ class _MachineAnchor {
       return '';
     }
     String ordered(Set<String> values) => (values.toList()..sort()).join(',');
-    return '${ordered(gtins)}|${ordered(lots)}|${ordered(serials)}|'
+    return '${ambiguousProductIds ? 'ambiguous' : 'single'}|'
+        '${ordered(gtins)}|${ordered(lots)}|${ordered(serials)}|'
         '${ordered(manufacturingDates)}|${ordered(expiryDates)}';
   }
 }
@@ -376,12 +378,16 @@ double _frameCorrelation(_FrameSignature left, _FrameSignature right) {
   final leftMachine = left.machine;
   final rightMachine = right.machine;
 
-  // Two independently checksum/GS1-validated product identifiers that disagree
-  // are a hard anti-correlation boundary. Similar box artwork cannot merge two
-  // different medicines into one evidence component.
   if (leftMachine.gtins.isNotEmpty && rightMachine.gtins.isNotEmpty) {
-    final shared = leftMachine.gtins.intersection(rightMachine.gtins);
-    if (shared.isEmpty) return 0;
+    // An ambiguous multi-product observation must never correlate with one
+    // singleton product merely because their GTIN sets overlap. If both frames
+    // are ambiguous, only an identical product-key set may proceed to ordinary
+    // visual similarity; ambiguity itself is never treated as identity proof.
+    if (leftMachine.ambiguousProductIds || rightMachine.ambiguousProductIds) {
+      if (!_sameSet(leftMachine.gtins, rightMachine.gtins)) return 0;
+    } else if (leftMachine.gtins.intersection(rightMachine.gtins).isEmpty) {
+      return 0;
+    }
 
     // A shared product may still be a different physical lot/serial/date. GS1
     // production identifiers are physical-pack evidence, so any explicit clash
@@ -401,8 +407,9 @@ double _frameCorrelation(_FrameSignature left, _FrameSignature right) {
   final trigramSimilarity = _jaccard(left.trigrams, right.trigrams);
   final visualTextSimilarity = max(tokenSimilarity, trigramSimilarity * .96);
 
-  if (leftMachine.gtins.isNotEmpty && rightMachine.gtins.isNotEmpty) {
-    // Same GTIN plus no OCR on either frame is a repeated barcode observation.
+  if (leftMachine.hasTrustedProductId && rightMachine.hasTrustedProductId) {
+    // Same unambiguous GTIN plus no OCR on either frame is a repeated barcode
+    // observation. Ambiguous multi-product frames never enter this authority path.
     if (!left.hasText && !right.hasText) return .99;
     // Same GTIN is not sufficient to collapse front/back complementary views.
     // It only strengthens an already-similar visual observation.
@@ -413,30 +420,11 @@ double _frameCorrelation(_FrameSignature left, _FrameSignature right) {
   return visualTextSimilarity;
 }
 
+bool _sameSet(Set<String> left, Set<String> right) =>
+    left.length == right.length && left.containsAll(right);
+
 bool _explicitAnchorConflict(Set<String> left, Set<String> right) =>
     left.isNotEmpty && right.isNotEmpty && left.intersection(right).isEmpty;
-
-String _canonicalPlainGtin(String raw) {
-  final value = raw.trim();
-  if (!RegExp(r'^\d+$').hasMatch(value) ||
-      !const {8, 12, 13, 14}.contains(value.length) ||
-      !_validGtin(value)) {
-    return '';
-  }
-  return value.padLeft(14, '0');
-}
-
-bool _validGtin(String digits) {
-  var sum = 0;
-  for (
-    var index = digits.length - 2, position = 1;
-    index >= 0;
-    index--, position++
-  ) {
-    sum += int.parse(digits[index]) * (position.isOdd ? 3 : 1);
-  }
-  return (10 - sum % 10) % 10 == int.parse(digits[digits.length - 1]);
-}
 
 double _jaccard(Set<String> left, Set<String> right) {
   if (left.isEmpty || right.isEmpty) return 0;
