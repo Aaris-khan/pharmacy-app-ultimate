@@ -40,6 +40,11 @@ class MedicineDateMatch {
   });
   final int start, end;
   final ParsedMedicineDate date;
+
+  /// True when a separator-less token is still role-unsafe without a date
+  /// label. Unambiguous 8-digit full dates are deliberately false: downstream
+  /// chronology may use a coherent pair, while a singleton remains only a
+  /// sub-threshold hint and non-date labels still veto the value.
   final bool compact;
 }
 
@@ -129,9 +134,13 @@ List<MedicineDateMatch> extractMedicineDateMatches(
   );
 
   if (allowCompact) {
-    // Four-digit years disambiguate DDMMYYYY / YYYYMMDD and MMYYYY / YYYYMM.
-    // Evaluate the complete token; never extract a date from inside a GTIN.
-    add(RegExp(r'(?<!\d)(\d{8}|\d{6})(?!\d)'), (m) {
+    // Four-digit years make an 8-digit full date self-validating enough for the
+    // downstream chronology engine: try both DDMMYYYY and YYYYMMDD and accept
+    // only one unique valid calendar interpretation. It is not marked role-
+    // unsafe compact, so two separator-less dates can form an MFG/EXP pair even
+    // when OCR dropped every label. A lone value still cannot auto-fill because
+    // date intelligence keeps an unlabeled singleton below its apply threshold.
+    add(RegExp(r'(?<!\d)(\d{8})(?!\d)'), (m) {
       final digits = m[1]!;
       final candidates = <ParsedMedicineDate>[];
       void keep(int year, int month, int? day) {
@@ -142,29 +151,35 @@ List<MedicineDateMatch> extractMedicineDateMatches(
         }
       }
 
-      if (digits.length == 8) {
-        keep(
-          int.parse(digits.substring(4)),
-          int.parse(digits.substring(2, 4)),
-          int.parse(digits.substring(0, 2)),
-        );
-        keep(
-          int.parse(digits.substring(0, 4)),
-          int.parse(digits.substring(4, 6)),
-          int.parse(digits.substring(6)),
-        );
-      } else {
-        keep(
-          int.parse(digits.substring(2)),
-          int.parse(digits.substring(0, 2)),
-          null,
-        );
-        keep(
-          int.parse(digits.substring(0, 4)),
-          int.parse(digits.substring(4)),
-          null,
-        );
+      keep(
+        int.parse(digits.substring(4)),
+        int.parse(digits.substring(2, 4)),
+        int.parse(digits.substring(0, 2)),
+      );
+      keep(
+        int.parse(digits.substring(0, 4)),
+        int.parse(digits.substring(4, 6)),
+        int.parse(digits.substring(6)),
+      );
+      return candidates.length == 1 ? candidates.single : null;
+    });
+
+    // Six digits can only be MMYYYY/YYYYMM here. They are much easier to
+    // confuse with a lot/serial code, so preserve the compact marker and let
+    // date intelligence require an explicit/adjacent date label.
+    add(RegExp(r'(?<!\d)(\d{6})(?!\d)'), (m) {
+      final digits = m[1]!;
+      final candidates = <ParsedMedicineDate>[];
+      void keep(int year, int month) {
+        final date = _date(year, month, null);
+        if (date != null &&
+            !candidates.any((other) => other.value == date.value)) {
+          candidates.add(date);
+        }
       }
+
+      keep(int.parse(digits.substring(2)), int.parse(digits.substring(0, 2)));
+      keep(int.parse(digits.substring(0, 4)), int.parse(digits.substring(4)));
       return candidates.length == 1 ? candidates.single : null;
     }, compact: true);
   }
