@@ -620,24 +620,43 @@ bool _saltCorrectionContextSupports(
     searchText(entry.brand),
   }.where((value) => value.length >= 3).toList(growable: false);
 
+  var observedAlias = false;
   for (final context in contexts) {
     if (!context.saltKeys.contains(aliasKey)) continue;
+    observedAlias = true;
+
+    var anchored = false;
     if (expectedBarcode.length >= 6 &&
         context.barcodes.contains(expectedBarcode)) {
-      return true;
+      anchored = true;
     }
-    if (learnedIdentityKeys.any(context.identityKeys.contains)) return true;
-    for (final target in identityTargets) {
-      for (final observed in context.identityKeys) {
-        final ratio =
-            min(observed.length, target.length) /
-            max(observed.length, target.length);
-        if (ratio < .68) continue;
-        if (_identitySimilarity(observed, target) >= .86) return true;
+    if (!anchored &&
+        learnedIdentityKeys.any(context.identityKeys.contains)) {
+      anchored = true;
+    }
+    if (!anchored) {
+      for (final target in identityTargets) {
+        for (final observed in context.identityKeys) {
+          final ratio =
+              min(observed.length, target.length) /
+              max(observed.length, target.length);
+          if (ratio < .68) continue;
+          if (_identitySimilarity(observed, target) >= .86) {
+            anchored = true;
+            break;
+          }
+        }
+        if (anchored) break;
       }
     }
+
+    // A learned composition alias is injected into the parser's knowledge for
+    // the whole bounded intake. Therefore every occurrence must be explained by
+    // the same medicine identity. One mixed/unknown occurrence is enough to
+    // abstain, preventing correction leakage across multi-medicine video/import.
+    if (!anchored) return false;
   }
-  return false;
+  return observedAlias;
 }
 
 String _recognitionBarcodeKey(String value) =>
