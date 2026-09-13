@@ -9,7 +9,7 @@ import '../domain/medicine_understanding.dart';
 import '../services/medicine_intake_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
-import 'import_screen.dart';
+import 'prepared_medicine_review_screen.dart';
 
 class MedicineIntakePanel extends StatefulWidget {
   const MedicineIntakePanel({super.key, required this.controller, this.onAsk});
@@ -53,16 +53,18 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
       .trim();
 
   Future<void> _review(MedicineIntakeJob job) async {
-    await Navigator.push<void>(
+    final completed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => ImportInboxScreen(
+        builder: (_) => PreparedMedicineReviewScreen(
           controller: widget.controller,
-          evidence: const [],
-          preparedDrafts: List.of(job.drafts),
+          drafts: List<MedicineScanDraft>.of(job.drafts),
         ),
       ),
     );
+    if (completed == true) {
+      await _run(() => queue.dismiss(job));
+    }
   }
 
   bool _expired(String value) {
@@ -152,7 +154,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   Widget _jobCard(MedicineIntakeJob job) {
     final processing = !job.terminal;
     final failedWithoutDraft = job.status == 'failed' && job.drafts.isEmpty;
-    final previews = job.drafts.take(3).toList(growable: false);
+    final preview = job.drafts.isEmpty ? null : job.drafts.first;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -233,14 +235,34 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                 label: Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
               ),
             ] else ...[
-              for (var i = 0; i < previews.length; i++)
-                _draftCard(previews[i], i),
-              if (job.drafts.length > 3)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '+ ${job.drafts.length - 3} more medicines',
-                    style: const TextStyle(color: muted, fontSize: 12),
+              if (preview != null) _draftCard(preview, 0),
+              if (job.drafts.length > 1)
+                Container(
+                  margin: const EdgeInsets.only(top: 2, bottom: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: primary.withValues(alpha: .055),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.layers_outlined,
+                        color: primary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${job.drafts.length} medicines found · Next reviews them one at a time.',
+                          style: const TextStyle(
+                            color: primary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               if (job.coverageWarning.isNotEmpty) ...[
