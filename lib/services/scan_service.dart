@@ -204,7 +204,11 @@ class _OcrLayoutLine {
 Iterable<_OcrLayoutLine> _layoutEvidence(RecognizedText result) sync* {
   for (final block in result.blocks) {
     for (final line in block.lines) {
-      final text = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      // Apply the exact same semantic-preserving normalization to geometry
+      // evidence as to flattened OCR text. Date adjacency, prominent product
+      // headings and strength parsing must not disagree merely because one path
+      // saw full-width/script digits while the other saw canonical ASCII.
+      final text = normalizeMedicineOcrLine(line.text);
       final box = line.boundingBox;
       if (text.isEmpty || box.width <= 0 || box.height <= 0) continue;
       yield _OcrLayoutLine(

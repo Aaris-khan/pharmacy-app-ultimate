@@ -197,7 +197,8 @@ List<MedicineDateMatch> extractMedicineDateMatches(
 
     // Six digits can only be MMYYYY/YYYYMM here. They are much easier to
     // confuse with a lot/serial code, so preserve the compact marker and let
-    // date intelligence require an explicit/adjacent date label.
+    // date intelligence require an explicit/adjacent date label or an isolated
+    // coherent two-date chronology.
     add(RegExp(r'(?<!\d)(\d{6})(?!\d)'), (m) {
       final digits = m[1]!;
       final candidates = <ParsedMedicineDate>[];
@@ -213,6 +214,24 @@ List<MedicineDateMatch> extractMedicineDateMatches(
       keep(int.parse(digits.substring(0, 4)), int.parse(digits.substring(4)));
       return candidates.length == 1 ? candidates.single : null;
     }, compact: true);
+
+    // Many Indian packs print month/year as MM/YY and OCR may drop the slash,
+    // yielding four digits such as 0428. Treat this only as compact date syntax:
+    // semantic date intelligence still requires an owning date label or exactly
+    // two isolated values forming a plausible MFG→EXP shelf-life chronology.
+    // A singleton "0428" therefore never becomes an authoritative date by itself.
+    add(
+      RegExp(r'(?<!\d)(\d{4})(?!\d)'),
+      (m) {
+        final digits = m[1]!;
+        return _date(
+          _year(digits.substring(2)),
+          int.parse(digits.substring(0, 2)),
+          null,
+        );
+      },
+      compact: true,
+    );
   }
   result.sort((a, b) => a.start.compareTo(b.start));
   return result;
