@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum AiProviderProtocol { gemini, chatCompletions, anthropicMessages }
 
 class AiConfiguration {
@@ -79,6 +81,24 @@ class AiConfiguration {
     'jsonModeEnabled': jsonModeEnabled,
     'responseTimeoutSeconds': responseTimeoutSeconds,
   };
+
+  /// Decode only inside secure-storage readers. JSON parser exceptions can
+  /// contain source excerpts, so never let one expose a saved credential in UI.
+  factory AiConfiguration.fromStored(String? raw) {
+    if (raw == null) return const AiConfiguration();
+    if (raw.length > 64 * 1024) {
+      throw const FormatException('Saved AI configuration is too large.');
+    }
+    try {
+      final value = jsonDecode(raw);
+      if (value is! Map<String, dynamic>) {
+        throw const FormatException('Saved AI configuration is invalid.');
+      }
+      return AiConfiguration.fromJson(value);
+    } on FormatException {
+      throw const FormatException('Saved AI configuration is invalid. Reconnect the API in settings.');
+    }
+  }
 
   factory AiConfiguration.fromJson(Map<String, dynamic> data) {
     String text(String name, String fallback, int limit) {

@@ -45,21 +45,12 @@ class AiService {
   Completer<void>? _localLeaseWaitCancel;
   int _cancelEpoch = 0;
 
-  Future<AiConfiguration> loadConfiguration() async {
-    final local = LocalAiService.instance;
-    await local.initialize();
-    final raw = await _storage.read(key: 'pharmacy.ai.configuration');
-    if (raw != null && raw.length > 64 * 1024) {
-      throw const FormatException('Saved AI configuration is too large.');
-    }
-    final decoded = raw == null ? <String, dynamic>{} : jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('Saved AI configuration is invalid.');
-    }
-    final config = AiConfiguration.fromJson(decoded);
-    if (config.localBrainEnabled) await preparePreferredLocalRoute();
-    return config;
-  }
+  /// Reading a cloud credential must not initialize a local model. A missing
+  /// or corrupt optional model cannot prevent cloud settings from being read.
+  Future<AiConfiguration> loadConfiguration() async =>
+      AiConfiguration.fromStored(await _storage
+          .read(key: 'pharmacy.ai.configuration')
+          .timeout(const Duration(seconds: 4)));
 
   Future<void> saveConfiguration(AiConfiguration config) async {
     await _storage.write(
@@ -71,11 +62,7 @@ class AiService {
   /// Removes only the cloud credential. Local Brain routing and the selected
   /// on-device model are independent preferences and must survive this action.
   Future<void> forgetKey() async {
-    final raw = await _storage.read(key: 'pharmacy.ai.configuration');
-    if (raw == null) return;
-    final config = AiConfiguration.fromJson(
-      jsonDecode(raw) as Map<String, dynamic>,
-    );
+    final config = await loadConfiguration();
     await saveConfiguration(config.copyWith(key: ''));
   }
 

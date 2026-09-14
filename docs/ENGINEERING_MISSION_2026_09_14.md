@@ -128,3 +128,37 @@ Implementation and final verification evidence will be appended to this record.
 - Added 9 regression cases for truncation/corruption, layout preservation and
   date sorting/grammar. These Dart tests have not been executed. A JavaScript
   reproduction demonstrated the old comparator cycle and the new total ordering.
+
+## Checkpoint: immediate capture, video reuse and optional-model isolation
+
+- Camera startup no longer waits on default-model initialization, a modal offer or
+  download. The existing explicit Local Models panel still installs/activates the
+  default or another model. Removed the now-unused capture-only setup dialog.
+- Native video hashing is computed while writing the existing JPEG, with only
+  digest-sized additional state and no second image copy or disk-read pass.
+  Consecutive identical OCR inputs are suppressed for up to 3 seconds; the window
+  tail and temporal anchors remain. Different encoded pixels always survive.
+  Decode failures break the duplicate run. Fine text is never suppressed based on
+  thumbnail similarity. Existing bounded quality-rescue sampling is preserved.
+- A JavaScript reproduction retained 8 of 40 identical samples and all 40 distinct
+  samples, including a one-frame change and its return. This is control-flow
+  evidence, not an Android throughput/accuracy benchmark. Decoding and JPEG
+  encoding still occur; the saving is in OCR invocations and retained files.
+- Native video allocation failure now cleans the sampled directory and reports a
+  recoverable error through the existing worker. Native decoder stalls/process
+  OOM cannot be ruled out without real-device fault testing.
+- Cloud configuration reads no longer initialize Local AI. Saved routing is shown
+  before optional model preparation, and reopening settings reads a fresh secure
+  envelope. Configuration generations reject older reads; a single editor owns
+  each settings session. Re-reading after editing does not wait on model loading.
+- Secure config decoding is bounded and sanitizes JSON source excerpts. The shared
+  structured AI parser also removes malformed-response source snippets from
+  exceptions while retaining the existing single-object recovery/validation.
+- Added 4 privacy/configuration regression cases, not executed. No dependency or
+  build configuration changed. The existing local runtime/lease/cancellation
+  implementation remains the owner of on-device inference.
+
+Additional primary references used:
+https://developer.android.com/reference/java/security/DigestOutputStream
+https://pub.dev/packages/camera
+https://api.dart.dev/dart-async/StreamIterator/cancel.html

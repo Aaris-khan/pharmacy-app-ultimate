@@ -36,7 +36,13 @@ Map<String, dynamic> localJsonObject(String input) {
 }
 
 Map<String, dynamic> _decodeLocalJsonObject(String text) {
-  final value = jsonDecode(text);
+  Object? value;
+  try {
+    value = jsonDecode(text);
+  } on FormatException {
+    // Parser source excerpts can contain private OCR or inventory context.
+    throw const FormatException('AI returned malformed JSON.');
+  }
   if (value is! Map<String, dynamic>) {
     throw const FormatException('Local AI must return one JSON object.');
   }

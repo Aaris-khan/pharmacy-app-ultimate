@@ -61,6 +61,8 @@ class _AiScreenState extends State<AiScreen> {
   bool _reviewing = false;
   bool _externalReady = false;
   int _generation = 0;
+  int _configurationGeneration = 0;
+  bool _connectionsOpen = false;
 
   bool get _cancellableRequest =>
       _journey == _AiJourneyState.thinking ||
@@ -79,13 +81,22 @@ class _AiScreenState extends State<AiScreen> {
     unawaited(_load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool prepareLocal = true}) async {
+    final generation = ++_configurationGeneration;
     try {
-      await _local.initialize();
       final config = await _service.loadConfiguration();
-      if (mounted) setState(() => _configuration = config);
+      if (!mounted || generation != _configurationGeneration) return;
+      setState(() => _configuration = config);
+      // Publish saved routing before optional model work. A corrupt manifest
+      // must leave the connections editor and deterministic commands usable.
+      if (prepareLocal && config.localBrainEnabled) {
+        await _service.preparePreferredLocalRoute();
+        if (mounted && generation == _configurationGeneration) setState(() {});
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = _friendlyAiError(e));
+      if (mounted && generation == _configurationGeneration) {
+        setState(() => _error = _friendlyAiError(e));
+      }
     }
   }
 
@@ -191,25 +202,36 @@ class _AiScreenState extends State<AiScreen> {
   }
 
   Future<void> _openConnections() async {
-    if (_requesting || _reviewing || widget.controller.aiPreparing) return;
-    final result = await showModalBottomSheet<Object?>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) =>
-          _AiConnectionsSheet(initial: _configuration, service: _service),
-    );
-    if (!mounted) return;
+    if (_connectionsOpen || _requesting || _reviewing ||
+        widget.controller.aiPreparing) return;
+    _connectionsOpen = true;
+    ++_configurationGeneration;
     try {
-      final latest = await _service.loadConfiguration();
-      if (mounted) setState(() => _configuration = latest);
+      // Read before opening so a fast first tap cannot edit an empty startup
+      // snapshot or let an older startup read replace the newly saved route.
+      AiConfiguration initial = _configuration;
+      try {
+        initial = await _service.loadConfiguration();
+      } catch (_) {
+        // A corrupt saved envelope still needs an accessible replacement editor.
+      }
+      if (!mounted) return;
+      final result = await showModalBottomSheet<Object?>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) =>
+            _AiConnectionsSheet(initial: initial, service: _service),
+      );
+      if (!mounted) return;
+      await _load(prepareLocal: false);
+      if (!mounted || result == null) return;
+      if (result == _AiConnectionsSheet.externalAction) await _share();
     } catch (e) {
       if (mounted) setState(() => _error = _friendlyAiError(e));
-    }
-    if (!mounted || result == null) return;
-    if (result == _AiConnectionsSheet.externalAction) {
-      await _share();
+    } finally {
+      _connectionsOpen = false;
     }
   }
 

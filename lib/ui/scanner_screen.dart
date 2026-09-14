@@ -12,7 +12,6 @@ import '../domain/medicine_scan_guidance.dart';
 import '../domain/medicine_understanding.dart';
 import '../services/media_import_service.dart';
 import '../services/scan_service.dart';
-import 'default_ai_prompt.dart';
 import 'design.dart';
 import 'scanner_view.dart';
 
@@ -73,10 +72,8 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   Future<void> _bootstrap() async {
-    // Ask once for the small default brain before opening the camera. If the
-    // owner declines or setup fails, offerAarisDefaultAi returns normally and
-    // the existing deterministic scanner starts unchanged.
-    await offerAarisDefaultAi(context);
+    // Deterministic capture is immediately available. Optional model download
+    // and activation belong to the explicit Local AI settings flow.
     if (_closed || !mounted) return;
     _bootstrapped = true;
     if (_foreground) await _restartCamera();

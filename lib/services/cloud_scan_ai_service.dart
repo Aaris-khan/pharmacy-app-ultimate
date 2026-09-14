@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -32,7 +31,6 @@ class CloudScanAiService {
 
   static const _storage = FlutterSecureStorage();
   static const _configurationKey = 'pharmacy.ai.configuration';
-  static const _maxConfigurationCharacters = 64 * 1024;
   static const _maxResponseBytes = 1500000;
   static const _sourceLimit = 7000;
   static const _transientStatuses = <int>{
@@ -70,20 +68,14 @@ class CloudScanAiService {
   }
 
   Future<AiConfiguration> requireConfiguration() async {
-    final raw = await _storage.read(key: _configurationKey);
+    final raw = await _storage.read(key: _configurationKey)
+        .timeout(const Duration(seconds: 4));
     if (raw == null || raw.trim().isEmpty) {
       throw StateError(
         'Connect a cloud API first in AI Controller → Settings → Use AI inside the app.',
       );
     }
-    if (raw.length > _maxConfigurationCharacters) {
-      throw const FormatException('Saved AI configuration is too large.');
-    }
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('Saved AI configuration is invalid.');
-    }
-    final config = AiConfiguration.fromJson(decoded);
+    final config = AiConfiguration.fromStored(raw);
     // This validates model/key and the HTTPS endpoint before any OCR can leave
     // the device. It also rejects credentials/query fragments embedded in URLs.
     config.uri;

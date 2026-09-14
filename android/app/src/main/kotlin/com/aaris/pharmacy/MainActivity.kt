@@ -24,6 +24,8 @@ import java.text.NumberFormat
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.charset.StandardCharsets
+import java.security.DigestOutputStream
+import java.security.MessageDigest
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.sqrt
@@ -446,6 +448,9 @@ class MainActivity : FlutterActivity() {
             val result = mutableListOf<Map<String, Any>>()
             var unreadable = 0
             var rescueBudget = 12
+            val frameDigest = MessageDigest.getInstance("SHA-256")
+            var previousDigest: ByteArray? = null
+            var lastRetainedTimestampMs = -1L
 
             // Bounded resolution preserves small pack text without keeping a
             // full-resolution movie or all decoded bitmaps in memory.
@@ -496,6 +501,7 @@ class MainActivity : FlutterActivity() {
                 val selectedMetrics = metrics
                 if (original == null || selectedMetrics == null) {
                     unreadable++
+                    previousDigest = null
                     continue
                 }
                 var frame: Bitmap? = null
@@ -514,12 +520,28 @@ class MainActivity : FlutterActivity() {
                 }
                 frame = outputFrame
                 val file = File(directory, "frame_${index.toString().padStart(3, '0')}.jpg")
-                FileOutputStream(file).use { stream ->
-                    if (!outputFrame.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
-                        throw IllegalStateException("A sampled frame could not be saved.")
+                frameDigest.reset()
+                FileOutputStream(file).use { output ->
+                    DigestOutputStream(output, frameDigest).use { stream ->
+                        if (!outputFrame.compress(Bitmap.CompressFormat.JPEG, 92, stream)) {
+                            throw IllegalStateException("A sampled frame could not be saved.")
+                        }
                     }
                 }
                 outputFrame.recycle()
+                val fingerprint = frameDigest.digest()
+                val identical = previousDigest?.contentEquals(fingerprint) == true
+                previousDigest = fingerprint
+                // Compare the exact bytes OCR would receive, not a thumbnail:
+                // any difference in the encoded OCR input remains eligible.
+                // Keep a sample every 3 s plus the window tail to preserve
+                // temporal package continuity through long static views.
+                if (identical && timestampMs - lastRetainedTimestampMs < 3_000L &&
+                    index != count - 1) {
+                    file.delete()
+                    continue
+                }
+                lastRetainedTimestampMs = timestampMs
                 result.add(
                     mapOf(
                         "path" to file.absolutePath,
@@ -539,6 +561,12 @@ class MainActivity : FlutterActivity() {
                 )
             }
             return SampledVideo(result, unreadable)
+        } catch (error: OutOfMemoryError) {
+            frameDirectory?.deleteRecursively()
+            throw IllegalStateException(
+                "Not enough memory to process this video. Close other apps or use a shorter, lower-resolution clip.",
+                error,
+            )
         } catch (error: Exception) {
             frameDirectory?.deleteRecursively()
             throw error
