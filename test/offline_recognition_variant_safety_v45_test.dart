@@ -84,7 +84,7 @@ void main() {
       expect(compatible, <String>{_identity(adult), _identity(child)});
     });
 
-    test('exact barcode outranks contradictory text variant evidence', () {
+    test('barcode and contradictory text make adaptive memory abstain', () {
       final compatible = recognitionVariantCompatibleIdentityKeys(
         alias: 'D0L0',
         candidates: const <MedicineKnowledgeEntry>[adult, child],
@@ -94,6 +94,23 @@ void main() {
             quality: .95,
             barcode: '1111111111111',
             text: 'D0L0\n125 mg/5 mL\nORAL SUSPENSION',
+          ),
+        ],
+      );
+
+      expect(compatible, isEmpty);
+    });
+
+    test('exact barcode can disambiguate when text has no variant conflict', () {
+      final compatible = recognitionVariantCompatibleIdentityKeys(
+        alias: 'D0L0',
+        candidates: const <MedicineKnowledgeEntry>[adult, child],
+        evidence: const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 0,
+            quality: .95,
+            barcode: '1111111111111',
+            text: 'D0L0\nPARACETAMOL',
           ),
         ],
       );
