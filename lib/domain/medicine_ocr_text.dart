@@ -13,6 +13,36 @@ final _medicineOcrAsciiDigit = RegExp(r'\d');
 final _medicineOcrDigitO = RegExp('[Oo]');
 final _medicineOcrDigitOne = RegExp('[IlL]');
 
+// OCR frequently drops the visual gap between a short packaging role and its
+// value ("MFG04/2026", "EXP04/2028", "BATCHNOAB123"). Restore only known
+// pharmaceutical roles. Generic alpha/digit splitting is intentionally avoided
+// because medicine brands, licences and machine codes legitimately mix them.
+final _medicineOcrGluedNumericRoleLabel = RegExp(
+  r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe|mrp|price|pkd|pkg))(?=[0-9])',
+  caseSensitive: false,
+);
+final _medicineOcrGluedTraceabilityLabel = RegExp(
+  r'(?<![A-Za-z])((?:batch|lot))(no\.?)?(?=[A-Za-z0-9])',
+  caseSensitive: false,
+);
+
+// A dropped boundary before a printed dose is semantically recoverable because
+// the numeric token is immediately owned by a pharmaceutical unit. The prefix
+// still needs at least three alphabetic characters; a separate context firewall
+// below keeps batch/lot/licence/machine-code surfaces from becoming strengths.
+final _medicineOcrGluedDose = RegExp(
+  r'([A-Za-z][A-Za-z-]{2,47})([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?)(?=\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
+  caseSensitive: false,
+);
+final _medicineOcrGluedDoseUnsafeContext = RegExp(
+  r'\b(?:batch|lot|serial|licen[cs]e|gtin|barcode|code|mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack)\b',
+  caseSensitive: false,
+);
+final _medicineOcrGluedDoseUnsafePrefix = RegExp(
+  r'^(?:batch|lot|serial|licen[cs]e|gtin|barcode|code|mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack)',
+  caseSensitive: false,
+);
+
 final _medicineOcrUnitBoundNumber = RegExp(
   r'(?<![A-Za-z0-9])([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?)(?=\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
   caseSensitive: false,
@@ -83,6 +113,24 @@ String _canonicalMedicineDenominatorUnit(String value) {
   return key;
 }
 
+String _separateMedicineOcrGluedDose(String value) {
+  return value.replaceAllMapped(_medicineOcrGluedDose, (match) {
+    final prefix = match[1]!;
+    final number = match[2]!;
+    // Do not turn an all-letter OCR accident into a dose. At least one genuine
+    // digit must survive recognition before O/0 and I/l/1 repair is allowed.
+    if (!_medicineOcrAsciiDigit.hasMatch(number)) return match[0]!;
+
+    final contextStart = match.start > 32 ? match.start - 32 : 0;
+    final context = value.substring(contextStart, match.start);
+    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context) ||
+        _medicineOcrGluedDoseUnsafePrefix.hasMatch(prefix)) {
+      return match[0]!;
+    }
+    return '$prefix $number';
+  });
+}
+
 String _canonicalMedicineOcrSurface(String value) {
   var result = value
       .replaceAll(_medicineOcrCompatibilitySpaces, ' ')
@@ -110,6 +158,25 @@ String _canonicalMedicineOcrSurface(String value) {
         : 0x0660;
     return (code - zero).toString();
   });
+
+  // Restore only role boundaries whose semantics are already known. This lets
+  // the existing date/batch/price firewalls see the label instead of treating a
+  // fused machine token as a possible medicine identity.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedNumericRoleLabel,
+    (match) => '${match[1]} ',
+  );
+  result = result.replaceAllMapped(_medicineOcrGluedTraceabilityLabel, (match) {
+    final numberWord = match[2];
+    return numberWord == null
+        ? '${match[1]} '
+        : '${match[1]} $numberWord ';
+  });
+
+  // Recover a lost boundary such as "Paracetamol5O0MG" or "CALPOL500MG".
+  // Traceability context remains fused on purpose so its internal digits cannot
+  // become competing strength evidence downstream.
+  result = _separateMedicineOcrGluedDose(result);
 
   // OCR engines sometimes fragment a printed number into one-character tokens,
   // e.g. "6 5 0 mg". Join only a short digit run that is immediately owned by
