@@ -8,6 +8,7 @@ class _DatePair {
 }
 
 final _bareFullDateSurface = RegExp(r'^[0-9०-९٠-٩۰-۹０-９OoIlL]{8}$');
+final _compactDatePairSeparator = RegExp(r'^[\s|,:;./-]*$');
 
 int _compareEvidence(MedicineDateEvidence a, MedicineDateEvidence b) {
   final explicit = (b.explicitLabel ? 1 : 0) - (a.explicitLabel ? 1 : 0);
@@ -143,6 +144,22 @@ Set<int> _bareCompactDatePairIndexes(List<String> lines, DateTime today) {
   final candidates = <(int, ParsedMedicineDate)>[];
   for (var index = 0; index < lines.length; index++) {
     final matches = extractMedicineDateMatches(lines[index], allowCompact: true);
+
+    // OCR flattening can place two otherwise standalone MMYY/MMYYYY values on
+    // one physical row (for example "0426 0428"). Accept that row only when it
+    // contains exactly two compact date tokens and nothing except harmless date
+    // separators around them. This preserves the existing chronology gate while
+    // recovering a common no-label package layout without turning batch/serial
+    // numbers into dates.
+    if (matches.length == 2 &&
+        _isIsolatedCompactDatePairLine(lines[index], matches) &&
+        !_adjacentNonDateLabel(lines, index)) {
+      for (final match in matches) {
+        candidates.add((index, match.date));
+      }
+      continue;
+    }
+
     if (matches.length != 1) continue;
     final match = matches.single;
     final roleUnsafeBareToken =
@@ -171,6 +188,26 @@ Set<int> _bareCompactDatePairIndexes(List<String> lines, DateTime today) {
     return const <int>{};
   }
   return Set<int>.unmodifiable(<int>{earlier.$1, later.$1});
+}
+
+bool _isIsolatedCompactDatePairLine(
+  String line,
+  List<MedicineDateMatch> matches,
+) {
+  if (matches.length != 2 || matches.any((match) => !match.compact)) {
+    return false;
+  }
+  var cursor = 0;
+  for (final match in matches) {
+    if (match.start < cursor ||
+        !_compactDatePairSeparator.hasMatch(
+          line.substring(cursor, match.start),
+        )) {
+      return false;
+    }
+    cursor = match.end;
+  }
+  return _compactDatePairSeparator.hasMatch(line.substring(cursor));
 }
 
 bool _isStandaloneDateLine(String line) {

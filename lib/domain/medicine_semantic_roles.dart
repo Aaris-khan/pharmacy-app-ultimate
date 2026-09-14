@@ -684,7 +684,11 @@ List<_ComponentCandidate> _splitUnlabelledCompositionCandidates(
 }
 
 List<_ComponentCandidate> _parseComposition(String raw, double quality) {
-  final source = raw.replaceAll('\r', '\n');
+  var source = raw.replaceAll('\r', '\n');
+  final instructionStop = _compositionInstructionStop.firstMatch(source);
+  if (instructionStop != null) {
+    source = source.substring(0, instructionStop.start);
+  }
   final matches = _strengthPattern
       .allMatches(source)
       .take(8)
@@ -890,6 +894,10 @@ final _compositionCue = RegExp(
 );
 final _compositionStop = RegExp(
   r'\b(?:manufactured|manufacturer|mfg|mfd|dom|exp|expiry|doe|batch|lot|mrp|storage|schedule|marketed|distributed|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
+  caseSensitive: false,
+);
+final _compositionInstructionStop = RegExp(
+  r'\b(?:dosage|directions?|take|administer(?:ed|ing)?|administration|warning|caution|excipients?|preservatives?|colour|color|flavou?r)\b|\bdose\s*[:.-]?\s*(?=\d)',
   caseSensitive: false,
 );
 final _brandLabel = RegExp(

@@ -48,6 +48,10 @@ final _medicineOcrBasisOwnedStrength = RegExp(
   r'(?<![A-Za-z0-9/])(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|meq|iu|i\.u\.|units?))(?!\s*/)',
   caseSensitive: false,
 );
+final _medicineOcrCompositionStop = RegExp(
+  r'\b(?:dosage|directions?|take|administer(?:ed|ing)?|administration|warning|caution|storage|mfg|mfd|dom|exp|expiry|doe|batch|lot|mrp|manufactured|manufacturer|marketed|distributed|pkd|pkg|packed|packing|pack\s*size|net\s+(?:qty|quantity|content)|excipients?|preservatives?|colour|color|flavou?r)\b|\bdose\s*[:.-]?\s*(?=\d)',
+  caseSensitive: false,
+);
 
 String _cleanMedicineOcrLine(String value) => value
     // Unicode bidi/zero-width controls are formatting code points, not word
@@ -172,31 +176,34 @@ String _canonicalMedicineOcrSurface(String value) {
   });
 
   // Liquid labels very often express the denominator before the ingredients:
-  // "Each 5 ml contains Paracetamol 125 mg". The old parser consumed the
-  // composition heading and then saw only "125 mg", silently losing the 5 ml
-  // basis. Bind that explicit basis to numerator strengths in the same bounded
-  // line before any semantic role extraction runs. Existing slash
-  // concentrations are left untouched, and the rule cannot fire without both
-  // an explicit numeric ml/g basis and the word "contains". The inserted
-  // semicolon preserves every printed token while making the heading/ingredient
-  // boundary explicit to the existing semantic segmenter.
+  // "Each 5 ml contains Paracetamol 125 mg". Bind that explicit basis only to
+  // the composition-owned clause. OCR sometimes flattens a following dose,
+  // storage, date or legal row into the same line; letting the 5 ml basis leak
+  // across that role boundary would fabricate concentrations such as a printed
+  // "Dose 250 mg" becoming "250 mg/5 ml". The suffix is preserved verbatim and
+  // continues through downstream evidence/review, but it cannot inherit the
+  // composition denominator.
   final basis = _medicineOcrCompositionBasis.firstMatch(result);
   if (basis != null) {
     final denominator = basis[1]!;
     final denominatorUnit = basis[2]!.toLowerCase();
     final head = result.substring(0, basis.end);
     final tail = result.substring(basis.end);
+    final stop = _medicineOcrCompositionStop.firstMatch(tail);
+    final ownedTail = stop == null ? tail : tail.substring(0, stop.start);
+    final suffix = stop == null ? '' : tail.substring(stop.start);
     var rewrites = 0;
-    final boundTail = tail.replaceAllMapped(_medicineOcrBasisOwnedStrength, (
-      match,
-    ) {
-      if (rewrites >= 6) return match[0]!;
-      final before = tail.substring(0, match.start).trimRight();
-      if (before.endsWith('/')) return match[0]!;
-      rewrites++;
-      return '${match[1]}/$denominator $denominatorUnit';
-    });
-    result = '$head;$boundTail';
+    final boundTail = ownedTail.replaceAllMapped(
+      _medicineOcrBasisOwnedStrength,
+      (match) {
+        if (rewrites >= 6) return match[0]!;
+        final before = ownedTail.substring(0, match.start).trimRight();
+        if (before.endsWith('/')) return match[0]!;
+        rewrites++;
+        return '${match[1]}/$denominator $denominatorUnit';
+      },
+    );
+    result = '$head;$boundTail$suffix';
   }
 
   return result.replaceAll(_medicineOcrWhitespace, ' ').trim();
