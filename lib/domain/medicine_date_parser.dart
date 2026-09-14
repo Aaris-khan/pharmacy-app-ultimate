@@ -1,18 +1,18 @@
 final medicineManufacturingLabel = RegExp(
-  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd]\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+by)(?:\s*(?:date|dt|on))?|production\s*date|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd](?![.\s]*(?:by|at)\b)\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+(?:by|at)\b)(?:\s*(?:date|dt|on))?|production\s*date|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineExpiryLabel = RegExp(
-  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+(?:expiry|expiration)|b[.\s]*b[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineNonDateLabel = RegExp(
-  r'(?<![A-Za-z])(?:batch(?:[\s.:_-]*(?:no|number)\.?)?|lot(?:[\s.:_-]*no\.?)?|b[.\s]*no\.?|serial|barcode|gtin|mrp|price|licen[cs]e|pack\s*size|p[.\s]*k[.\s]*(?:d|g)\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+packing|pack(?:ed|ing)?\s*(?:date|dt|on))(?=$|[^A-Za-z]|[OoIlL](?=[0-9OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:batch(?:[\s.:_-]*(?:no|number)\.?)?|lot(?:[\s.:_-]*no\.?)?|b[.\s]*no\.?|serial|barcode|gtin|mrp|price|licen[cs]e|pack\s*size|p[.\s]*k[.\s]*(?:d|g)\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+packing|pack(?:ed|ing)?\s*(?:date|dt|on)|m[.\s]*f[.\s]*[gd][.\s]*(?:by|at)|manufactur(?:ed|er)\s+(?:by|at)|marketed\s+by|distributed\s+by|imported\s+by)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 
 final _medicineCompactDatePrefix = RegExp(
-  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?)' 
+  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?)'
   r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*$',
   caseSensitive: false,
 );
@@ -235,19 +235,25 @@ int _month(String value) =>
 String _repairNumericOcr(String raw) {
   // Replace directional/invisible OCR artifacts one-for-one so date offsets
   // stay aligned with the original line used by spatial/role reasoning.
-  var text = raw.replaceAll(
-    RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
-    ' ',
-  );
+  var text = raw
+      .replaceAll(
+        RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
+        ' ',
+      )
+      .replaceAll(RegExp(r'[\u00A0\u2007\u202F]'), ' ')
+      .replaceAll(RegExp(r'[／⁄∕]'), '/')
+      .replaceAll(RegExp(r'[‐‑‒–—−]'), '-');
 
   // One-to-one digit replacements also keep detector character offsets intact.
-  text = text.replaceAllMapped(RegExp(r'[०-९٠-٩۰-۹]'), (m) {
+  text = text.replaceAllMapped(RegExp(r'[०-९٠-٩۰-۹０-９]'), (m) {
     final code = m[0]!.codeUnitAt(0);
-    final zero = code >= 0x966
-        ? 0x966
-        : code >= 0x6f0
-        ? 0x6f0
-        : 0x660;
+    final zero = code >= 0xFF10
+        ? 0xFF10
+        : code >= 0x0966
+        ? 0x0966
+        : code >= 0x06F0
+        ? 0x06F0
+        : 0x0660;
     return (code - zero).toString();
   });
 
@@ -256,7 +262,7 @@ String _repairNumericOcr(String raw) {
   // global letter-to-digit replacement would corrupt medicine names/batch IDs.
   text = text.replaceAllMapped(
     RegExp(
-      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?)' 
+      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?)'
       r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*)([0-9OoIlL]{4,8})(?![A-Za-z0-9])',
       caseSensitive: false,
     ),

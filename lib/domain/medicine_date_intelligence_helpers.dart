@@ -7,7 +7,7 @@ class _DatePair {
   final double score;
 }
 
-final _bareFullDateSurface = RegExp(r'^[0-9०-९٠-٩۰-۹OoIlL]{8}$');
+final _bareFullDateSurface = RegExp(r'^[0-9०-९٠-٩۰-۹０-９OoIlL]{8}$');
 
 int _compareEvidence(MedicineDateEvidence a, MedicineDateEvidence b) {
   final explicit = (b.explicitLabel ? 1 : 0) - (a.explicitLabel ? 1 : 0);
@@ -27,11 +27,80 @@ List<List<String>> _dateLineStreams(MedicineFrameEvidence frame) {
   final raw = clean(frame.text.split(RegExp(r'[\r\n]+')));
   final layoutEvidence = frame.layoutLines.take(120).toList(growable: false)
     ..sort(_compareDateLayoutReadingOrder);
-  final layout = clean(layoutEvidence.map((line) => line.text));
-  return <List<String>>[
-    if (raw.isNotEmpty) raw,
-    if (layout.isNotEmpty) layout,
-  ];
+
+  // Raw RecognizedText is assembled from multiple script recognizers and does
+  // not carry physical column ownership. Once detector geometry exists, it is
+  // therefore unsafe to let flattened raw adjacency compete with the spatial
+  // reading order: "MFG | EXP" above two dates can otherwise invert their roles.
+  // Geometry is authoritative for date adjacency; raw text remains the fallback
+  // only when no usable layout evidence survived the detector.
+  final layout = clean(_mergeDateLayoutRows(layoutEvidence));
+  if (layout.isNotEmpty) return <List<String>>[layout];
+  return <List<String>>[if (raw.isNotEmpty) raw];
+}
+
+List<String> _mergeDateLayoutRows(List<MedicineTextLineEvidence> lines) {
+  if (lines.isEmpty) return const <String>[];
+  final hasGeometry = lines.any(
+    (line) =>
+        line.height > 0 || line.width > 0 || line.left != 0 || line.top != 0,
+  );
+  if (!hasGeometry) {
+    return lines.map((line) => line.text).toList(growable: false);
+  }
+
+  final rows = <List<MedicineTextLineEvidence>>[];
+  for (final line in lines) {
+    if (line.text.trim().isEmpty) continue;
+    if (line.height <= 0) {
+      rows.add(<MedicineTextLineEvidence>[line]);
+      continue;
+    }
+    if (rows.isEmpty) {
+      rows.add(<MedicineTextLineEvidence>[line]);
+      continue;
+    }
+
+    final row = rows.last;
+    final geometric = row.where((item) => item.height > 0).toList(growable: false);
+    if (geometric.isEmpty) {
+      rows.add(<MedicineTextLineEvidence>[line]);
+      continue;
+    }
+    final rowCenter =
+        geometric
+            .map((item) => item.top + item.height / 2)
+            .reduce((a, b) => a + b) /
+        geometric.length;
+    final lineCenter = line.top + line.height / 2;
+    final referenceHeight = geometric
+        .map((item) => item.height)
+        .reduce(min);
+    final tolerance = max(3.0, min(referenceHeight, line.height) * .62);
+    if ((lineCenter - rowCenter).abs() <= tolerance) {
+      row.add(line);
+    } else {
+      rows.add(<MedicineTextLineEvidence>[line]);
+    }
+  }
+
+  final result = <String>[];
+  for (final row in rows.take(120)) {
+    row.sort((a, b) {
+      final horizontal = a.left.compareTo(b.left);
+      if (horizontal != 0) return horizontal;
+      final vertical = a.top.compareTo(b.top);
+      if (vertical != 0) return vertical;
+      return a.text.compareTo(b.text);
+    });
+    final text = row
+        .map((item) => item.text.trim())
+        .where((value) => value.isNotEmpty)
+        .join('  ')
+        .trim();
+    if (text.isNotEmpty) result.add(text);
+  }
+  return result;
 }
 
 int _compareDateLayoutReadingOrder(
@@ -53,7 +122,7 @@ int _compareDateLayoutReadingOrder(
 }
 
 MedicineDateRole? _labelOnlyRole(String line) {
-  if (RegExp(r'[0-9०-९٠-٩۰-۹]').hasMatch(line)) return null;
+  if (RegExp(r'[0-9०-९٠-٩۰-۹０-９]').hasMatch(line)) return null;
   final labels = _dateLabels(line);
   if (labels.length != 1) return null;
   final role = labels.single.$1;
@@ -61,7 +130,7 @@ MedicineDateRole? _labelOnlyRole(String line) {
 }
 
 bool _labelOnlyNonDate(String line) {
-  if (RegExp(r'[0-9०-९٠-٩۰-۹]').hasMatch(line)) return false;
+  if (RegExp(r'[0-9०-९٠-٩۰-۹０-９]').hasMatch(line)) return false;
   final labels = _dateLabels(line);
   return labels.length == 1 && labels.single.$1 == MedicineDateRole.unknown;
 }
