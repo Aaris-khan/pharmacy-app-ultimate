@@ -169,12 +169,31 @@ class ChatCompletionsProviderAdapter extends AiProviderAdapter {
   @override
   String delta(Map<String, dynamic> event) {
     final first = _firstMap(event['choices']);
-    final delta = first?['delta'];
-    if (delta is Map) return _textParts(delta['content']);
+    final change = first?['delta'];
+    if (change is Map && change['content'] != null) {
+      return _textParts(change['content']);
+    }
     final message = first?['message'];
-    if (message is Map) return _textParts(message['content']);
-    return _textParts(first?['text']);
+    if (message is Map && message['content'] != null) {
+      return _textParts(message['content']);
+    }
+    final choiceText = _textParts(first?['text']);
+    if (choiceText.isNotEmpty) return choiceText;
+
+    // Preserve supported legacy gateways that emit top-level text deltas.
+    // Typed reasoning/tool events are excluded from assistant output.
+    final type = event['type'];
+    if (type != null && type != 'text_delta' &&
+        type != 'response.output_text.delta') return '';
+    final topDelta = event['delta'];
+    if (topDelta is String) return topDelta;
+    if (topDelta is Map && topDelta['thought'] != true &&
+        (topDelta['type'] == null || topDelta['type'] == 'text_delta')) {
+      return _textParts(topDelta['text']);
+    }
+    return _textParts(event['output_text']);
   }
+
   @override
   bool terminal(Map<String, dynamic> event) =>
       _firstMap(event['choices'])?['finish_reason'] != null;

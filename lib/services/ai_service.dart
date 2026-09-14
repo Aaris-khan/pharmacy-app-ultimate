@@ -242,7 +242,7 @@ class AiService {
       throw const FormatException('Describe what you want the AI to do.');
     }
 
-    final endpoint = config.uri;
+    config.uri;
     final data = exportData();
     if (data.content.length > 700000) {
       throw const FormatException(
@@ -267,7 +267,6 @@ class AiService {
           return await _askCloudOnce(
             client: client,
             config: config,
-            endpoint: endpoint,
             data: data,
             instruction: instruction,
             conversation: priorConversation,
@@ -521,7 +520,6 @@ class AiService {
   Future<String> _askCloudOnce({
     required http.Client client,
     required AiConfiguration config,
-    required Uri endpoint,
     required PharmacyExport data,
     required String instruction,
     required String conversation,
@@ -531,7 +529,7 @@ class AiService {
   }) async {
     if (!config.streamingEnabled) {
       return _askCloudBufferedOnce(
-        client: client, config: config, endpoint: endpoint, data: data,
+        client: client, config: config, data: data,
         instruction: instruction, conversation: conversation,
         cancelEpoch: cancelEpoch, onDelta: onDelta,
         onStreamStarted: onStreamStarted,
@@ -542,7 +540,6 @@ class AiService {
         .send(
           _cloudRequest(
             config: config,
-            endpoint: endpoint,
             data: data,
             instruction: instruction,
             conversation: conversation,
@@ -557,7 +554,9 @@ class AiService {
     // streaming is the unsupported argument. 404/405/auth/quota/model failures
     // are real endpoint errors and must not be disguised by a duplicate request.
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-      final errorBytes = await _readBoundedBytes(streamed, cancelEpoch, config.responseTimeout);
+      final errorBytes = await _readBoundedBytes(
+        streamed, cancelEpoch, config.responseTimeout,
+      );
       final detail = _providerErrorDetail(errorBytes);
       final canFallback =
           adapter.canNegotiateStreaming &&
@@ -567,7 +566,6 @@ class AiService {
         return _askCloudBufferedOnce(
           client: client,
           config: config,
-          endpoint: endpoint,
           data: data,
           instruction: instruction,
           conversation: conversation,
@@ -603,7 +601,9 @@ class AiService {
     // A compatible server may ignore `stream:true` and return its normal JSON
     // envelope. Accept that response instead of turning capability variance into
     // a false Connection Failed error.
-    final bytes = await _readBoundedBytes(streamed, cancelEpoch, config.responseTimeout);
+    final bytes = await _readBoundedBytes(
+      streamed, cancelEpoch, config.responseTimeout,
+    );
     final text = _decodeBufferedCloud(config, bytes);
     if (text.isNotEmpty) {
       _safeStart(onStreamStarted);
@@ -615,7 +615,6 @@ class AiService {
   Future<String> _askCloudBufferedOnce({
     required http.Client client,
     required AiConfiguration config,
-    required Uri endpoint,
     required PharmacyExport data,
     required String instruction,
     required String conversation,
@@ -627,7 +626,6 @@ class AiService {
         .send(
           _cloudRequest(
             config: config,
-            endpoint: endpoint,
             data: data,
             instruction: instruction,
             conversation: conversation,
@@ -640,7 +638,9 @@ class AiService {
       await _readBoundedBytes(response, cancelEpoch, config.responseTimeout);
       throw AiProviderFailure.http(response.statusCode);
     }
-    final bytes = await _readBoundedBytes(response, cancelEpoch, config.responseTimeout);
+    final bytes = await _readBoundedBytes(
+      response, cancelEpoch, config.responseTimeout,
+    );
     final text = _decodeBufferedCloud(config, bytes);
     if (text.isNotEmpty) {
       _safeStart(onStreamStarted);
@@ -651,7 +651,6 @@ class AiService {
 
   http.Request _cloudRequest({
     required AiConfiguration config,
-    required Uri endpoint,
     required PharmacyExport data,
     required String instruction,
     required String conversation,

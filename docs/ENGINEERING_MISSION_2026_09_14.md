@@ -41,7 +41,7 @@ Earlier documents' recorded test results are not evidence for this pass.
 - MedicineReviewScreen owns source/match generations and final confirm. Editor
   owns manual fields and row revision. Persistence is authoritative before
   optional recognition feedback; provider output does not directly write stock.
-- Cloud chat and cloud scan currently duplicate request/envelope adaptation.
+- At the starting commit, cloud chat and cloud scan duplicated request/envelope adaptation.
   Both use OS secure storage, HTTPS without embedded credentials and no redirects.
   Explicit cloud scan excludes private inventory/adaptive hints from its payload.
 
@@ -81,7 +81,7 @@ Earlier documents' recorded test results are not evidence for this pass.
   https://ai.google.dev/gemini-api/docs/text-generation
   https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
 
-Implementation and final verification evidence will be appended to this record.
+The following sections distinguish implemented changes from preserved behavior and unverified device assumptions.
 
 ## Checkpoint: provider protocols and response bounds
 
@@ -162,3 +162,104 @@ Additional primary references used:
 https://developer.android.com/reference/java/security/DigestOutputStream
 https://pub.dev/packages/camera
 https://api.dart.dev/dart-async/StreamIterator/cancel.html
+
+## Final adversarial review
+
+The final review caught two further compatibility/performance details: legacy
+adaptive support must be capped in SQL candidate ordering as well as final
+weighting, and existing compatible gateway top-level text deltas must survive the
+adapter extraction. Both were corrected. Typed thinking/reasoning/tool deltas
+remain excluded. Removed obsolete endpoint forwarding from chat orchestration;
+the adapter validates and owns the actual request URI.
+
+### Final runtime and authoritative boundaries
+
+| Stage | Runtime owner and boundary |
+| --- | --- |
+| Camera / images / video | ScannerScreen and MediaImportService acquire inputs; native video samples bounded windows. MedicineVisionService leases one frame across OCR and barcode detectors. |
+| Evidence | The shared layout reconstruction runs before empty-frame gates. Original nonempty OCR, layout, timestamps, source and quality are retained. Field-specific normalization remains in medicine_ocr_text and domain parsers. |
+| Retrieval / pharmacy understanding | CanonicalMedicineCatalogService and bounded adaptive aliases feed the existing V2 resolver in compute. Inventory SearchWorker retains its existing isolated index. |
+| Optional AI | Explicit local route uses the existing selected-model lease; explicit cloud uses protocol adapters. Cloud scan context contains bounded OCR, without private inventory/adaptive history. Chat's explicit cloud inventory workflow retains its existing export consent boundary. |
+| Structured validation / confidence | Local and cloud scan candidates use validateLocalScan, source quotations, paired ingredients and deterministic date ownership. The existing resolver conflict rules and ScanQuickAdd/AutoSave decisions remain the confidence/commit authority; no new averaged model confidence is introduced. |
+| Review / final state | MedicineReviewScreen owns immutable prepared drafts and match/source generations. EditorScreen owns manual edits and the reviewed row revision. Existing review, one-tap confirm and conservative automation gates are retained. |
+| Persistence | medicineFromConfirmedScan or EditorScreen constructs Medicine; PharmacyController.save enters InventoryMutation and SQLite CAS validation. Derived expiry/sold/warning screens read the same authoritative inventory. |
+| Learning | Human-confirmed save precedes alias feedback. Automatic machine-save does not teach. Receipt identity, variant compatibility and bounded memory govern reuse; an unavailable memory DB returns original knowledge. |
+
+### Database and performance decisions
+
+No schema migration, new inventory table, dependency upgrade, FTS deployment or
+WAL toggle was required for these fixes. The existing normalized_alias index
+supports candidate filtering/group counting. Capped Top-K still requires ordering
+the bounded matching rows; this was reasoned from the SQL and index definitions,
+not measured with EXPLAIN. The counts query adds read work to avoid false identity
+certainty when a candidate list truncates.
+
+Inventory remains JSON-fact based and loads complete snapshots. Controller
+integrity checks and snapshot copies may become a bottleneck at larger stock
+sizes; this session does not claim a database-scale benchmark or replace those
+invariants speculatively. Canonical/adaptive knowledge stays bounded. Native video
+dedup reduces OCR work for exactly repeated frames, while preserving decoded
+variations and package-transition anchors; camera-motion/noise near-duplicates
+remain eligible until a safe device-calibrated policy exists.
+
+### Verification actually performed
+
+- Inspected the connected Flutter/domain/service/state/data architecture, native
+  Android media and Local AI owners, dependency pins and workflow definitions.
+- Reviewed every checkpoint diff and cumulative GitHub comparison against the
+  starting SHA; checked deleted helper references and final relative Dart imports.
+- A focused JavaScript check found no missing relative imports in 125 inspected
+  Dart source/test files. This is a path check, not Dart parsing, analysis or compilation.
+- Reproduced the prior date-sort cycle and video duplicate-admission control flow
+  in JavaScript; these are reasoning experiments, not app/test-suite executions.
+- Authored 26 regression cases across six new Dart test files. None was run here.
+- Reviewed schema versions/index definitions, transaction scopes, CAS, feedback
+  receipts, human-confirmation paths, native drain/generation guards, provider
+  bodies/authentication/redirect policy and bounded transport/error paths.
+- Checked modified content for merge markers and common credential/private-key
+  patterns, and manually reviewed configuration/diagnostic changes. No actual
+  credentials, binaries, generated files or workflow edits were added.
+- Every checkpoint was a non-force child of the current remote main; the remote
+  SHA was re-read after each push. No external main advancement occurred.
+- Read GitHub Actions runs for all four implementation/audit checkpoints: only
+  the repository's automatic GitHub Pages/Jekyll publishing ran. Application
+  Flutter checks and release APK workflows did not run. No workflow was dispatched.
+
+### Explicit remaining limits
+
+1. No Dart/Flutter compiler, analyzer, test runner, SQLite engine or Android device
+   was available in this session. New tests and Kotlin/Dart integration still
+   need execution in an authorized development/device environment.
+2. Camera permission/lifecycle/orientation, giant-image decoding, video codecs,
+   native allocation failure and exact duplicate hashing were reviewed in source,
+   not fault-injected on phones. Image orientation/resizing were not rewritten;
+   device OCR behavior and large-photo memory use remain acceptance risks.
+3. Local AI discovery, GGUF compatibility, memory planning, selection, exclusive
+   runtime, cancellation and restart recovery were traced and preserved. No model
+   weights were executed; arbitrary model/device compatibility is not claimed.
+4. Provider support means the implemented Gemini, Chat Completions and Anthropic
+   protocols with explicit configuration. There is one saved cloud connection;
+   model discovery, arbitrary HTTP authentication/templates, image/tool APIs and
+   automatic multi-provider failover were not added. No live paid API call was made.
+5. Adaptive learning is compact confirmed-alias retrieval, not model-weight
+   training. No speculative learned dates, quantities or automatic acceptance of
+   rejected/unconfirmed predictions was added. Clinical/OCR accuracy and
+   confidence calibration require a representative reviewed pack dataset.
+6. Learning follows the inventory transaction in a separate optional store. A
+   process crash between inventory commit and feedback can lose that learning
+   event; inventory remains saved. There is no new cross-database outbox.
+7. Native decoder calls cannot be forcibly terminated by a Dart timeout. Existing
+   work barriers retain ownership until native work drains; real-device stall
+   behavior and worst-case cancellation latency remain unmeasured.
+8. No zero-bug, complete production-safety, migration execution, clinical
+   correctness or measured speedup claim is made.
+
+### Remote checkpoint history
+
+- 4ab38346538ea081c5ad19298b35f5a56ae3231f — Repository architecture and audit.
+- 867f27ed7b621cddf54e4c41314224d2ff0be2f6 — Shared provider adapters and bounded response transport.
+- bd75468f82dbcf1da82217338ea36295e4ff6b7b — OCR boundary, date order, adaptive collision safety and coherent inventory load.
+- af715be8bdd7b9143ce35fa82365993bd9990323 — Immediate scanner, duplicate video suppression and optional-model isolation.
+
+The final review/report commit is a direct child of the last checkpoint above;
+its exact verified main SHA is reported in the session completion message.

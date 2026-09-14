@@ -106,6 +106,18 @@ void main() {
     expect(adapter.terminal({'type': 'message_stop'}), isTrue);
   });
 
+  test('compatible text gateways retain legacy deltas without reasoning output', () {
+    final adapter = AiProviderAdapter.forConfiguration(config('Compatible'));
+    expect(adapter.delta({'delta': 'text'}), 'text');
+    expect(adapter.delta({'delta': {'text': 'text'}}), 'text');
+    expect(adapter.delta({'type': 'response.output_text.delta', 'delta': 'text'}),
+      'text');
+    expect(adapter.delta({'type': 'reasoning_delta', 'delta': 'private'}), isEmpty);
+    expect(adapter.delta({'delta': {'type': 'thinking_delta', 'text': 'private'}}),
+      isEmpty);
+    expect(adapter.delta({'choices': [{'delta': {'role': 'assistant'}}]}), isEmpty);
+  });
+
   test('all cloud protocols use the same evidence validator', () async {
     const draft = MedicineScanDraft(fields: {}, rawText: 'ALPHA 500 mg',
       searchKeywords: '', frameSequences: [0]);

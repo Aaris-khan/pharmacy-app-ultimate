@@ -248,7 +248,7 @@ CREATE TABLE recognition_aliases (
           '''SELECT identity_key, alias, normalized_alias, support, last_confirmed
              FROM recognition_aliases
              WHERE normalized_alias IN ($placeholders)
-             ORDER BY support DESC, last_confirmed DESC
+             ORDER BY MIN(support, $_maxAliasSupport) DESC, last_confirmed DESC
              LIMIT 256''',
           keys,
         );
