@@ -65,7 +65,6 @@ class _EditorScreenState extends State<EditorScreen> {
   final fields = <String, TextEditingController>{};
   final _extraSaltControllers = <TextEditingController>[];
   final _formKey = GlobalKey<FormState>();
-  late final int _baseRevision;
 
   bool _mfgMonthOnly = false, _expiryMonthOnly = true;
   String _form = '', _error = '';
@@ -74,7 +73,6 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
-    _baseRevision = widget.controller.snapshot.revision;
     final seed = widget.seed;
     final scan = widget.scanDraft;
     String identityValue(String? catalog, String scanned) =>
@@ -401,7 +399,24 @@ class _EditorScreenState extends State<EditorScreen> {
       }
 
       if (!mounted) return;
-      await widget.controller.save(draft, expectedRevision: _baseRevision);
+      final reviewed = widget.record;
+      if (reviewed != null) {
+        final live = widget.controller.snapshot.records[reviewed.id];
+        if (live == null ||
+            live.archived ||
+            live.revision != reviewed.revision) {
+          throw StateError(
+            'This medicine changed while you were editing it. Reopen the live entry before saving.',
+          );
+        }
+      }
+      // The editor is bound to the exact stock-row revision it opened, not to
+      // unrelated Medicine Database traffic. The storage CAS still guards the
+      // final global revision, so a later concurrent write fails closed.
+      await widget.controller.save(
+        draft,
+        expectedRevision: widget.controller.snapshot.revision,
+      );
       final confirmedScan = widget.scanDraft;
       if (!sold && confirmedScan != null) {
         await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
@@ -473,11 +488,17 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
-      await widget.controller.archive(
-        record.id,
-        reason,
-        expectedRevision: _baseRevision,
-      );
+      final live = widget.controller.snapshot.records[record.id];
+      if (live == null || live.archived || live.revision != record.revision) {
+        throw StateError(
+          'This medicine changed while removal was being reviewed. Reopen the live entry before removing it.',
+        );
+      }
+      // Reuse the controller's exact-row reviewed removal path. Harmless writes
+      // to other medicines no longer invalidate this confirmation, while any
+      // later mutation of this row is rejected by applyArchive().
+      final review = widget.controller.reviewArchive(record.id, reason);
+      await widget.controller.applyArchive(review);
       widget.controller.clearOperationalTarget(record.id);
       if (mounted) {
         setState(() => _allowPop = true);
