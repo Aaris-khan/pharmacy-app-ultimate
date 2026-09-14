@@ -56,7 +56,7 @@ Earlier documents' recorded test results are not evidence for this pass.
 3. Adaptive retrieval takes the first 256 rows by support before considering
    collisions. A competing identity omitted by LIMIT can make an ambiguous alias
    appear unique. Historical support is effectively unbounded (up to one million).
-4. Native video sampling computes a low-resolution hash but currently emits every
+4. Native video sampling computes low-resolution quality but currently emits every
    decoded bucket. Deduplication must preserve fine date/strength changes and
    never replace product evidence with a coarse visual-similarity guess.
 5. Queue OCR bypasses the interactive review's missing-text/layout reconstruction.
@@ -80,3 +80,24 @@ Earlier documents' recorded test results are not evidence for this pass.
   https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
 
 Implementation and final verification evidence will be appended to this record.
+
+## Checkpoint: provider protocols and response bounds
+
+- Shared adapters now implement Gemini generateContent, Chat Completions
+  (OpenAI and configurable compatible endpoints), and Anthropic Messages.
+  Chat/scan use the same wire mapping; existing evidence/AI-plan validators stay
+  authoritative. Model IDs are user supplied; no name-specific model catalogue.
+- Secure configuration v2 preserves old values and accepts legacy Compatible /
+  OpenAI-compatible aliases. Unknown protocols fail before a request. Base /v1
+  URLs expand predictably; custom full HTTPS endpoints remain exact.
+- Streaming and provider JSON mode are explicit capabilities in settings.
+  Anthropic remains prompt-structured text, with required max_tokens and typed
+  text-block deltas. Tool/image input is not claimed or transmitted.
+- Raw response bytes are capped before UTF-8/line splitting, with an absolute
+  body deadline and cancellation checks. Provider bodies are not surfaced as
+  errors; HTTP categories remain actionable. Auth/rate limits do not auto-retry.
+- Removing a cloud key returns the actual saved configuration so the active
+  Local Brain preference is not visually reset. Switching provider clears the
+  old unsaved key/model so another vendor cannot receive an old credential.
+- Added 12 focused provider/stream regression tests, not executed in this session.
+  Source review preserves existing bounded retries, ownership and [skip ci].

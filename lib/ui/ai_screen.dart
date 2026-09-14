@@ -1581,6 +1581,8 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
   late final TextEditingController key;
   final local = LocalAiService.instance;
   late bool localBrainEnabled;
+  late bool streamingEnabled;
+  late bool jsonModeEnabled;
   bool obscure = true;
   bool busy = false;
   bool apiExpanded = false;
@@ -1589,11 +1591,14 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
   @override
   void initState() {
     super.initState();
-    provider = widget.initial.provider;
+    provider = widget.initial.provider == 'OpenAI-compatible'
+        ? 'Compatible' : widget.initial.provider;
     model = TextEditingController(text: widget.initial.model);
     endpoint = TextEditingController(text: widget.initial.endpoint);
     key = TextEditingController(text: widget.initial.key);
     localBrainEnabled = widget.initial.localBrainEnabled;
+    streamingEnabled = widget.initial.streamingEnabled;
+    jsonModeEnabled = widget.initial.useJsonMode;
   }
 
   @override
@@ -1620,6 +1625,9 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
         // Local Brain preference. The owner can keep a private on-device route
         // active while also keeping a cloud provider ready for explicit use.
         localBrainEnabled: localBrainEnabled,
+        streamingEnabled: streamingEnabled,
+        jsonModeEnabled: jsonModeEnabled,
+        responseTimeoutSeconds: widget.initial.responseTimeoutSeconds,
       );
       config.uri;
       await widget.service.saveConfiguration(config);
@@ -1720,7 +1728,8 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
     setState(() => busy = true);
     try {
       await widget.service.forgetKey();
-      if (mounted) Navigator.pop(context, const AiConfiguration());
+      final saved = await widget.service.loadConfiguration();
+      if (mounted) Navigator.pop(context, saved);
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
@@ -1729,7 +1738,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
   }
 
   String get _providerLabel =>
-      provider == 'Gemini' ? 'Google Gemini' : 'OpenAI-compatible';
+      AiConfiguration(provider: provider).providerLabel;
 
   Widget _apiFields(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
@@ -1740,6 +1749,8 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
           decoration: const InputDecoration(labelText: 'Provider'),
           items: const [
             DropdownMenuItem(value: 'Gemini', child: Text('Google Gemini')),
+            DropdownMenuItem(value: 'OpenAI', child: Text('OpenAI')),
+            DropdownMenuItem(value: 'Anthropic', child: Text('Anthropic')),
             DropdownMenuItem(
               value: 'Compatible',
               child: Text('OpenAI-compatible'),
@@ -1747,7 +1758,15 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
           ],
           onChanged: busy
               ? null
-              : (value) => setState(() => provider = value ?? 'Gemini'),
+              : (value) => setState(() {
+                  provider = value ?? 'Gemini';
+                  jsonModeEnabled = provider == 'Gemini';
+                  // Keys/models are tied to the selected provider. Never send a
+                  // credential to another host merely because the picker changed.
+                  key.clear();
+                  model.clear();
+                  endpoint.clear();
+                }),
         ),
         const SizedBox(height: 10),
         TextField(
@@ -1761,7 +1780,10 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
             controller: endpoint,
             enabled: !busy,
             keyboardType: TextInputType.url,
-            decoration: const InputDecoration(labelText: 'HTTPS endpoint'),
+            decoration: const InputDecoration(
+              labelText: 'HTTPS base URL or full endpoint',
+              helperText: 'Use an API that supports chat/completions.',
+            ),
           ),
         ],
         const SizedBox(height: 10),
@@ -1785,6 +1807,22 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
             ),
           ),
         ),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Stream replies'),
+          value: streamingEnabled,
+          onChanged: busy ? null : (value) =>
+              setState(() => streamingEnabled = value),
+        ),
+        if (provider != 'Anthropic')
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Provider supports JSON mode'),
+            subtitle: const Text('Turn off if this model rejects JSON mode.'),
+            value: jsonModeEnabled,
+            onChanged: busy ? null : (value) =>
+                setState(() => jsonModeEnabled = value),
+          ),
         if (error.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 10),
