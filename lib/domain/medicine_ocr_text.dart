@@ -1,3 +1,5 @@
+import 'medicine.dart';
+
 final _medicineOcrPresentationArtifacts = RegExp(
   r'[\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]',
 );
@@ -13,6 +15,9 @@ final _medicineOcrAsciiDigit = RegExp(r'\d');
 final _medicineOcrDigitO = RegExp('[Oo]');
 final _medicineOcrDigitOne = RegExp('[IlL]');
 
+const _medicineOcrNamedMonthPattern =
+    r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
 // OCR frequently drops the visual gap between a short packaging role and its
 // value ("MFG04/2026", "EXP04/2028", "BATCHNOAB123"). Restore only known
 // pharmaceutical roles. Generic alpha/digit splitting is intentionally avoided
@@ -21,8 +26,54 @@ final _medicineOcrGluedNumericRoleLabel = RegExp(
   r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe|mrp|price|pkd|pkg))(?=[0-9])',
   caseSensitive: false,
 );
+final _medicineOcrGluedNamedMonthRoleLabel = RegExp(
+  '(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe))'
+  '(?=$_medicineOcrNamedMonthPattern\\s*(?:[./-]\\s*)?\\d{2,4}(?![A-Za-z0-9]))',
+  caseSensitive: false,
+);
 final _medicineOcrGluedTraceabilityLabel = RegExp(
   r'(?<![A-Za-z])((?:batch|lot))(no\.?)?(?=[A-Za-z0-9])',
+  caseSensitive: false,
+);
+
+// Multi-word field labels are especially easy for OCR to collapse into one
+// token. Only strong, explicit packaging roles are recovered here; bare words
+// such as BRAND/GENERIC are intentionally excluded so ordinary product text is
+// never split merely because it starts with a role-like word.
+final _medicineOcrGluedSemanticLabel = RegExp(
+  r'(?<![A-Za-z])(BRANDNAME|TRADENAME|PRODUCTNAME|GENERICNAME|ACTIVEINGREDIENTS?|MANUFACTURER)(?=[A-Z][A-Z0-9-]{2,})',
+);
+
+// Company ownership headings often arrive as MANUFACTUREDBYACME or MFG.BYACME.
+// Restore the value boundary while preserving the role itself for the existing
+// manufacturer/date-noise firewalls.
+final _medicineOcrGluedOwnerValue = RegExp(
+  r'(?<![A-Za-z])((?:manufactured|mfg|mfd|made|marketed|distributed|imported))\s*\.?\s*(by)(?=[A-Za-z]{2})',
+  caseSensitive: false,
+);
+
+// "EACH10MLCONTAINS..." is a common OCR collapse on syrup/suspension packs.
+// The exact EACH + numeric-volume + CONTAINS scaffold is strong enough to
+// restore without guessing an ingredient or a concentration.
+final _medicineOcrGluedCompositionBasis = RegExp(
+  r'(?<![A-Za-z0-9])(each)([0-9OoIlL]{1,4}(?:[.,][0-9OoIlL]{1,2})?)(ml|g)contains(?=[A-Za-z])',
+  caseSensitive: false,
+);
+
+// Reuse the authoritative dosage-form vocabulary rather than introducing a
+// second form list. Only single-token aliases participate in glued recovery;
+// multi-word forms still require visible spacing from OCR.
+final _medicineOcrSingleTokenFormPattern =
+    (medicineFormAliases.keys
+            .where((value) => value != 'other' && !value.contains(' '))
+            .toList(growable: false)
+          ..sort((left, right) => right.length.compareTo(left.length)))
+        .map(RegExp.escape)
+        .join('|');
+final _medicineOcrGluedUnitForm = RegExp(
+  '([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?\\s*'
+  '(?:mcg|ug|mg|gm|g|ml|meq|iu|i\\.u\\.|units?|%))'
+  '(?=(?:$_medicineOcrSingleTokenFormPattern)(?![A-Za-z]))',
   caseSensitive: false,
 );
 
@@ -113,6 +164,26 @@ String _canonicalMedicineDenominatorUnit(String value) {
   return key;
 }
 
+String _canonicalMedicineSemanticLabel(String value) {
+  switch (value) {
+    case 'BRANDNAME':
+      return 'BRAND NAME';
+    case 'TRADENAME':
+      return 'TRADE NAME';
+    case 'PRODUCTNAME':
+      return 'PRODUCT NAME';
+    case 'GENERICNAME':
+      return 'GENERIC NAME';
+    case 'ACTIVEINGREDIENT':
+      return 'ACTIVE INGREDIENT';
+    case 'ACTIVEINGREDIENTS':
+      return 'ACTIVE INGREDIENTS';
+    case 'MANUFACTURER':
+      return 'MANUFACTURER';
+  }
+  return value;
+}
+
 String _separateMedicineOcrGluedDose(String value) {
   return value.replaceAllMapped(_medicineOcrGluedDose, (match) {
     final prefix = match[1]!;
@@ -159,6 +230,27 @@ String _canonicalMedicineOcrSurface(String value) {
     return (code - zero).toString();
   });
 
+  // Recover explicit multi-word labels collapsed by OCR before any field parser
+  // sees them. Uppercase is deliberate: it gives us a strong packaging signal
+  // and avoids splitting ordinary prose that merely starts with BRAND/GENERIC.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedSemanticLabel,
+    (match) => '${_canonicalMedicineSemanticLabel(match[1]!)} ',
+  );
+
+  // Restore company-owner boundaries such as MANUFACTUREDBYACME and MFG.BYACME.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedOwnerValue,
+    (match) => '${match[1]} ${match[2]} ',
+  );
+
+  // Date roles can glue to a named month as well as to digits. Keep this narrow
+  // to a complete month+year surface so words such as "expansion" are untouched.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedNamedMonthRoleLabel,
+    (match) => '${match[1]} ',
+  );
+
   // Restore only role boundaries whose semantics are already known. This lets
   // the existing date/batch/price firewalls see the label instead of treating a
   // fused machine token as a possible medicine identity.
@@ -172,6 +264,23 @@ String _canonicalMedicineOcrSurface(String value) {
         ? '${match[1]} '
         : '${match[1]} $numberWord ';
   });
+
+  // Recover a fully collapsed composition basis without inventing any medicine
+  // fact. The printed denominator is retained and later binds only composition-
+  // owned strengths through the existing bounded concentration logic.
+  result = result.replaceAllMapped(_medicineOcrGluedCompositionBasis, (match) {
+    final number = match[2]!;
+    if (!_medicineOcrAsciiDigit.hasMatch(number)) return match[0]!;
+    return '${match[1]} ${_repairMedicineOcrDigitToken(number)} ${match[3]!.toLowerCase()} contains ';
+  });
+
+  // A form can be glued immediately after the dose unit. Split only against the
+  // shared pharmaceutical-form vocabulary, then let the existing dose boundary
+  // recovery handle the medicine-token side. Example: CALPOL500MGTablets.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedUnitForm,
+    (match) => '${match[1]} ',
+  );
 
   // Recover a lost boundary such as "Paracetamol5O0MG" or "CALPOL500MG".
   // Traceability context remains fused on purpose so its internal digits cannot
