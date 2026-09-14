@@ -283,14 +283,25 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
           .trim();
       if (candidate.length < 3) continue;
 
-      final componentLike = componentVotes.values.any(
-        (component) =>
-            _semanticSimilarity(
-              searchText(candidate),
-              searchText(component.ingredient),
-            ) >=
-            .90,
-      );
+      final candidateKey = searchText(candidate);
+      final containedComponents = componentVotes.values
+          .where((component) {
+            final ingredientKey = searchText(component.ingredient);
+            return ingredientKey.length >= 4 &&
+                candidateKey.contains(ingredientKey);
+          })
+          .take(2)
+          .length;
+      final componentLike =
+          componentVotes.values.any(
+            (component) =>
+                _semanticSimilarity(
+                  candidateKey,
+                  searchText(component.ingredient),
+                ) >=
+                .90,
+          ) ||
+          containedComponents >= 2;
       if (componentLike) {
         rememberText(genericVotes, candidate, .82 + quality * .05);
         continue;
@@ -601,11 +612,72 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
         _manufacturerNoise.hasMatch(normalized) ||
         _companyIdentityNoise.hasMatch(normalized) ||
         _equivalentToHint.hasMatch(normalized) ||
-        _unlabelledCompositionNoise.hasMatch(normalized)) {
+        _unlabelledCompositionNoise.hasMatch(normalized) ||
+        _compositionInstructionStop.hasMatch(normalized)) {
       continue;
     }
 
-    final strengths = _strengthPattern.allMatches(raw).take(2).toList();
+    final strengths = _strengthPattern
+        .allMatches(raw)
+        .take(5)
+        .toList(growable: false);
+
+    // Combination packs often lose the COMPOSITION heading while OCR still
+    // preserves an exact "ingredient dose + ingredient dose" row. Recover only
+    // this explicit shape: 2-4 aligned strengths, literal '+' separators, and a
+    // pharmaceutical signal for every segment. This deliberately abstains on
+    // prose, dosage directions and weak multi-number lines rather than inventing
+    // a clinically unsafe salt/strength pairing.
+    if (strengths.length > 1) {
+      if (strengths.length > 4 || !raw.contains('+')) continue;
+      final segments = raw.split('+').map((value) => value.trim()).toList();
+      if (segments.length != strengths.length || segments.length > 4) continue;
+
+      final parsed = _parseComposition(raw, quality);
+      if (parsed.length != strengths.length) continue;
+
+      final seenIngredients = <String>{};
+      var safeCombination = true;
+      for (var componentIndex = 0;
+          componentIndex < parsed.length;
+          componentIndex++) {
+        final component = parsed[componentIndex];
+        final segment = segments[componentIndex];
+        final segmentStrengths = _strengthPattern
+            .allMatches(segment)
+            .take(2)
+            .length;
+        final ingredientKey = searchText(component.ingredient);
+        final pharmaceuticalSignal =
+            _pharmacopoeiaHint.hasMatch(segment) ||
+            _genericChemistryHint.hasMatch(ingredientKey) ||
+            _genericDrugMorphology.hasMatch(ingredientKey);
+        if (segmentStrengths != 1 ||
+            ingredientKey.length < 4 ||
+            !pharmaceuticalSignal ||
+            !seenIngredients.add(ingredientKey)) {
+          safeCombination = false;
+          break;
+        }
+      }
+      if (!safeCombination) continue;
+
+      for (final component in parsed) {
+        final confidence = max(
+          component.confidence,
+          (.83 + quality * .06).clamp(.83, .92).toDouble(),
+        );
+        result.add(
+          _ComponentCandidate(
+            component.ingredient,
+            component.strength,
+            confidence,
+          ),
+        );
+      }
+      continue;
+    }
+
     if (strengths.length != 1) continue;
     final match = strengths.single;
     if (match.start <= 0) continue;
