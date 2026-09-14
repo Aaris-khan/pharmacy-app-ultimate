@@ -29,11 +29,11 @@ final _medicineOcrGluedNumericRoleLabel = RegExp(
 
 // A leading 0/1 in a printed month is commonly OCR'd as O/I/l. When that
 // confusable glyph is fused to a strong MFG/EXP role, require a second real
-// digit plus an explicit month/year separator and year before restoring only the
-// missing role boundary. The date parser then performs its existing bounded
-// label-adjacent glyph repair; this rule never changes letters into digits.
+// digit plus either an explicit month/year separator or a complete four-digit
+// compact year. The date parser then performs its existing bounded label-adjacent
+// glyph repair; this rule never changes letters into digits.
 final _medicineOcrGluedConfusableMonthYearRoleLabel = RegExp(
-  r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe))(?=[OoIlL][0-9](?:\s*[./-]\s*|\s{1,3})(?:20[0-9]{2}|[0-9]{2})(?![A-Za-z0-9]))',
+  r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe))(?=[OoIlL][0-9](?:(?:\s*[./-]\s*|\s{1,3})(?:20[0-9]{2}|[0-9]{2})|20[0-9]{2})(?![A-Za-z0-9]))',
   caseSensitive: false,
 );
 final _medicineOcrGluedNamedMonthRoleLabel = RegExp(
@@ -41,8 +41,13 @@ final _medicineOcrGluedNamedMonthRoleLabel = RegExp(
   '(?=$_medicineOcrNamedMonthPattern\\s*(?:[./-]\\s*)?\\d{2,4}(?![A-Za-z0-9]))',
   caseSensitive: false,
 );
+
+// Traceability headings are frequently flattened as BATCHNUMBERAB123,
+// BATCHNUMAB123 or LOTNOAB123. Recover only an exact pharmaceutical lot role;
+// NUMBER/NUM are canonicalized to NO so the downstream batch grammar keeps one
+// authority instead of growing a second set of aliases.
 final _medicineOcrGluedTraceabilityLabel = RegExp(
-  r'(?<![A-Za-z])((?:batch|lot))(no\.?)?(?=[A-Za-z0-9])',
+  r'(?<![A-Za-z])((?:batch|lot))((?:number|num|no)\.?)?(?=[A-Za-z0-9])',
   caseSensitive: false,
 );
 
@@ -258,8 +263,9 @@ String _canonicalMedicineOcrSurface(String value) {
   );
 
   // Restore the role boundary when the first month digit itself was read as an
-  // OCR-confusable O/I/l. The following real digit + separator + year are the
-  // safety proof; actual glyph-to-digit repair remains owned by the date parser.
+  // OCR-confusable O/I/l. The following real digit plus separator+year or a full
+  // compact four-digit year is the safety proof; glyph-to-digit repair remains
+  // owned by the date parser.
   result = result.replaceAllMapped(
     _medicineOcrGluedConfusableMonthYearRoleLabel,
     (match) => '${match[1]} ',
@@ -280,10 +286,8 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]} ',
   );
   result = result.replaceAllMapped(_medicineOcrGluedTraceabilityLabel, (match) {
-    final numberWord = match[2];
-    return numberWord == null
-        ? '${match[1]} '
-        : '${match[1]} $numberWord ';
+    final qualifier = match[2];
+    return qualifier == null ? '${match[1]} ' : '${match[1]} NO ';
   });
 
   // Recover a fully collapsed composition basis without inventing any medicine
