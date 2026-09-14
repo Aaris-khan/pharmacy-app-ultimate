@@ -134,8 +134,27 @@ final _medicineOcrMlConfusion = RegExp(
   r'(?<![A-Za-z0-9])([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?)\s*m[1Il](?![A-Za-z])',
   caseSensitive: false,
 );
+
+// OCR can lose the slash in a liquid concentration and return 125mg5ml (or
+// 125mg5m1). Treat only an immediately fused mass/unit + numeric-volume/unit
+// surface as a concentration. A visible gap between "mg" and "5 ml" remains a
+// hard boundary so pack volume or an adjacent dose can never be silently joined.
+final _medicineOcrFusedConcentration = RegExp(
+  r'(?<![A-Za-z0-9])([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?)\s*(mcg|ug|mg|gm|g|meq|iu|i\.u\.|units?)([0-9OoIlL]{1,4}(?:[.,][0-9OoIlL]{1,2})?)\s*(ml|m[1Il])(?![A-Za-z])',
+  caseSensitive: false,
+);
 final _medicineOcrPerConcentration = RegExp(
   r'(?<![A-Za-z0-9])(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|meq|iu|i\.u\.|units?|%))\s+per\s+(?:(\d+(?:[.,]\d+)?)\s*)?(ml|millilit(?:er|re)s?|g|gram(?:me)?s?|dose|actuation)(?![A-Za-z])',
+  caseSensitive: false,
+);
+
+// V40's unlabeled-combination grammar intentionally accepts literal '+' only.
+// Canonicalize common pharmaceutical separators (& / AND / WITH) into that one
+// authority, but only when the separator is owned by a complete left strength
+// and the right side contains an alphabetic ingredient followed by another
+// pharmaceutical strength. Ordinary prose and "500 mg AND 125 mg" stay intact.
+final _medicineOcrCombinationSeparator = RegExp(
+  r'(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?)\s*(?:&|\band\b|\bwith\b)\s*(?=[A-Za-z][A-Za-z .()/-]{2,72}\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
   caseSensitive: false,
 );
 final _medicineOcrCompositionBasis = RegExp(
@@ -355,6 +374,26 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]}${match[2]}',
   );
 
+  // Restore a slash only when OCR fused two complete unit-owned numeric tokens.
+  // At least one genuine digit must survive in each token before O/0-I/l repair;
+  // this prevents all-letter accidents from manufacturing a concentration.
+  // Explicit traceability/price/date contexts stay byte-for-byte untouched.
+  result = result.replaceAllMapped(_medicineOcrFusedConcentration, (match) {
+    final numerator = match[1]!;
+    final denominator = match[3]!;
+    if (!_medicineOcrAsciiDigit.hasMatch(numerator) ||
+        !_medicineOcrAsciiDigit.hasMatch(denominator)) {
+      return match[0]!;
+    }
+    final contextStart = match.start > 32 ? match.start - 32 : 0;
+    final context = result.substring(contextStart, match.start);
+    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context)) {
+      return match[0]!;
+    }
+    final numeratorUnit = match[2]!.toLowerCase();
+    return '${_repairMedicineOcrDigitToken(numerator)} $numeratorUnit/${_repairMedicineOcrDigitToken(denominator)} ml';
+  });
+
   // O/0 and I/l/1 are repaired only inside a numeric token immediately owned
   // by a pharmaceutical unit. At least one real digit is required, so product
   // words such as OIL/ILL can never be converted into invented strengths.
@@ -374,6 +413,19 @@ String _canonicalMedicineOcrSurface(String value) {
     return denominator == null
         ? '${match[1]}/$unit'
         : '${match[1]}/$denominator $unit';
+  });
+
+  // Map only semantically constrained ingredient-dose separators onto the one
+  // '+' grammar consumed by the unlabeled composition resolver. The downstream
+  // instruction firewall remains authoritative for TAKE/DOSAGE prose, while
+  // traceability/date/price contexts remain excluded before semantic inference.
+  result = result.replaceAllMapped(_medicineOcrCombinationSeparator, (match) {
+    final contextStart = match.start > 32 ? match.start - 32 : 0;
+    final context = result.substring(contextStart, match.start);
+    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context)) {
+      return match[0]!;
+    }
+    return '${match[1]} + ';
   });
 
   // Liquid labels very often express the denominator before the ingredients:
