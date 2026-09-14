@@ -220,7 +220,7 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       rememberFrameComponent(component);
     }
 
-    // Also recover the common split "PARACETAMOL I.P." / "650 mg" shape. A
+    // Also recover the common "PARACETAMOL I.P." / "650 mg" shape. A
     // pharmaceutical morphology gate plus a dose-only adjacent line prevents a
     // trade heading such as "CROCIN" / "650 mg" becoming an invented salt.
     for (final component in _splitUnlabelledCompositionCandidates(
@@ -252,12 +252,18 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
         );
       }
 
+      // Legal-company rows are high-salience uppercase text on many medicine
+      // packs. They are useful manufacturer evidence elsewhere, but they must
+      // never compete with an unlabelled trade name merely because they are
+      // early, large, or uppercase. Explicit BRAND/PRODUCT NAME labels above
+      // remain authoritative and are intentionally evaluated before this gate.
       if (_compositionCue.hasMatch(normalized) ||
           _brandLabel.hasMatch(normalized) ||
           _genericLabel.hasMatch(normalized) ||
           _semanticLegalNoise.hasMatch(normalized) ||
           _semanticDateNoise.hasMatch(normalized) ||
-          _manufacturerNoise.hasMatch(normalized)) {
+          _manufacturerNoise.hasMatch(normalized) ||
+          _companyIdentityNoise.hasMatch(normalized)) {
         continue;
       }
       if (raw.length < 3 || raw.length > 72) continue;
@@ -322,12 +328,19 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
     );
   }
 
+  double textScore(_TextVote vote) =>
+      (vote.confidence + min(.08, max(0, vote.support - 1) * .03))
+          .clamp(0, .99)
+          .toDouble();
+
   _TextVote? chooseText(Map<String, _TextVote> votes, {required bool brand}) {
     final ranked = votes.values.toList(growable: false)
       ..sort((a, b) {
-        final left = a.confidence + min(.08, max(0, a.support - 1) * .03);
-        final right = b.confidence + min(.08, max(0, b.support - 1) * .03);
-        return right.compareTo(left);
+        final score = textScore(b).compareTo(textScore(a));
+        if (score != 0) return score;
+        final confidence = b.confidence.compareTo(a.confidence);
+        if (confidence != 0) return confidence;
+        return a.value.compareTo(b.value);
       });
     if (ranked.isEmpty) return null;
     if (!brand || resolvedComponents.isEmpty) return ranked.first;
@@ -350,11 +363,20 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
   var conflicted = componentConflict;
 
   if (brand != null) {
+    // Conflict evaluation must use the same support-aware ordering that selected
+    // the winner. Comparing raw detector confidence here previously allowed a
+    // single competing frame to veto a consistently repeated trade name.
     final ranked = brandVotes.values.toList(growable: false)
-      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+      ..sort((a, b) {
+        final score = textScore(b).compareTo(textScore(a));
+        if (score != 0) return score;
+        return a.value.compareTo(b.value);
+      });
     if (ranked.length > 1) {
       final first = ranked[0];
       final second = ranked[1];
+      final firstScore = textScore(first);
+      final secondScore = textScore(second);
       final distinct =
           _semanticSimilarity(
             searchText(first.value),
@@ -362,19 +384,16 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
           ) <
           .80;
       if (distinct &&
-          first.confidence >= .80 &&
-          second.confidence >= .78 &&
-          first.confidence - second.confidence < .06) {
+          firstScore >= .80 &&
+          secondScore >= .78 &&
+          firstScore - secondScore < .06) {
         conflicted = true;
       }
     }
   }
 
-  double effectiveTextConfidence(_TextVote? vote) => vote == null
-      ? 0
-      : (vote.confidence + min(.08, max(0, vote.support - 1) * .03))
-            .clamp(0, .99)
-            .toDouble();
+  double effectiveTextConfidence(_TextVote? vote) =>
+      vote == null ? 0 : textScore(vote);
 
   return MedicineSemanticResolution(
     brand: conflicted ? '' : brand?.value ?? '',
@@ -572,6 +591,7 @@ List<_ComponentCandidate> _unlabelledCompositionCandidates(
         _semanticLegalNoise.hasMatch(normalized) ||
         _semanticDateNoise.hasMatch(normalized) ||
         _manufacturerNoise.hasMatch(normalized) ||
+        _companyIdentityNoise.hasMatch(normalized) ||
         _equivalentToHint.hasMatch(normalized) ||
         _unlabelledCompositionNoise.hasMatch(normalized)) {
       continue;
@@ -629,6 +649,7 @@ List<_ComponentCandidate> _splitUnlabelledCompositionCandidates(
         _semanticLegalNoise.hasMatch(normalized) ||
         _semanticDateNoise.hasMatch(normalized) ||
         _manufacturerNoise.hasMatch(normalized) ||
+        _companyIdentityNoise.hasMatch(normalized) ||
         _equivalentToHint.hasMatch(normalized) ||
         _unlabelledCompositionNoise.hasMatch(normalized) ||
         _strengthPattern.hasMatch(raw)) {
@@ -891,6 +912,16 @@ final _manufacturerNoise = RegExp(
   r'\b(?:manufactured\s+by|mfg\.?\s+by|manufacturer|made\s+by)\b',
   caseSensitive: false,
 );
+
+// Corporate identity is a different semantic role from a medicine trade name.
+// Keep this separate from general legal noise so an explicit BRAND NAME value
+// is still accepted when the packaging itself declares it, while unlabelled
+// company rows cannot win the visual-prominence brand heuristic.
+final _companyIdentityNoise = RegExp(
+  r'\b(?:pvt|private|ltd|limited|llp|plc|inc|incorporated|labs?|laborator(?:y|ies)|pharmaceuticals?|healthcare|industries|company|corporation|corp(?:oration)?|biotech(?:nology)?|life\s*sciences?)\b',
+  caseSensitive: false,
+);
+
 final _unlabelledCompositionNoise = RegExp(
   r'(?:₹|\brs\.?\b|\bm\s*\.?\s*r\s*\.?\s*p\.?\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bdom\b|\bexp(?:iry)?\b|\bdoe\b|\bpkd\b|\bpkg\b|\bpacked\b|\bpacking\b|\buse\s*(?:before|by|till|until)\b|\bbest\s*before\b|\bvalid\s*(?:till|until)\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
   caseSensitive: false,

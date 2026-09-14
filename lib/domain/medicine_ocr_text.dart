@@ -3,7 +3,12 @@ final _medicineOcrPresentationArtifacts = RegExp(
 );
 
 String _cleanMedicineOcrLine(String value) => value
-    .replaceAll(_medicineOcrPresentationArtifacts, ' ')
+    // Unicode bidi/zero-width controls are formatting code points, not word
+    // separators. Replacing them with spaces split real medicine tokens such as
+    // PARA<Cf> CETAMOL and weakened name/salt matching. Remove them here; the
+    // geometry-aware date parser keeps its own one-for-one offset-preserving
+    // normalization where character offsets are semantically required.
+    .replaceAll(_medicineOcrPresentationArtifacts, '')
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
@@ -74,5 +79,8 @@ double medicineOcrLineQuality(String value) {
     }
   }
   if (runes == 0) return 0;
-  return useful / runes - replacement * .08;
+  // This value is consumed as a bounded quality signal. Corrupt OCR can contain
+  // many replacement glyphs, so keep the public contract mathematically inside
+  // [0, 1] instead of leaking a negative score into duplicate-selection logic.
+  return (useful / runes - replacement * .08).clamp(0.0, 1.0).toDouble();
 }
