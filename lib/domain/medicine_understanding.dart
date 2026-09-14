@@ -1161,7 +1161,7 @@ class MedicineUnderstandingEngine {
       final manufacturer = _afterLabel(
         line,
         RegExp(
-          r'\b(?:manufactured|mfg\.?|mfd|made)\s+by\b|\bmanufacturer\b',
+          r'\b(?:manufactured|mfg|mfd|made)\s*\.?\s*by\b|\bmanufacturer\b',
           caseSensitive: false,
         ),
       );
@@ -1179,7 +1179,7 @@ class MedicineUnderstandingEngine {
 
       final explicitBrand = _afterLabel(
         line,
-        RegExp(r'\b(?:brand|trade|product)\s*name\b', caseSensitive: false),
+        RegExp(r'\b(?:brand(?:\s+name)?|trade\s+(?:name|mark)|product\s*name|proprietary\s+name)\b', caseSensitive: false),
       );
       if (explicitBrand.isNotEmpty) {
         final value = _productName(explicitBrand);
@@ -2145,11 +2145,11 @@ final _compositionLabel = RegExp(
   caseSensitive: false,
 );
 final _manufacturerHeader = RegExp(
-  r'\b(?:manufactured|mfg\.?|mfd|made)\s+by\b|\bmanufacturer\b',
+  r'\b(?:manufactured|mfg|mfd|made)\s*\.?\s*by\b|\bmanufacturer\b',
   caseSensitive: false,
 );
 final _dateNoise = RegExp(
-  r'\b(?:mfg|mfd|dom|manufactur(?:e|ed|ing)|exp|expiry|expires|doe|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|pkd|pkg|packed|packing)\b',
+  r'\b(?:mfg|mfd|dom|manufactur(?:e|ed|ing)|exp|expn|xpry|expiry|expires|doe|e\s*[./-]\s*d|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until|upto|up\s*to)|pkd|pkg|packed|packing)\b',
   caseSensitive: false,
 );
 final _priceNoise = RegExp(
@@ -2356,11 +2356,9 @@ bool _looksLikeGenericLine(String line) {
 String _productName(String raw) {
   var value = raw
       .replaceAll(RegExp(r'[®™©]'), ' ')
+      .replaceAll(medicineFormPresentationPattern, ' ')
       .replaceAll(
-        RegExp(
-          r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?|ip|bp|usp)\b',
-          caseSensitive: false,
-        ),
+        RegExp(r'\b(?:ip|bp|usp)\b', caseSensitive: false),
         ' ',
       )
       .replaceAll(
@@ -2420,7 +2418,7 @@ bool _eligibleNameLine(String line, int index) {
       _compositionLabel.hasMatch(normalized) ||
       _manufacturerHeader.hasMatch(normalized) ||
       _nonProductLine.hasMatch(normalized) ||
-      _companyMarker.hasMatch(normalized) ||
+      medicineCompanyIdentityMarker.hasMatch(normalized) ||
       RegExp(
         r'\b(?:batch|lot)\b|\bb\s*\.?\s*no\b',
         caseSensitive: false,
@@ -2488,44 +2486,11 @@ double _uppercaseRatio(String value) {
 }
 
 String _formValue(String normalized) {
-  for (final entry in const <String, String>{
-    'oral suspension': 'Suspension',
-    'suspension': 'Suspension',
-    'susp': 'Suspension',
-    'oral solution': 'Solution',
-    'solution': 'Solution',
-    'soln': 'Solution',
-    'tablet': 'Tablet',
-    'tablets': 'Tablet',
-    'tab': 'Tablet',
-    'capsule': 'Capsule',
-    'capsules': 'Capsule',
-    'cap': 'Capsule',
-    'syrup': 'Syrup',
-    'syp': 'Syrup',
-    'syr': 'Syrup',
-    'injection': 'Injection',
-    'injectable': 'Injection',
-    'inj': 'Injection',
-    'cream': 'Cream',
-    'ointment': 'Ointment',
-    'gel': 'Gel',
-    'lotion': 'Lotion',
-    'eye drops': 'Drops',
-    'ear drops': 'Drops',
-    'nasal drops': 'Drops',
-    'drops': 'Drops',
-    'drop': 'Drops',
-    'nasal spray': 'Spray',
-    'spray': 'Spray',
-    'inhaler': 'Inhaler',
-    'inhalation': 'Inhaler',
-    'dry powder': 'Powder',
-    'powder': 'Powder',
-    'sachets': 'Sachet',
-    'sachet': 'Sachet',
-  }.entries) {
-    if (RegExp('\\b${entry.key}\\b').hasMatch(normalized)) return entry.value;
+  for (final entry in medicineFormAliases.entries) {
+    if (entry.key == 'other') continue;
+    if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(normalized)) {
+      return entry.value;
+    }
   }
   return '';
 }
@@ -2604,6 +2569,8 @@ const _identityNoise = <String>{
   'mfd',
   'dom',
   'exp',
+  'expn',
+  'xpry',
   'doe',
   'pkd',
   'pkg',
@@ -2630,8 +2597,8 @@ final _nonProductLine = RegExp(
   caseSensitive: false,
 );
 
-final _companyMarker = RegExp(
-  r'\b(?:pvt|private|ltd|limited|laborator(?:y|ies)|pharmaceuticals?|healthcare|industries|company|corporation|corp)\b',
+final medicineCompanyIdentityMarker = RegExp(
+  r'\b(?:pvt|private|ltd|limited|llp|plc|inc|incorporated|labs?|laborator(?:y|ies)|pharmaceuticals?|pharma|healthcare|industries|company|corporation|corp(?:oration)?|biotech(?:nology)?|life\s*sciences?|remedies|formulations?)\b',
   caseSensitive: false,
 );
 

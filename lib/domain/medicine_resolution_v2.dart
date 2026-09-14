@@ -1874,10 +1874,15 @@ MedicineScanDraft _applySemanticMedicineRoles(
         !name.isEmpty &&
         salt.trim().isNotEmpty &&
         _weightedTextSimilarity(name.value, salt) >= .88;
+    final nameLooksCompany =
+        name != null &&
+        !name.isEmpty &&
+        medicineCompanyIdentityMarker.hasMatch(searchText(name.value));
     if (name == null ||
         name.isEmpty ||
         name.confidence < .76 ||
-        nameLooksGeneric) {
+        nameLooksGeneric ||
+        nameLooksCompany) {
       fields['name'] = ExtractedMedicineField(
         value: semantic.brand,
         confidence: semantic.brandConfidence.clamp(.82, .97).toDouble(),

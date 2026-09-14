@@ -1,9 +1,9 @@
 final medicineManufacturingLabel = RegExp(
-  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd](?![.\s]*(?:by|at)\b)\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+(?:by|at)\b)(?:\s*(?:date|dt|on))?|prod(?:uction)?\s*(?:date|dt)|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd](?![.\s]*(?:by|at)\b)\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+(?:by|at)\b)(?:\s*(?:date|dt|on))?|prod(?:uction)?\.?\s*(?:date|dt)|date\s+of\s+m[.\s]*f[.\s]*[gd]\.?|mfr\.?\s*(?:date|dt)|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineExpiryLabel = RegExp(
-  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+(?:expiry|expiration)|b[.\s]*b[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+(?:expiry|expiration)|b[.\s]*b[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|e[.\s]*[./-][.\s]*d\.?(?:[\s.:_-]*(?:date|dt|on))?|xpry(?:[\s.:_-]*(?:date|dt|on))?|expn\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineNonDateLabel = RegExp(
@@ -12,7 +12,7 @@ final medicineNonDateLabel = RegExp(
 );
 
 final _medicineCompactDatePrefix = RegExp(
-  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|prod(?:uction)?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
+  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|e[.\s]*[./-][.\s]*d\.?|xpry|expn\.?|prod(?:uction)?\.?\s*(?:date|dt)|date\s+of\s+m[.\s]*f[.\s]*[gd]\.?|mfr\.?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
   r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*$',
   caseSensitive: false,
 );
@@ -301,7 +301,7 @@ String _repairNumericOcr(String raw) {
   // global letter-to-digit replacement would corrupt medicine names/batch IDs.
   text = text.replaceAllMapped(
     RegExp(
-      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|prod(?:uction)?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
+      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|e[.\s]*[./-][.\s]*d\.?|xpry|expn\.?|prod(?:uction)?\.?\s*(?:date|dt)|date\s+of\s+m[.\s]*f[.\s]*[gd]\.?|mfr\.?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
       r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*)([0-9OoIlL]{4,8})(?![A-Za-z0-9])',
       caseSensitive: false,
     ),

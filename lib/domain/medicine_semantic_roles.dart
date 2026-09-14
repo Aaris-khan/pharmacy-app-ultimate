@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'medicine.dart';
 import 'medicine_understanding.dart';
 import 'offline_evidence_graph.dart';
 import 'search.dart';
@@ -823,13 +824,7 @@ bool _isDoseOnlyLine(String raw) {
 String _stripPresentation(String raw) {
   var value = raw.replaceAll(RegExp(r'[®™]'), ' ');
   value = value.replaceAll(_pharmacopoeiaHint, ' ');
-  value = value.replaceAll(
-    RegExp(
-      r'\b(?:oral\s+(?:suspension|solution)|tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?)\b',
-      caseSensitive: false,
-    ),
-    ' ',
-  );
+  value = value.replaceAll(medicineFormPresentationPattern, ' ');
   value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   return value;
 }
@@ -893,7 +888,7 @@ final _compositionCue = RegExp(
   caseSensitive: false,
 );
 final _compositionStop = RegExp(
-  r'\b(?:manufactured|manufacturer|mfg|mfd|dom|exp|expiry|doe|batch|lot|mrp|storage|schedule|marketed|distributed|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
+  r'\b(?:manufactured|manufacturer|mfg|mfd|dom|exp|expn|xpry|expiry|doe|e\s*[./-]\s*d|batch|lot|mrp|storage|schedule|marketed|distributed|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
   caseSensitive: false,
 );
 final _compositionInstructionStop = RegExp(
@@ -901,11 +896,11 @@ final _compositionInstructionStop = RegExp(
   caseSensitive: false,
 );
 final _brandLabel = RegExp(
-  r'\b(?:brand|trade|product)\s*name\b',
+  r'\b(?:brand(?:\s+name)?|trade\s+(?:name|mark)|product\s*name|proprietary\s+name)\b',
   caseSensitive: false,
 );
 final _genericLabel = RegExp(
-  r'\b(?:generic\s+name|active\s+ingredient|salt)\b',
+  r'\b(?:generic(?:\s+name)?|active\s+ingredients?|salt)\b',
   caseSensitive: false,
 );
 final _semanticLegalNoise = RegExp(
@@ -913,7 +908,7 @@ final _semanticLegalNoise = RegExp(
   caseSensitive: false,
 );
 final _semanticDateNoise = RegExp(
-  r'\b(?:mfg|mfd|dom|manufactured|exp|expiry|doe|batch|lot|mrp|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
+  r'\b(?:mfg|mfd|dom|manufactured|exp|expn|xpry|expiry|doe|e\s*[./-]\s*d|batch|lot|mrp|pkd|pkg|packed|packing|use\s*(?:before|by|till|until)|best\s*before|valid\s*(?:till|until))\b',
   caseSensitive: false,
 );
 final _manufacturerNoise = RegExp(
@@ -925,13 +920,10 @@ final _manufacturerNoise = RegExp(
 // Keep this separate from general legal noise so an explicit BRAND NAME value
 // is still accepted when the packaging itself declares it, while unlabelled
 // company rows cannot win the visual-prominence brand heuristic.
-final _companyIdentityNoise = RegExp(
-  r'\b(?:pvt|private|ltd|limited|llp|plc|inc|incorporated|labs?|laborator(?:y|ies)|pharmaceuticals?|healthcare|industries|company|corporation|corp(?:oration)?|biotech(?:nology)?|life\s*sciences?)\b',
-  caseSensitive: false,
-);
+final _companyIdentityNoise = medicineCompanyIdentityMarker;
 
 final _unlabelledCompositionNoise = RegExp(
-  r'(?:₹|\brs\.?\b|\bm\s*\.?\s*r\s*\.?\s*p\.?\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bdom\b|\bexp(?:iry)?\b|\bdoe\b|\bpkd\b|\bpkg\b|\bpacked\b|\bpacking\b|\buse\s*(?:before|by|till|until)\b|\bbest\s*before\b|\bvalid\s*(?:till|until)\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
+  r'(?:₹|\brs\.?\b|\bm\s*\.?\s*r\s*\.?\s*p\.?\b|\bprice\b|\bpack\b|\bstrip\b|\bblister\b|\bnet\s+(?:qty|quantity|content)\b|\bbatch\b|\blot\b|\bmfg\b|\bmfd\b|\bdom\b|\b(?:exp(?:iry)?|expn|xpry)\b|\be\s*[./-]\s*d\b|\bdoe\b|\bpkd\b|\bpkg\b|\bpacked\b|\bpacking\b|\buse\s*(?:before|by|till|until)\b|\bbest\s*before\b|\bvalid\s*(?:till|until)\b|\blicen[cs]e\b|\bstorage\b|\bmarketed\b|\bmanufactured\b|\bdistributed\b|\baddress\b|\bmade\s+in\b|\bfor\s+(?:oral|external)\s+use\b|\bexcipients?\b|\bcolour\b|\bflavou?r\b)',
   caseSensitive: false,
 );
 final _pharmacopoeiaHint = RegExp(
