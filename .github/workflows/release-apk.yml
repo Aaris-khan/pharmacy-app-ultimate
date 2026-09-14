@@ -1,5 +1,6 @@
 name: Aaris Pharmacy Release APK
-# Final release builder with deterministic regression repairs validated in CI.
+# Release builder: committed repository source is authoritative. CI never rewrites
+# production Dart code before analysis, tests, or APK generation.
 
 on:
   push:
@@ -34,10 +35,10 @@ jobs:
       CI: true
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -52,86 +53,11 @@ jobs:
       - name: Resolve pinned dependencies
         run: flutter pub get
 
-      - name: Apply validated release regression repairs
+      - name: Verify authoritative release source
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if new in text:
-                  return
-              if old not in text:
-                  raise SystemExit(f'Patch anchor missing in {path}: {old[:80]!r}')
-              p.write_text(text.replace(old, new, 1))
-
-          replace_once(
-              'lib/domain/medicine_date_intelligence.dart',
-              "import 'offline_evidence_graph.dart';\n",
-              "import 'offline_evidence_graph.dart';\nimport 'spatial_traceability.dart';\n",
-          )
-
-          spatial_block = r'''
-            // Geometry-aware MFG/EXP assignment is already solved by the
-            // traceability engine. Feed those one-to-one label/value bindings
-            // into the date resolver before weaker flattened-text heuristics.
-            final spatial = inferSpatialTraceability(frames);
-            final spatialMfg = spatial.mfg;
-            if (spatialMfg != null && !spatialMfg.conflicted) {
-              final parsed = parseMedicineDateText(spatialMfg.value);
-              if (parsed != null) {
-                remember(
-                  MedicineDateEvidence(
-                    date: parsed,
-                    role: MedicineDateRole.manufacturing,
-                    confidence: max(.84, spatialMfg.confidence),
-                    support: max(1, spatialMfg.support),
-                    explicitLabel: true,
-                  ),
-                );
-              }
-            }
-            final spatialExpiry = spatial.expiry;
-            if (spatialExpiry != null && !spatialExpiry.conflicted) {
-              final parsed = parseMedicineDateText(spatialExpiry.value);
-              if (parsed != null) {
-                remember(
-                  MedicineDateEvidence(
-                    date: parsed,
-                    role: MedicineDateRole.expiry,
-                    confidence: max(.84, spatialExpiry.confidence),
-                    support: max(1, spatialExpiry.support),
-                    explicitLabel: true,
-                  ),
-                );
-              }
-            }
-          '''
-          replace_once(
-              'lib/domain/medicine_date_intelligence_core.dart',
-              '  final graph = buildOfflineEvidenceGraph(frames, maxFrames: 16);\n',
-              spatial_block + '\n  final graph = buildOfflineEvidenceGraph(frames, maxFrames: 16);\n',
-          )
-
-          replace_once(
-              'lib/domain/medicine_semantic_roles.dart',
-              "  'sachets',\n  'ip',\n",
-              "  'sachets',\n  'oral',\n  'ip',\n",
-          )
-
-          replace_once(
-              'test/medicine_ocr_semantic_hardening_v22_test.dart',
-              "        '20 meq/15 ml',\n",
-              "        '20 mEq/15 ml',\n",
-          )
-          PY
           git diff --check
-          git diff -- lib/domain/medicine_date_intelligence.dart \
-            lib/domain/medicine_date_intelligence_core.dart \
-            lib/domain/medicine_semantic_roles.dart \
-            test/medicine_ocr_semantic_hardening_v22_test.dart
+          git diff --exit-code
 
       # A production artifact must never be published from source that did not
       # pass the same deterministic safety gates as the application CI.
@@ -154,7 +80,7 @@ jobs:
           printf '%s\n' \
             "base_commit=${GITHUB_SHA}" \
             "ref=${GITHUB_REF_NAME}" \
-            "release_repairs=spatial-date-binding,oral-form-brand-guard,meq-canonical-test" \
+            "source_mode=committed-repository-source-no-runtime-patches" \
             > build/app-release-source.txt
 
       - name: Upload verified release APK
