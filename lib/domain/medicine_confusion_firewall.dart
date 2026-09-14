@@ -54,14 +54,33 @@ MedicineConfusionAssessment assessMedicineConfusion(
 ) {
   final a = _nameKey(left.displayName);
   final b = _nameKey(right.displayName);
-  if (a.length < 3 || b.length < 3 || a == b) {
+  final criticalFields = _criticalDifferences(left, right);
+
+  // Exact display-name equality is the most dangerous variant shape when a
+  // clinically critical identity field differs: the printed/trade name cannot
+  // distinguish (for example) a 500 mg pack from a 650 mg pack. The previous
+  // early return assigned risk 0 to this case, effectively disabling the LASA
+  // firewall exactly when independent strength/salt/form evidence is required.
+  if (a == b && a.isNotEmpty) {
+    final variantRisk = criticalFields.isEmpty ? 0.0 : 1.0;
+    return MedicineConfusionAssessment(
+      riskScore: variantRisk,
+      orthographicSimilarity: 1,
+      phoneticSimilarity: 1,
+      commonPrefix: a.length,
+      commonSuffix: a.length,
+      criticalFields: criticalFields,
+    );
+  }
+
+  if (a.length < 3 || b.length < 3) {
     return MedicineConfusionAssessment(
       riskScore: 0,
-      orthographicSimilarity: a == b && a.isNotEmpty ? 1 : 0,
+      orthographicSimilarity: 0,
       phoneticSimilarity: 0,
       commonPrefix: _commonPrefix(a, b),
       commonSuffix: _commonSuffix(a, b),
-      criticalFields: _criticalDifferences(left, right),
+      criticalFields: criticalFields,
     );
   }
 
@@ -92,7 +111,7 @@ MedicineConfusionAssessment assessMedicineConfusion(
     phoneticSimilarity: phonetic,
     commonPrefix: prefix,
     commonSuffix: suffix,
-    criticalFields: _criticalDifferences(left, right),
+    criticalFields: criticalFields,
   );
 }
 
