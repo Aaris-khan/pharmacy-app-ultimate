@@ -37,11 +37,13 @@ final _medicineOcrGluedTraceabilityLabel = RegExp(
 );
 
 // Multi-word field labels are especially easy for OCR to collapse into one
-// token. Only strong, explicit packaging roles are recovered here; bare words
-// such as BRAND/GENERIC are intentionally excluded so ordinary product text is
-// never split merely because it starts with a role-like word.
+// token. These are strong explicit packaging roles, so recognizer casing is not
+// semantic evidence: ML Kit may return ALL-CAPS, TitleCase or lowercase for the
+// same print. Bare BRAND/GENERIC prefixes remain excluded. MANUFACTURERNAME is
+// matched before MANUFACTURER so the word NAME can never leak into the value.
 final _medicineOcrGluedSemanticLabel = RegExp(
-  r'(?<![A-Za-z])(BRANDNAME|TRADENAME|PRODUCTNAME|GENERICNAME|ACTIVEINGREDIENTS?|MANUFACTURER)(?=[A-Z][A-Z0-9-]{2,})',
+  r'(?<![A-Za-z])(BRANDNAME|TRADENAME|PRODUCTNAME|GENERICNAME|ACTIVEINGREDIENTS?|MANUFACTURERNAME|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
+  caseSensitive: false,
 );
 
 // Company ownership headings often arrive as MANUFACTUREDBYACME or MFG.BYACME.
@@ -165,7 +167,7 @@ String _canonicalMedicineDenominatorUnit(String value) {
 }
 
 String _canonicalMedicineSemanticLabel(String value) {
-  switch (value) {
+  switch (value.toUpperCase()) {
     case 'BRANDNAME':
       return 'BRAND NAME';
     case 'TRADENAME':
@@ -178,6 +180,7 @@ String _canonicalMedicineSemanticLabel(String value) {
       return 'ACTIVE INGREDIENT';
     case 'ACTIVEINGREDIENTS':
       return 'ACTIVE INGREDIENTS';
+    case 'MANUFACTURERNAME':
     case 'MANUFACTURER':
       return 'MANUFACTURER';
   }
@@ -230,9 +233,9 @@ String _canonicalMedicineOcrSurface(String value) {
     return (code - zero).toString();
   });
 
-  // Recover explicit multi-word labels collapsed by OCR before any field parser
-  // sees them. Uppercase is deliberate: it gives us a strong packaging signal
-  // and avoids splitting ordinary prose that merely starts with BRAND/GENERIC.
+  // Recover strong explicit multi-word labels collapsed by OCR before any field
+  // parser sees them. Casing is detector presentation, not semantic evidence;
+  // the role prefix itself is exact and bare ambiguous labels remain excluded.
   result = result.replaceAllMapped(
     _medicineOcrGluedSemanticLabel,
     (match) => '${_canonicalMedicineSemanticLabel(match[1]!)} ',
