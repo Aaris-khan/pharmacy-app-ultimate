@@ -211,9 +211,20 @@ class MedicineReviewPipeline {
   final CloudScanAiService _cloud;
   final Map<String, MedicineScanDraft> _semanticCache =
       <String, MedicineScanDraft>{};
+  bool _cancelled = false;
+  bool _ownsLocalAiLease = false;
+
+  void _ensureActive() {
+    if (_cancelled) throw StateError('Medicine review cancelled.');
+  }
 
   void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
     _cloud.cancel();
+    if (_ownsLocalAiLease) {
+      LocalAiService.instance.cancelRequest();
+    }
     _semanticCache.clear();
   }
 
@@ -221,12 +232,14 @@ class MedicineReviewPipeline {
     MedicineReviewInput input,
     Iterable<Medicine> records,
   ) async {
+    _ensureActive();
     switch (input.kind) {
       case MedicineReviewInputKind.prepared:
         final normalized = normalizeMedicineReviewDrafts(
           input.preparedDrafts,
           singlePackExpected: input.singlePackExpected,
         );
+        _ensureActive();
         return MedicineReviewPreparation(
           drafts: List<PreparedMedicineReviewDraft>.unmodifiable(
             normalized.map(
@@ -265,8 +278,10 @@ class MedicineReviewPipeline {
 
     try {
       final brainEnabled = await LocalBrainRoutePolicy.enabled();
+      _ensureActive();
       if (brainEnabled) {
         scanModelId = await LocalBrainRoutePolicy.captureModelId(local);
+        _ensureActive();
         if (scanModelId == null) {
           warning = local.hasSelection && local.scannerEnabled && !local.scanReady
               ? 'Local AI is not ready yet. Aaris kept the on-device result.'
@@ -274,6 +289,7 @@ class MedicineReviewPipeline {
         }
       }
     } catch (_) {
+      if (_cancelled) _ensureActive();
       scanModelId = null;
       warning = 'Local AI could not be checked. Aaris kept the on-device result.';
     }
@@ -284,8 +300,10 @@ class MedicineReviewPipeline {
       baseKnowledge,
       evidence,
     );
+    _ensureActive();
     final catalogue = await CanonicalMedicineCatalogService.instance
         .candidatesForEvidence(evidence);
+    _ensureActive();
 
     final payload = await compute(
       understandMedicineEvidenceV2Message,
@@ -301,6 +319,7 @@ class MedicineReviewPipeline {
             .toList(growable: false),
       },
     );
+    _ensureActive();
     final understanding = MedicineUnderstandingResult.fromMessage(payload);
     final reviewDrafts = normalizeMedicineReviewDrafts(
       understanding.drafts,
@@ -315,6 +334,7 @@ class MedicineReviewPipeline {
     final prepared = <PreparedMedicineReviewDraft>[];
     var localBrainUsed = false;
     for (final original in reviewDrafts) {
+      _ensureActive();
       var draft = original;
       ScanAutoSaveVerifier? autoSaveVerifier;
       final leasedModelId = scanModelId;
@@ -324,6 +344,7 @@ class MedicineReviewPipeline {
             local,
             leasedModelId,
           );
+          _ensureActive();
           if (!mayReason) {
             scanModelId = null;
             warning =
@@ -342,12 +363,14 @@ class MedicineReviewPipeline {
                     routedModelId,
                     original,
                   );
+              _ensureActive();
               final leaseStillValid =
                   await LocalBrainRoutePolicy.mayReasonWith(
                         local,
                         routedModelId,
                       ) &&
                       local.activeId == routedModelId;
+              _ensureActive();
               if (leaseStillValid) {
                 draft = candidate;
                 _rememberSemanticCache(key, candidate);
@@ -364,6 +387,7 @@ class MedicineReviewPipeline {
             }
           }
         } catch (_) {
+          if (_cancelled) _ensureActive();
           warning =
               'Local AI could not finish this scan. Aaris kept the on-device result.';
         }
@@ -376,6 +400,7 @@ class MedicineReviewPipeline {
       );
     }
 
+    _ensureActive();
     return MedicineReviewPreparation(
       drafts: List<PreparedMedicineReviewDraft>.unmodifiable(prepared),
       ignoredFrames: understanding.ignoredFrames,
@@ -394,8 +419,10 @@ class MedicineReviewPipeline {
     AiConfiguration? config;
     try {
       config = await _cloud.requireConfiguration();
+      _ensureActive();
       routeLabel = _cloud.routeLabel(config);
     } catch (error) {
+      if (_cancelled) _ensureActive();
       warning =
           '${_cleanError(error)} Aaris kept the on-device result; nothing was sent externally.';
     }
@@ -413,10 +440,12 @@ class MedicineReviewPipeline {
             evidence,
           )
         : const <MedicineKnowledgeEntry>[];
+    _ensureActive();
     final catalogue = config == null
         ? await CanonicalMedicineCatalogService.instance
             .candidatesForEvidence(evidence)
         : const <CanonicalMedicineProduct>[];
+    _ensureActive();
 
     final payload = await compute(
       understandMedicineEvidenceV2Message,
@@ -432,6 +461,7 @@ class MedicineReviewPipeline {
             .toList(growable: false),
       },
     );
+    _ensureActive();
     final deterministic = MedicineUnderstandingResult.fromMessage(payload);
     final reviewDrafts = normalizeMedicineReviewDrafts(
       deterministic.drafts,
@@ -445,23 +475,24 @@ class MedicineReviewPipeline {
 
     final prepared = <PreparedMedicineReviewDraft>[];
     for (final original in reviewDrafts) {
+      _ensureActive();
       if (config == null) {
         prepared.add(PreparedMedicineReviewDraft(draft: original));
         continue;
       }
       try {
-        prepared.add(
-          PreparedMedicineReviewDraft(
-            draft: await _cloud.refine(config, original),
-          ),
-        );
+        final refined = await _cloud.refine(config, original);
+        _ensureActive();
+        prepared.add(PreparedMedicineReviewDraft(draft: refined));
       } catch (error) {
+        if (_cancelled) _ensureActive();
         prepared.add(PreparedMedicineReviewDraft(draft: original));
         warning =
             'Cloud AI could not safely validate every medicine. Aaris kept the on-device result. ${_cleanError(error)}';
       }
     }
 
+    _ensureActive();
     return MedicineReviewPreparation(
       drafts: List<PreparedMedicineReviewDraft>.unmodifiable(prepared),
       ignoredFrames: deterministic.ignoredFrames,
@@ -515,9 +546,13 @@ class MedicineReviewPipeline {
   Future<bool> _routeStillOwnsScan(
     LocalAiService local,
     String routedModelId,
-  ) async =>
-      await LocalBrainRoutePolicy.mayReasonWith(local, routedModelId) &&
-      local.activeId == routedModelId;
+  ) async {
+    _ensureActive();
+    final owns = await LocalBrainRoutePolicy.mayReasonWith(local, routedModelId) &&
+        local.activeId == routedModelId;
+    _ensureActive();
+    return owns;
+  }
 
   Future<MedicineScanDraft> _understandWithRecovery(
     LocalAiService local,
@@ -527,9 +562,22 @@ class MedicineReviewPipeline {
     var transportRecovered = false;
     var contentionAttempt = 0;
     while (true) {
+      _ensureActive();
       try {
-        return await local.understand(draft);
+        _ownsLocalAiLease = false;
+        try {
+          return await local.understand(
+            draft,
+            onLeaseAcquired: () {
+              _ownsLocalAiLease = true;
+              if (_cancelled) local.cancelRequest();
+            },
+          );
+        } finally {
+          _ownsLocalAiLease = false;
+        }
       } catch (error, stack) {
+        if (_cancelled) _ensureActive();
         if (_localLeaseContention(error)) {
           if (!await _routeStillOwnsScan(local, routedModelId)) {
             throw StateError('Local AI route changed while this scan was waiting.');
@@ -541,6 +589,7 @@ class MedicineReviewPipeline {
             );
           }
           await Future<void>.delayed(delay);
+          _ensureActive();
           continue;
         }
         if (transportRecovered || !_recoverableLocalTransportFailure(error)) {
@@ -549,10 +598,13 @@ class MedicineReviewPipeline {
         transportRecovered = true;
         var suspendAttempt = 0;
         while (true) {
+          _ensureActive();
           try {
             await local.suspend();
+            _ensureActive();
             break;
           } catch (suspendError) {
+            if (_cancelled) _ensureActive();
             if (!_localLeaseContention(suspendError) ||
                 !await _routeStillOwnsScan(local, routedModelId)) {
               Error.throwWithStackTrace(error, stack);
@@ -562,6 +614,7 @@ class MedicineReviewPipeline {
               Error.throwWithStackTrace(error, stack);
             }
             await Future<void>.delayed(delay);
+            _ensureActive();
           }
         }
         if (!await _routeStillOwnsScan(local, routedModelId)) {

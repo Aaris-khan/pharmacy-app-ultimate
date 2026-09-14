@@ -882,7 +882,10 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
     return result;
   }, onLeaseAcquired: onLeaseAcquired);
 
-  Future<MedicineScanDraft> understand(MedicineScanDraft draft) async {
+  Future<MedicineScanDraft> understand(
+    MedicineScanDraft draft, {
+    void Function()? onLeaseAcquired,
+  }) async {
     await initialize();
     if (!hasSelection || !scannerEnabled || !scanReady) return draft;
     return _exclusive((generation) async {
@@ -909,7 +912,7 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
       _status = 'AI scan evidence verified · deterministic save gate deciding next step';
       notifyListeners();
       return result;
-    });
+    }, onLeaseAcquired: onLeaseAcquired);
   }
 }
 
