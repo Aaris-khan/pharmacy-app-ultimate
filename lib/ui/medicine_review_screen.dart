@@ -466,6 +466,13 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       if (confirmed != true || !mounted) return;
       setState(() => _busy = true);
       await widget.controller.applyStockAdjustment(stockReview);
+      final confirmedRecord = widget.controller.snapshot.records[expectedId];
+      if (confirmedRecord != null && !confirmedRecord.archived) {
+        await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
+          draft,
+          confirmedRecord,
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$units units added to ${live.title}.')),
