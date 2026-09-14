@@ -1,12 +1,14 @@
 final _medicineOcrPresentationArtifacts = RegExp(
-  r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]',
+  r'[\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]',
 );
 
 String _cleanMedicineOcrLine(String value) => value
     // Unicode bidi/zero-width controls are formatting code points, not word
     // separators. Replacing them with spaces split real medicine tokens such as
-    // PARA<Cf> CETAMOL and weakened name/salt matching. Remove them here; the
-    // geometry-aware date parser keeps its own one-for-one offset-preserving
+    // PARA<Cf> CETAMOL and weakened name/salt matching. Soft hyphens, combining
+    // grapheme joiners and Arabic layout marks are presentation artifacts too;
+    // removing them prevents invisible OCR metadata from fragmenting identity.
+    // The geometry-aware date parser keeps its own one-for-one offset-preserving
     // normalization where character offsets are semantically required.
     .replaceAll(_medicineOcrPresentationArtifacts, '')
     .replaceAll(RegExp(r'\s+'), ' ')
