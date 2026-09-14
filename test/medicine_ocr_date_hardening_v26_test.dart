@@ -42,6 +42,19 @@ void main() {
       expect(medicineExpiryLabel.hasMatch('USE UPTO 04/2028'), isTrue);
     });
 
+    test('glued labels own compact dates and bounded O I OCR repair', () {
+      final production = parseMedicineDateText('PRODDTO5O42O27');
+      expect(production?.value, '2027-04-05');
+      expect(production?.monthOnly, isFalse);
+
+      final expiry = parseMedicineDateText('USEUPTOO42O28');
+      expect(expiry?.value, '2028-04');
+      expect(expiry?.monthOnly, isTrue);
+
+      // An arbitrary alphabetic prefix is still not a date-valued context.
+      expect(parseMedicineDateText('SERIALO5O42O27'), isNull);
+    });
+
     test('invisible OCR format marks cannot split medicine identity tokens', () {
       expect(medicineOcrLineKey('PARA\u00ADCETAMOL'), 'paracetamol');
       expect(medicineOcrLineKey('CRO\u034FCIN'), 'crocin');
