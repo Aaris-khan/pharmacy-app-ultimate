@@ -71,10 +71,11 @@ CREATE TABLE recognition_aliases (
     MedicineScanDraft draft,
     Medicine confirmed,
   ) async {
-    final identityAliases = deriveLearnableIdentityAliases(draft, confirmed);
-    final saltAliases = deriveLearnableSaltAliases(draft, confirmed);
-    if (identityAliases.isEmpty && saltAliases.isEmpty) return;
     try {
+      final identityAliases = deriveLearnableIdentityAliases(draft, confirmed);
+      final saltAliases = deriveLearnableSaltAliases(draft, confirmed);
+      if (identityAliases.isEmpty && saltAliases.isEmpty) return;
+
       await _initialize();
       final db = _database;
       if (db == null) return;
@@ -137,10 +138,12 @@ CREATE TABLE recognition_aliases (
   }
 
   /// Adds previously confirmed OCR memory only to matching current local
-  /// medicine identities. Identity aliases use recency-weighted collision
-  /// evidence. Salt corrections additionally require the learned typo and an
-  /// independent identity anchor to co-occur in the same OCR frame, preventing
-  /// one medicine in a video/import from teaching another medicine by accident.
+  /// medicine identities. Identity aliases use current package evidence before
+  /// recency-weighted collision evidence, so one strength/form cannot inherit a
+  /// typo merely because another variant was confirmed more often historically.
+  /// Salt corrections additionally require the learned typo and an independent
+  /// identity anchor to co-occur in the same OCR frame, preventing one medicine
+  /// in a video/import from teaching another medicine by accident.
   ///
   /// If the memory DB is absent/corrupt/unavailable, the exact original
   /// knowledge list is returned.
@@ -187,21 +190,60 @@ CREATE TABLE recognition_aliases (
             .add(row);
       }
 
-      // Identity aliases are allowed to accelerate product recognition only
-      // when an ambiguous alias has a materially dominant, reasonably recent
-      // pharmacist-confirmed mapping. The exponential half-life prevents old
-      // mistakes from owning a typo forever while preserving repeated evidence.
+      final knowledgeByIdentity = <String, List<MedicineKnowledgeEntry>>{};
+      for (final item in knowledge) {
+        final identity = recognitionIdentityKey(
+          name: item.name,
+          brand: item.brand,
+          salt: item.salt,
+          strength: item.strength,
+          form: item.form,
+        );
+        if (identity.isEmpty) continue;
+        knowledgeByIdentity
+            .putIfAbsent(identity, () => <MedicineKnowledgeEntry>[])
+            .add(item);
+      }
+      if (knowledgeByIdentity.isEmpty) return knowledge;
+      final frameContexts = _recognitionFrameContexts(evidence);
+
+      // Identity aliases may accelerate product recognition only for identities
+      // that still exist in current knowledge. Current same-frame package
+      // evidence narrows collisions in the order barcode -> strength -> form.
+      // Historical support/recency is consulted only after that compatibility
+      // filter, preventing a popular old variant from owning another variant's
+      // OCR alias and preventing deleted/stale identities from suppressing live
+      // candidates.
       final learnedIdentity = <String, List<String>>{};
       final now = DateTime.now().millisecondsSinceEpoch;
       for (final entry in byAlias.entries) {
         if (entry.key.startsWith(_saltAliasPrefix)) continue;
         final collision = entry.value;
+        final liveIdentities = <String>{
+          for (final row in collision)
+            if (row['identity_key'] is String &&
+                knowledgeByIdentity.containsKey(row['identity_key']))
+              row['identity_key']! as String,
+        };
+        if (liveIdentities.isEmpty) continue;
+        final compatibleIdentities = _variantCompatibleIdentityKeys(
+          aliasKey: entry.key,
+          candidateIdentities: liveIdentities,
+          knowledgeByIdentity: knowledgeByIdentity,
+          contexts: frameContexts,
+        );
+        if (compatibleIdentities.isEmpty) continue;
+
         final weightByIdentity = <String, double>{};
         final supportByIdentity = <String, int>{};
         for (final row in collision) {
           final identity = row['identity_key'];
           final support = row['support'];
-          if (identity is! String || support is! num) continue;
+          if (identity is! String ||
+              support is! num ||
+              !compatibleIdentities.contains(identity)) {
+            continue;
+          }
           final count = max(1, support.toInt());
           final last = row['last_confirmed'];
           final lastConfirmed = last is num ? last.toInt() : now;
@@ -230,7 +272,9 @@ CREATE TABLE recognition_aliases (
           final runner = ranked[1];
           final total = ranked.fold<double>(0, (sum, item) => sum + item.value);
           final posterior = total <= 0 ? 0.0 : winner.value / total;
-          final ratio = runner.value <= 0 ? double.infinity : winner.value / runner.value;
+          final ratio = runner.value <= 0
+              ? double.infinity
+              : winner.value / runner.value;
           final dominant =
               (supportByIdentity[winner.key] ?? 0) >= 2 &&
               posterior >= .64 &&
@@ -251,21 +295,6 @@ CREATE TABLE recognition_aliases (
         }
       }
 
-      final knowledgeByIdentity = <String, List<MedicineKnowledgeEntry>>{};
-      for (final item in knowledge) {
-        final identity = recognitionIdentityKey(
-          name: item.name,
-          brand: item.brand,
-          salt: item.salt,
-          strength: item.strength,
-          form: item.form,
-        );
-        if (identity.isEmpty) continue;
-        knowledgeByIdentity
-            .putIfAbsent(identity, () => <MedicineKnowledgeEntry>[])
-            .add(item);
-      }
-      final frameContexts = _recognitionFrameContexts(evidence);
       final learnedSalt = <String, List<String>>{};
       for (final entry in byAlias.entries) {
         if (!entry.key.startsWith(_saltAliasPrefix)) continue;
@@ -364,6 +393,40 @@ String recognitionIdentityKey({
   ].map(searchText).toList(growable: false);
   if (parts.every((value) => value.isEmpty)) return '';
   return sha256.convert(parts.join('|').codeUnits).toString();
+}
+
+/// Pure compatibility policy used before historical adaptive-memory arbitration.
+///
+/// It deliberately does not choose a winner when current evidence cannot
+/// distinguish variants. Callers may then use bounded historical confidence or
+/// abstain. Evidence is tied to the same frame that contains [alias], preventing
+/// a strength/form from another medicine in a video from leaking across items.
+Set<String> recognitionVariantCompatibleIdentityKeys({
+  required String alias,
+  required Iterable<MedicineKnowledgeEntry> candidates,
+  required List<MedicineFrameEvidence> evidence,
+}) {
+  final byIdentity = <String, List<MedicineKnowledgeEntry>>{};
+  for (final item in candidates) {
+    final identity = recognitionIdentityKey(
+      name: item.name,
+      brand: item.brand,
+      salt: item.salt,
+      strength: item.strength,
+      form: item.form,
+    );
+    if (identity.isEmpty) continue;
+    byIdentity
+        .putIfAbsent(identity, () => <MedicineKnowledgeEntry>[])
+        .add(item);
+  }
+  if (byIdentity.isEmpty) return const <String>{};
+  return _variantCompatibleIdentityKeys(
+    aliasKey: searchText(alias),
+    candidateIdentities: byIdentity.keys.toSet(),
+    knowledgeByIdentity: byIdentity,
+    contexts: _recognitionFrameContexts(evidence),
+  );
 }
 
 /// Extracts bounded OCR variants demonstrably related to the final
@@ -585,11 +648,15 @@ class _RecognitionFrameContext {
     required this.identityKeys,
     required this.saltKeys,
     required this.barcodes,
+    required this.strengthKeys,
+    required this.forms,
   });
 
   final Set<String> identityKeys;
   final Set<String> saltKeys;
   final Set<String> barcodes;
+  final Set<String> strengthKeys;
+  final Set<String> forms;
 }
 
 List<_RecognitionFrameContext> _recognitionFrameContexts(
@@ -603,8 +670,86 @@ List<_RecognitionFrameContext> _recognitionFrameContexts(
           .map(_recognitionBarcodeKey)
           .where((value) => value.length >= 6)
           .toSet(),
+      strengthKeys: _recognitionStrengthKeys(frame.text),
+      forms: _recognitionForms(frame.text),
     ),
 ];
+
+Set<String> _variantCompatibleIdentityKeys({
+  required String aliasKey,
+  required Set<String> candidateIdentities,
+  required Map<String, List<MedicineKnowledgeEntry>> knowledgeByIdentity,
+  required List<_RecognitionFrameContext> contexts,
+}) {
+  var compatible = candidateIdentities
+      .where(knowledgeByIdentity.containsKey)
+      .toSet();
+  if (compatible.length <= 1) return compatible;
+
+  final relevantContexts = contexts
+      .where((context) => context.identityKeys.contains(aliasKey))
+      .toList(growable: false);
+  if (relevantContexts.isEmpty) return compatible;
+
+  Set<String> matching(
+    bool Function(
+      MedicineKnowledgeEntry entry,
+      _RecognitionFrameContext context,
+    ) predicate,
+  ) {
+    final matches = <String>{};
+    for (final identity in compatible) {
+      final entries = knowledgeByIdentity[identity];
+      if (entries == null || entries.isEmpty) continue;
+      final supported = entries.any(
+        (item) => relevantContexts.any((context) => predicate(item, context)),
+      );
+      if (supported) matches.add(identity);
+    }
+    return matches;
+  }
+
+  final barcodeMatches = matching((entry, context) {
+    final expected = _recognitionBarcodeKey(entry.barcode);
+    return expected.length >= 6 && context.barcodes.contains(expected);
+  });
+  if (barcodeMatches.isNotEmpty) compatible = barcodeMatches;
+  if (compatible.length <= 1) return compatible;
+
+  final strengthMatches = matching((entry, context) {
+    final expected = _recognitionStrengthKeys(entry.strength);
+    return expected.isNotEmpty && context.strengthKeys.containsAll(expected);
+  });
+  if (strengthMatches.isNotEmpty) compatible = strengthMatches;
+  if (compatible.length <= 1) return compatible;
+
+  final formMatches = matching((entry, context) {
+    final expected = normalizeForm(entry.form);
+    return expected.isNotEmpty &&
+        expected != 'Other' &&
+        context.forms.contains(expected);
+  });
+  if (formMatches.isNotEmpty) compatible = formMatches;
+  return compatible;
+}
+
+Set<String> _recognitionStrengthKeys(String value) {
+  final normalized = searchText(value);
+  if (normalized.isEmpty) return const <String>{};
+  return RegExp(
+    r'\b\d+(?:\.\d+)?(?:mcg|mg|g|ml|iu|units?|meq|mmol)\b',
+  )
+      .allMatches(normalized)
+      .map((match) => match.group(0))
+      .whereType<String>()
+      .toSet();
+}
+
+Set<String> _recognitionForms(String value) => medicineFormPresentationPattern
+    .allMatches(value)
+    .map((match) => normalizeForm(match.group(0) ?? ''))
+    .where((form) => form.isNotEmpty && form != 'Other')
+    .toSet();
 
 bool _saltCorrectionContextSupports(
   MedicineKnowledgeEntry entry,
