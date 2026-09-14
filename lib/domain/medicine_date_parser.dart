@@ -136,6 +136,16 @@ List<MedicineDateMatch> extractMedicineDateMatches(
     ),
     (m) => _date(_year(m[3]!), _month(m[2]!), int.parse(m[1]!)),
   );
+  // A named month also makes MONTH DAY YEAR unambiguous when the final
+  // year has four digits. Reserve the whole surface before validating it:
+  // "APR 31, 2028" must not degrade into the month-only date "APR 31".
+  add(
+    RegExp(
+      '(?<![$namedMonthBoundary])($monthNames)$sep(\\d{1,2})$sep(20\\d{2})(?![$namedMonthBoundary])',
+      caseSensitive: false,
+    ),
+    (m) => _date(int.parse(m[3]!), _month(m[1]!), int.parse(m[2]!)),
+  );
   // Year-first named dates are unambiguous when a four-digit year and literal
   // month word are both present. Supporting this common import/OCR order costs
   // no fuzzy guessing and remains inside the same calendar validator.

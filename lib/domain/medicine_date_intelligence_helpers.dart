@@ -140,10 +140,14 @@ bool _adjacentNonDateLabel(List<String> lines, int index) =>
     (index > 0 && _labelOnlyNonDate(lines[index - 1])) ||
     (index + 1 < lines.length && _labelOnlyNonDate(lines[index + 1]));
 
-Set<int> _bareCompactDatePairIndexes(List<String> lines, DateTime today) {
+Set<int> _bareCompactDatePairIndexes(
+  List<String> lines,
+  List<List<MedicineDateMatch>> matchesByLine,
+  DateTime today,
+) {
   final candidates = <(int, ParsedMedicineDate)>[];
   for (var index = 0; index < lines.length; index++) {
-    final matches = extractMedicineDateMatches(lines[index], allowCompact: true);
+    final matches = matchesByLine[index];
 
     // OCR flattening can place two otherwise standalone MMYY/MMYYYY values on
     // one physical row (for example "0426 0428"). Accept that row only when it
@@ -208,11 +212,6 @@ bool _isIsolatedCompactDatePairLine(
     cursor = match.end;
   }
   return _compactDatePairSeparator.hasMatch(line.substring(cursor));
-}
-
-bool _isStandaloneDateLine(String line) {
-  final matches = extractMedicineDateMatches(line, allowCompact: true);
-  return matches.length == 1 && _isStandaloneDateMatch(line, matches.single);
 }
 
 bool _isStandaloneDateMatch(String line, MedicineDateMatch match) =>

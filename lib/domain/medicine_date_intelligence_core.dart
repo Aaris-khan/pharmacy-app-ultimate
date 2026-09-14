@@ -96,13 +96,19 @@ MedicineDateResolution inferMedicineDateIntelligence({
     final quality = frame.quality.clamp(0, 1).toDouble();
     final observed = <String>{};
     for (final orderedLines in _dateLineStreams(frame)) {
+      // Tokenize each bounded line once. Pair discovery and adjacency checks
+      // reuse the same offsets and calendar decisions as role assignment.
+      final matchesByLine = orderedLines
+          .map((line) => extractMedicineDateMatches(line, allowCompact: true))
+          .toList(growable: false);
       final acceptedBareCompact = _bareCompactDatePairIndexes(
         orderedLines,
+        matchesByLine,
         today,
       );
       for (var index = 0; index < orderedLines.length; index++) {
         final line = orderedLines[index];
-        final matches = extractMedicineDateMatches(line, allowCompact: true);
+        final matches = matchesByLine[index];
         if (matches.isEmpty) continue;
         final labels = _dateLabels(line);
         for (final match in matches.take(6)) {
@@ -124,7 +130,11 @@ MedicineDateResolution inferMedicineDateIntelligence({
               final followingRole = _labelOnlyRole(orderedLines[index + 1]);
               final followedByAnotherDate =
                   index + 2 < orderedLines.length &&
-                  _isStandaloneDateLine(orderedLines[index + 2]);
+                  matchesByLine[index + 2].length == 1 &&
+                  _isStandaloneDateMatch(
+                    orderedLines[index + 2],
+                    matchesByLine[index + 2].single,
+                  );
               if (followingRole != null && !followedByAnotherDate) {
                 labelled = (followingRole, 30);
               }

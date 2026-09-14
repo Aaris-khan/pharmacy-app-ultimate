@@ -33,6 +33,7 @@ class MedicineSemanticResolution {
     this.genericConfidence = 0,
     this.components = const <MedicineIngredientComponent>[],
     this.conflicted = false,
+    this.compositionConflicted = false,
   });
 
   final String brand;
@@ -41,6 +42,10 @@ class MedicineSemanticResolution {
   final double genericConfidence;
   final List<MedicineIngredientComponent> components;
   final bool conflicted;
+
+  /// Contradictory ingredient/dose evidence is independent of trade identity.
+  /// Keep it visible even when semantic composition abstains from a value.
+  final bool compositionConflicted;
 
   String get salt => components.map((value) => value.ingredient).join(' + ');
 
@@ -67,7 +72,11 @@ class MedicineSemanticResolution {
   }
 
   bool get isEmpty =>
-      brand.trim().isEmpty && genericName.trim().isEmpty && components.isEmpty;
+      brand.trim().isEmpty &&
+      genericName.trim().isEmpty &&
+      components.isEmpty &&
+      !conflicted &&
+      !compositionConflicted;
 }
 
 MedicineSemanticResolution inferMedicineSemanticRoles(
@@ -143,19 +152,21 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
 
   void rememberText(
     Map<String, _TextVote> target,
+    Set<String> observedInFrame,
     String value,
     double confidence,
   ) {
     final clean = _cleanSemanticText(value);
     final key = searchText(clean);
     if (key.length < 3 || _semanticNoiseOnly(key)) return;
+    final independent = observedInFrame.add(key);
     final old = target[key];
     target[key] = old == null
         ? _TextVote(clean, confidence, 1)
         : _TextVote(
             old.value,
             max(old.confidence, confidence),
-            old.support + 1,
+            old.support + (independent ? 1 : 0),
           );
   }
 
@@ -165,6 +176,8 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
     if (lines.isEmpty) continue;
 
     final frameComponents = <String, _ComponentCandidate>{};
+    final frameBrands = <String>{};
+    final frameGenerics = <String>{};
 
     // All semantic lanes converge through one per-frame gate. A single camera
     // frame therefore contributes at most one vote for the same ingredient and
@@ -172,13 +185,20 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
     void rememberFrameComponent(_ComponentCandidate component) {
       final rawKey = searchText(component.ingredient);
       if (rawKey.length < 3) return;
-      String key = rawKey;
+      // Equal doses on different ingredients and contradictory doses on one
+      // ingredient are distinct facts. Only the same ingredient/dose pair may
+      // collapse across semantic rules inside a single physical frame.
+      String key = '$rawKey|${_strengthKey(component.strength)}';
       for (final existing in frameComponents.entries) {
         final sameStrength =
             _strengthKey(existing.value.strength) ==
             _strengthKey(component.strength);
         if (!sameStrength) continue;
-        if (_semanticSimilarity(existing.key, rawKey) >= .955) {
+        if (_semanticSimilarity(
+              searchText(existing.value.ingredient),
+              rawKey,
+            ) >=
+            .955) {
           key = existing.key;
           break;
         }
@@ -242,12 +262,18 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
 
       final explicitBrand = _semanticLabelValue(lines, index, _brandLabel);
       if (explicitBrand.isNotEmpty) {
-        rememberText(brandVotes, _stripTradePresentation(explicitBrand), .97);
+        rememberText(
+          brandVotes,
+          frameBrands,
+          _stripTradePresentation(explicitBrand),
+          .97,
+        );
       }
       final explicitGeneric = _semanticLabelValue(lines, index, _genericLabel);
       if (explicitGeneric.isNotEmpty) {
         rememberText(
           genericVotes,
+          frameGenerics,
           _stripGenericPresentation(explicitGeneric),
           .965,
         );
@@ -303,7 +329,12 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
           ) ||
           containedComponents >= 2;
       if (componentLike) {
-        rememberText(genericVotes, candidate, .82 + quality * .05);
+        rememberText(
+          genericVotes,
+          frameGenerics,
+          candidate,
+          .82 + quality * .05,
+        );
         continue;
       }
 
@@ -314,7 +345,7 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       score += min(.07, uppercase * .08);
       score += lines[index].prominence.clamp(0, .12);
       if (score >= .72) {
-        rememberText(brandVotes, candidate, score.clamp(0, .94));
+        rememberText(brandVotes, frameBrands, candidate, score.clamp(0, .94));
       }
     }
   }
@@ -322,9 +353,8 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
   final components = componentVotes.values.toList(growable: false)
     ..sort((a, b) => a.order.compareTo(b.order));
   final resolvedComponents = <MedicineIngredientComponent>[];
-  var componentConflict = false;
+  final componentConflict = components.any((item) => item.conflicted);
   for (final item in components.take(6)) {
-    componentConflict = componentConflict || item.conflicted;
     final confidence =
         (item.confidence + min(.07, max(0, item.support - 1) * .025))
             .clamp(0, .99)
@@ -341,8 +371,8 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
   }
   // Composition disagreement is field-local. Do not let a conflicting dose or
   // salt erase independently clean trade-name evidence. Abstain from semantic
-  // composition entirely and let the baseline/resolver keep that field in
-  // review, while brand inference remains usable.
+  // composition entirely and explicitly pass its conflict to the resolver;
+  // otherwise an already confident baseline dose could escape review.
   if (componentConflict) resolvedComponents.clear();
 
   double textScore(_TextVote vote) =>
@@ -423,6 +453,7 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       resolvedComponents,
     ),
     conflicted: conflicted,
+    compositionConflicted: componentConflict,
   );
 }
 
@@ -465,26 +496,57 @@ class _ComponentVote {
 
 List<_SemanticLine> _orderedFrameLines(MedicineFrameEvidence frame) {
   final result = <_SemanticLine>[];
-  final seen = <String>{};
-  // ML Kit recognizers are merged from more than one script. Their insertion
-  // order is therefore not guaranteed to be physical reading order. Sort a
-  // bounded copy by row/column geometry before any adjacency-sensitive semantic
-  // parsing so a COMPOSITION heading still owns the ingredient printed beneath
-  // it even when the recognizer streams arrived in the opposite order.
-  final layout = frame.layoutLines.take(160).toList(growable: false)
+  // Geometry is sorted by a total order, then assigned to anchored rows.
+  // Pairwise "close enough to share a row" is not transitive and must never
+  // be used as a sort comparator.
+  final spatial = frame.layoutLines
+      .where((line) =>
+          line.left.isFinite &&
+          line.top.isFinite &&
+          line.width.isFinite &&
+          line.height.isFinite &&
+          line.height > 0)
+      .take(160)
+      .toList(growable: false)
     ..sort(_compareLayoutReadingOrder);
-  final heights =
-      layout
-          .where((line) => line.height > 0)
-          .map((line) => line.height)
-          .toList(growable: false)
-        ..sort();
-  final median = heights.isEmpty ? 0.0 : heights[heights.length ~/ 2];
+  final layout = <MedicineTextLineEvidence>[];
+  var index = 0;
+  while (index < spatial.length) {
+    final anchor = spatial[index++];
+    final row = <MedicineTextLineEvidence>[anchor];
+    final anchorCenter = anchor.top + anchor.height / 2;
+    while (index < spatial.length) {
+      final line = spatial[index];
+      final center = line.top + line.height / 2;
+      final tolerance = max(3.0, min(anchor.height, line.height) * .65);
+      if ((center - anchorCenter).abs() > tolerance) break;
+      row.add(line);
+      index++;
+    }
+    row.sort((left, right) {
+      final horizontal = left.left.compareTo(right.left);
+      return horizontal != 0
+          ? horizontal
+          : _compareLayoutReadingOrder(left, right);
+    });
+    layout.addAll(row);
+  }
 
+  final heights = layout.map((line) => line.height).toList(growable: false)
+    ..sort();
+  final median = heights.isEmpty ? 0.0 : heights[heights.length ~/ 2];
+  final positions = <String>{};
+  final layoutOccurrences = <String, int>{};
   for (final line in layout) {
     final clean = line.text.replaceAll(RegExp(r'\s+'), ' ').trim();
     final key = searchText(clean);
-    if (key.length < 2 || !seen.add(key)) continue;
+    if (key.length < 2) continue;
+    final position =
+        '$key|${line.left}|${line.top}|${line.width}|${line.height}';
+    if (!positions.add(position)) continue;
+    // Equal text in different physical regions remains separate evidence.
+    // In particular, two ingredients can each have a printed "5 mg" row.
+    layoutOccurrences.update(key, (count) => count + 1, ifAbsent: () => 1);
     final relative = median <= 0 ? 0.0 : line.height / median;
     final prominence = ((relative - 1) * .10).clamp(0, .12).toDouble();
     result.add(_SemanticLine(clean, prominence));
@@ -492,7 +554,14 @@ List<_SemanticLine> _orderedFrameLines(MedicineFrameEvidence frame) {
   for (final raw in frame.text.split(RegExp(r'[\r\n]+')).take(180)) {
     final clean = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
     final key = searchText(clean);
-    if (key.length < 2 || !seen.add(key)) continue;
+    if (key.length < 2) continue;
+    final represented = layoutOccurrences[key] ?? 0;
+    if (represented > 0) {
+      layoutOccurrences[key] = represented - 1;
+      continue;
+    }
+    // Preserve multiplicity within raw OCR too. Cross-rule/frame voting owns
+    // deduplication; deleting repeated words here destroys label/dose adjacency.
     result.add(_SemanticLine(clean, 0));
   }
   return result;
@@ -502,18 +571,15 @@ int _compareLayoutReadingOrder(
   MedicineTextLineEvidence left,
   MedicineTextLineEvidence right,
 ) {
-  final leftCenterY = left.top + left.height / 2;
-  final rightCenterY = right.top + right.height / 2;
-  final rowTolerance = max(3.0, min(left.height, right.height) * .65);
-  if ((leftCenterY - rightCenterY).abs() > rowTolerance) {
-    final vertical = left.top.compareTo(right.top);
-    if (vertical != 0) return vertical;
-  }
-  final horizontal = left.left.compareTo(right.left);
-  if (horizontal != 0) return horizontal;
   final vertical = left.top.compareTo(right.top);
   if (vertical != 0) return vertical;
-  return left.text.compareTo(right.text);
+  final horizontal = left.left.compareTo(right.left);
+  if (horizontal != 0) return horizontal;
+  final text = left.text.compareTo(right.text);
+  if (text != 0) return text;
+  final height = left.height.compareTo(right.height);
+  if (height != 0) return height;
+  return left.width.compareTo(right.width);
 }
 
 List<String> _compositionWindows(List<_SemanticLine> lines) {

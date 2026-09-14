@@ -290,13 +290,17 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
     final seen = <String>{};
     var characters = 0;
 
-    void addLine(String raw) {
+    void addLine(String raw, {bool fromLayout = false}) {
       if (output.length >= 220 || characters >= 30000) return;
       var clean = normalizeMedicineOcrLine(raw);
       if (clean.isEmpty) return;
       if (clean.length > 300) clean = clean.substring(0, 300);
       final key = medicineOcrLineKey(clean);
-      if (key.isEmpty || !seen.add(key)) return;
+      if (key.isEmpty || (fromLayout && seen.contains(key))) return;
+      // Repeated text within one OCR stream can belong to different fields
+      // ("5 mg" below two ingredients, or repeated GENERIC NAME labels). Keep
+      // its position; suppress only layout text already present in that stream.
+      seen.add(key);
       final remaining = 30000 - characters;
       if (remaining <= 0) return;
       if (clean.length > remaining) clean = clean.substring(0, remaining);
@@ -320,7 +324,7 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
         return a.text.compareTo(b.text);
       });
     for (final line in orderedLayout) {
-      addLine(line.text);
+      addLine(line.text, fromLayout: true);
     }
 
     final normalizedText = output.join('\n');
@@ -1916,6 +1920,19 @@ MedicineScanDraft _applySemanticMedicineRoles(
     }
   }
 
+  if (semantic.compositionConflicted) {
+    for (final key in const <String>['salt', 'strength']) {
+      final field = fields[key];
+      // An empty conflicting field must also block later catalogue inheritance.
+      fields[key] = ExtractedMedicineField(
+        value: field?.value ?? '',
+        confidence: min(field?.confidence ?? 0, .77),
+        support: field?.support ?? 0,
+        conflicted: true,
+      );
+    }
+  }
+
   if (semantic.conflicted) {
     for (final key in const <String>['name', 'brand', 'salt', 'strength']) {
       final field = fields[key];
@@ -1932,7 +1949,7 @@ MedicineScanDraft _applySemanticMedicineRoles(
   return _copyDraft(
     draft,
     fields: fields,
-    overallConfidence: semantic.conflicted
+    overallConfidence: semantic.conflicted || semantic.compositionConflicted
         ? min(draft.overallConfidence, .77)
         : draft.overallConfidence,
   );
