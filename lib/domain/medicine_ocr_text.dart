@@ -96,14 +96,16 @@ final _medicineOcrGluedUnitForm = RegExp(
 
 // A dropped boundary before a printed dose is semantically recoverable because
 // the numeric token is immediately owned by a pharmaceutical unit. The prefix
-// still needs at least three alphabetic characters; a separate context firewall
-// below keeps batch/lot/licence/machine-code surfaces from becoming strengths.
+// still needs at least three alphabetic characters; field ownership below keeps
+// batch/lot/licence/machine-code surfaces from becoming strengths without making
+// every nearby packaging word poison otherwise valid medicine evidence.
 final _medicineOcrGluedDose = RegExp(
   r'([A-Za-z][A-Za-z-]{2,47})([0-9OoIlL]{1,7}(?:[.,][0-9OoIlL]{1,4})?)(?=\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
   caseSensitive: false,
 );
-final _medicineOcrGluedDoseUnsafeContext = RegExp(
-  r'\b(?:batch|lot|serial|licen[cs]e|gtin|barcode|code|mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack)\b',
+final _medicineOcrUnsafeOwningRole = RegExp(
+  r'(?:^|[\s;|])(?:mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack(?:\s*size)?)\b(?:\s*(?:date|dt|on)\.?)?\s*[:._-]?\s*$|'
+  r'(?:^|[\s;|])(?:batch|lot|serial|licen[cs]e|gtin|barcode|code)\b(?:\s*(?:no|number)\.?)?\s*[:._-]?\s*(?:[A-Za-z0-9-]{1,24}\s+)?$',
   caseSensitive: false,
 );
 final _medicineOcrGluedDoseUnsafePrefix = RegExp(
@@ -221,6 +223,13 @@ String _canonicalMedicineSemanticLabel(String value) {
   return value;
 }
 
+bool _medicineOcrUnsafeRoleOwnsCandidate(String value, int start) {
+  final contextStart = start > 48 ? start - 48 : 0;
+  return _medicineOcrUnsafeOwningRole.hasMatch(
+    value.substring(contextStart, start),
+  );
+}
+
 String _separateMedicineOcrGluedDose(String value) {
   return value.replaceAllMapped(_medicineOcrGluedDose, (match) {
     final prefix = match[1]!;
@@ -229,9 +238,7 @@ String _separateMedicineOcrGluedDose(String value) {
     // digit must survive recognition before O/0 and I/l/1 repair is allowed.
     if (!_medicineOcrAsciiDigit.hasMatch(number)) return match[0]!;
 
-    final contextStart = match.start > 32 ? match.start - 32 : 0;
-    final context = value.substring(contextStart, match.start);
-    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context) ||
+    if (_medicineOcrUnsafeRoleOwnsCandidate(value, match.start) ||
         _medicineOcrGluedDoseUnsafePrefix.hasMatch(prefix)) {
       return match[0]!;
     }
@@ -377,7 +384,8 @@ String _canonicalMedicineOcrSurface(String value) {
   // Restore a slash only when OCR fused two complete unit-owned numeric tokens.
   // At least one genuine digit must survive in each token before O/0-I/l repair;
   // this prevents all-letter accidents from manufacturing a concentration.
-  // Explicit traceability/price/date contexts stay byte-for-byte untouched.
+  // Explicit field ownership stays protected, but completed PACK/MRP/date text
+  // elsewhere on the same OCR line no longer poisons a later medicine strength.
   result = result.replaceAllMapped(_medicineOcrFusedConcentration, (match) {
     final numerator = match[1]!;
     final denominator = match[3]!;
@@ -385,9 +393,7 @@ String _canonicalMedicineOcrSurface(String value) {
         !_medicineOcrAsciiDigit.hasMatch(denominator)) {
       return match[0]!;
     }
-    final contextStart = match.start > 32 ? match.start - 32 : 0;
-    final context = result.substring(contextStart, match.start);
-    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context)) {
+    if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
       return match[0]!;
     }
     final numeratorUnit = match[2]!.toLowerCase();
@@ -416,13 +422,11 @@ String _canonicalMedicineOcrSurface(String value) {
   });
 
   // Map only semantically constrained ingredient-dose separators onto the one
-  // '+' grammar consumed by the unlabeled composition resolver. The downstream
-  // instruction firewall remains authoritative for TAKE/DOSAGE prose, while
-  // traceability/date/price contexts remain excluded before semantic inference.
+  // '+' grammar consumed by the unlabeled composition resolver. A machine field
+  // must immediately own the candidate to veto it; a completed MRP/date/pack
+  // elsewhere on a flattened OCR line is no longer treated as global poison.
   result = result.replaceAllMapped(_medicineOcrCombinationSeparator, (match) {
-    final contextStart = match.start > 32 ? match.start - 32 : 0;
-    final context = result.substring(contextStart, match.start);
-    if (_medicineOcrGluedDoseUnsafeContext.hasMatch(context)) {
+    if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
       return match[0]!;
     }
     return '${match[1]} + ';
