@@ -4,6 +4,7 @@ import 'gs1_healthcare.dart';
 import 'medicine.dart';
 import 'medicine_confusion_firewall.dart';
 import 'medicine_date_intelligence.dart';
+import 'medicine_ocr_text.dart';
 import 'medicine_semantic_roles.dart';
 import 'medicine_understanding.dart';
 import 'offline_decision_reliability.dart';
@@ -231,19 +232,40 @@ Map<String, Object?> understandMedicineEvidenceV2Message(
   ).reconcile(baseline, evidence).toMessage();
 }
 
-/// Builds one bounded OCR surface per physical frame without inventing text.
-/// The merged recognizer stream remains first-authority; detector geometry only
-/// contributes observed lines that are missing from it. This keeps the fast
-/// text parser and the geometry-aware semantic layers on the same evidence set.
+/// Builds one bounded canonical OCR surface per physical frame without
+/// inventing text. Every intake path (live camera, pasted/imported OCR, tests,
+/// and future recognizers) therefore enters the baseline parser and the V2
+/// semantic/resolution layers with the same Unicode and OCR-confusion contract.
+/// Geometry is retained, but its text is canonicalized too so spatial and flat
+/// consumers cannot disagree about the same printed line.
 List<MedicineFrameEvidence> _normalizeResolverEvidence(
   Iterable<MedicineFrameEvidence> source,
 ) {
   final result = <MedicineFrameEvidence>[];
   for (final frame in source.take(maxMedicineEvidenceFrames)) {
-    if (frame.layoutLines.isEmpty) {
-      result.add(frame);
-      continue;
+    final normalizedLayout = <MedicineTextLineEvidence>[];
+    var layoutChanged = false;
+    var retainedLayout = 0;
+    for (final line in frame.layoutLines.take(240)) {
+      var clean = normalizeMedicineOcrLine(line.text);
+      if (clean.length > 300) clean = clean.substring(0, 300);
+      if (clean.isEmpty) {
+        layoutChanged = true;
+        continue;
+      }
+      if (clean != line.text) layoutChanged = true;
+      normalizedLayout.add(
+        MedicineTextLineEvidence(
+          text: clean,
+          left: line.left,
+          top: line.top,
+          width: line.width,
+          height: line.height,
+        ),
+      );
+      retainedLayout++;
     }
+    if (retainedLayout != frame.layoutLines.length) layoutChanged = true;
 
     final output = <String>[];
     final seen = <String>{};
@@ -251,11 +273,11 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
 
     void addLine(String raw) {
       if (output.length >= 220 || characters >= 30000) return;
-      var clean = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+      var clean = normalizeMedicineOcrLine(raw);
       if (clean.isEmpty) return;
       if (clean.length > 300) clean = clean.substring(0, 300);
-      final key = clean.toLowerCase();
-      if (!seen.add(key)) return;
+      final key = medicineOcrLineKey(clean);
+      if (key.isEmpty || !seen.add(key)) return;
       final remaining = 30000 - characters;
       if (remaining <= 0) return;
       if (clean.length > remaining) clean = clean.substring(0, remaining);
@@ -263,11 +285,14 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
       characters += clean.length + 1;
     }
 
+    // Raw recognizer text remains first authority. Layout contributes only
+    // observed lines missing from that stream, exactly as before, but now both
+    // sources share one canonicalizer even for text-only evidence.
     for (final line in frame.text.split(RegExp(r'[\r\n]+')).take(180)) {
       addLine(line);
     }
 
-    final layout = frame.layoutLines.take(240).toList(growable: false)
+    final orderedLayout = normalizedLayout.toList(growable: false)
       ..sort((a, b) {
         final vertical = a.top.compareTo(b.top);
         if (vertical != 0) return vertical;
@@ -275,12 +300,12 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
         if (horizontal != 0) return horizontal;
         return a.text.compareTo(b.text);
       });
-    for (final line in layout) {
+    for (final line in orderedLayout) {
       addLine(line.text);
     }
 
     final normalizedText = output.join('\n');
-    if (normalizedText.isEmpty || normalizedText == frame.text) {
+    if (!layoutChanged && normalizedText == frame.text) {
       result.add(frame);
       continue;
     }
@@ -288,7 +313,9 @@ List<MedicineFrameEvidence> _normalizeResolverEvidence(
       MedicineFrameEvidence(
         barcode: frame.barcode,
         barcodes: frame.barcodes,
-        layoutLines: frame.layoutLines,
+        layoutLines: List<MedicineTextLineEvidence>.unmodifiable(
+          normalizedLayout,
+        ),
         text: normalizedText,
         source: frame.source,
         sequence: frame.sequence,
@@ -2168,9 +2195,8 @@ bool _isStrongProductBarcodeKey(String value) {
 }
 
 String _strengthIdentity(String value) =>
-    searchText(value)
+    searchText(normalizeMedicineOcrLine(value))
         .replaceAll(' ', '')
-        .replaceAll('μ', 'µ')
         .replaceAll('ug', 'mcg');
 
 double _weightedTextSimilarity(String rawObserved, String rawCanonical) {
