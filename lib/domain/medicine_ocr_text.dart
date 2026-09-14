@@ -26,6 +26,16 @@ final _medicineOcrGluedNumericRoleLabel = RegExp(
   r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe|mrp|price|pkd|pkg))(?=[0-9])',
   caseSensitive: false,
 );
+
+// A leading 0/1 in a printed month is commonly OCR'd as O/I/l. When that
+// confusable glyph is fused to a strong MFG/EXP role, require a second real
+// digit plus an explicit month/year separator and year before restoring only the
+// missing role boundary. The date parser then performs its existing bounded
+// label-adjacent glyph repair; this rule never changes letters into digits.
+final _medicineOcrGluedConfusableMonthYearRoleLabel = RegExp(
+  r'(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe))(?=[OoIlL][0-9](?:\s*[./-]\s*|\s{1,3})(?:20[0-9]{2}|[0-9]{2})(?![A-Za-z0-9]))',
+  caseSensitive: false,
+);
 final _medicineOcrGluedNamedMonthRoleLabel = RegExp(
   '(?<![A-Za-z])((?:mfg|mfd|dom|exp|expn|xpry|expiry|doe))'
   '(?=$_medicineOcrNamedMonthPattern\\s*(?:[./-]\\s*)?\\d{2,4}(?![A-Za-z0-9]))',
@@ -245,6 +255,14 @@ String _canonicalMedicineOcrSurface(String value) {
   result = result.replaceAllMapped(
     _medicineOcrGluedOwnerValue,
     (match) => '${match[1]} ${match[2]} ',
+  );
+
+  // Restore the role boundary when the first month digit itself was read as an
+  // OCR-confusable O/I/l. The following real digit + separator + year are the
+  // safety proof; actual glyph-to-digit repair remains owned by the date parser.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedConfusableMonthYearRoleLabel,
+    (match) => '${match[1]} ',
   );
 
   // Date roles can glue to a named month as well as to digits. Keep this narrow
