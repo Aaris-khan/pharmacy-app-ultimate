@@ -1,0 +1,144 @@
+name: Repair and Build Final APK V5
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repair-final-release-v5.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      CI: 'true'
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Apply proven V4 fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/repair-final-release-v4.yml').read_text()
+          marker = '      - name: Apply final release fixes\n'
+          start = text.index(marker)
+          run_at = text.index('        run: |\n', start) + len('        run: |\n')
+          end = text.index('\n      - name: Resolve pinned dependencies', run_at)
+          block = text[run_at:end]
+          lines = []
+          for line in block.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply-v4.sh').write_text('\n'.join(lines) + '\n')
+          PY
+          bash /tmp/apply-v4.sh
+
+      - name: Preserve serialized OCR layout geometry
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('lib/domain/medicine_understanding.dart')
+          text = p.read_text()
+
+          old = """    final rawText = map['text'];\n    final text = rawText is String ? _cleanLine(rawText) : '';\n"""
+          new = """    final rawText = map['text'];\n    final text = rawText is String ? _cleanLayoutLine(rawText) : '';\n"""
+          if text.count(old) != 1:
+              raise SystemExit('layout deserialization target not found exactly once')
+          text = text.replace(old, new, 1)
+
+          old_helper = """String _cleanLine(String value) => value\n    .replaceAll(RegExp(r'[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]'), ' ')\n    .replaceAll(\n      RegExp(r'[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF]'),\n      ' ',\n    )\n    .replaceAll(RegExp(r'\\s+'), ' ')\n    .trim();\n"""
+          new_helper = """String _cleanLayoutLine(String value) => value\n    .replaceAll(RegExp(r'[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]'), ' ')\n    .replaceAll(\n      RegExp(r'[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF]'),\n      ' ',\n    )\n    .replaceAll(RegExp(r'[\\t\\r\\n]+'), ' ')\n    .trim();\n\nString _cleanLine(String value) => value\n    .replaceAll(RegExp(r'[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]'), ' ')\n    .replaceAll(\n      RegExp(r'[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF]'),\n      ' ',\n    )\n    .replaceAll(RegExp(r'\\s+'), ' ')\n    .trim();\n"""
+          if text.count(old_helper) != 1:
+              raise SystemExit('clean-line helper target not found exactly once')
+          text = text.replace(old_helper, new_helper, 1)
+          p.write_text(text)
+          print('Preserved significant layout spacing across isolate/message boundary.')
+          PY
+          git diff --check
+
+      - name: Resolve pinned dependencies
+        run: flutter pub get
+
+      - name: Static safety gate
+        run: dart analyze lib test tool third_party/lib_llama_cpp/lib
+
+      - name: Targeted regression gate
+        run: >-
+          flutter test --reporter expanded
+          test/medicine_extraction_hardening_v18_test.dart
+          test/medicine_extraction_hardening_v30_test.dart
+          test/medicine_extraction_hardening_v31_test.dart
+          test/medicine_ocr_semantic_hardening_v22_test.dart
+          test/medicine_ocr_semantic_hardening_v23_test.dart
+          test/medicine_extraction_hardening_v28_test.dart
+          test/medicine_date_edge_cases_v21_test.dart
+          test/medicine_spatial_assignment_v24_test.dart
+          test/medicine_review_evidence_normalization_test.dart
+
+      - name: Full pharmacy regression gate
+        run: flutter test --reporter expanded
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Verify release APK
+        shell: bash
+        run: |
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          sha256sum build/app/outputs/flutter-apk/app-release.apk | tee build/app/outputs/flutter-apk/app-release.apk.sha256
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload verified release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aaris-Pharmacy-Final-Release-APK
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-release.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Persist verified fixes and remove one-shot workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/repair-final-release.yml
+          rm -f .github/workflows/repair-final-release-v2.yml
+          rm -f .github/workflows/repair-final-release-v3.yml
+          rm -f .github/workflows/repair-final-release-v4.yml
+          rm -f .github/workflows/repair-final-release-v5.yml
+          rm -f .github/workflows/diagnose-v18-release.yml
+          git config user.name 'aaris-release-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add lib/domain/medicine_understanding.dart \
+                  lib/domain/medicine_semantic_roles.dart \
+                  lib/domain/medicine_date_intelligence.dart \
+                  lib/domain/medicine_date_intelligence_core.dart \
+                  lib/domain/medicine_resolution_v2.dart \
+                  .github/workflows/repair-final-release.yml \
+                  .github/workflows/repair-final-release-v2.yml \
+                  .github/workflows/repair-final-release-v3.yml \
+                  .github/workflows/repair-final-release-v4.yml \
+                  .github/workflows/repair-final-release-v5.yml \
+                  .github/workflows/diagnose-v18-release.yml
+          git commit -m 'Fix OCR and date regressions for final release [skip ci]'
+          git push origin HEAD:main
