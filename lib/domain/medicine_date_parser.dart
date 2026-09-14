@@ -279,9 +279,18 @@ String _repairNumericOcr(String raw) {
         RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
         ' ',
       )
-      .replaceAll(RegExp(r'[\u00A0\u2007\u202F]'), ' ')
+      .replaceAll(RegExp(r'[\u00A0\u2007\u202F\u3000]'), ' ')
       .replaceAll(RegExp(r'[／⁄∕]'), '/')
-      .replaceAll(RegExp(r'[‐‑‒–—−]'), '-');
+      .replaceAll(RegExp(r'[‐‑‒–—−]'), '-')
+      .replaceAll(RegExp(r'[٫．]'), '.');
+
+  // Geometry-aware date evidence can reach this parser before the general OCR
+  // canonicalizer. Normalize the full-width ASCII block one code point to one
+  // code point so labels (ＭＦＧ/ＥＸＰ), digits and punctuation are readable
+  // without changing spatial character offsets.
+  text = text.replaceAllMapped(RegExp(r'[\uFF01-\uFF5E]'), (m) {
+    return String.fromCharCode(m[0]!.codeUnitAt(0) - 0xFEE0);
+  });
 
   // One-to-one digit replacements also keep detector character offsets intact.
   text = text.replaceAllMapped(RegExp(r'[०-९٠-٩۰-۹０-９]'), (m) {

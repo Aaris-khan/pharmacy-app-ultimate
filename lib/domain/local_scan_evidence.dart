@@ -76,20 +76,36 @@ class LocalScanEvidence {
       // every printed trade/form heading on a long multilingual wrapper.
       addBlock(0, min(400, limit ~/ 4), before: 0, after: 2);
     }
+    final identity = RegExp(
+      r'\b(?:medicine\s*name|brand\s*name|trade\s*name|product\s*name|generic\s*name|dosage\s*form)\b',
+      caseSensitive: false,
+    );
     final composition = RegExp(
       r'\b(?:composition|compositon|ingredients?|active\s+ingredient|each\s+(?:tablet|capsule|5\s*ml)|contains)\b|संघटन|संरचना',
       caseSensitive: false,
     );
+    // Evidence selection runs before medicine OCR canonicalization. Mirror the
+    // authoritative pharmaceutical unit family broadly enough that long OCR
+    // does not drop a clinically important row merely because the pack printed
+    // mEq, ug/µg/μg, I.U. or full-width/script digits. This regex only selects
+    // evidence; downstream semantic/date/strength resolvers still own facts.
     final dose = RegExp(
-      r'[0-9\u0660-\u0669\u06f0-\u06f9\u0966-\u096f]\s*(?:mcg|mg|gm|g|ml|iu|units?|%)(?![a-z])',
+      r'[0-9\u0660-\u0669\u06f0-\u06f9\u0966-\u096f\uFF10-\uFF19]\s*(?:mcg|[uµμ]g|mg|gm|g|ml|meq|i\.?\s*u\.?|units?|%)(?![a-z])',
       caseSensitive: false,
     );
     final batch = RegExp(r'\b(?:batch|lot)\b', caseSensitive: false);
+    final owner = RegExp(
+      r'\b(?:manufacturer(?:\s*name)?|manufactured\s+by|mfg\.?\s*by|made\s+by|marketed\s+by|distributed\s+by|imported\s+by)\b',
+      caseSensitive: false,
+    );
+    final identityAnchors = <int>[];
     final ingredientAnchors = <int>[];
     final doseAnchors = <int>[];
     final dateAnchors = <int>[];
+    final ownerAnchors = <int>[];
     for (var i = 0; i < lines.length; i++) {
       final text = lines[i][0]!;
+      if (identity.hasMatch(text)) identityAnchors.add(i);
       if (composition.hasMatch(text)) ingredientAnchors.add(i);
       if (dose.hasMatch(text)) doseAnchors.add(i);
       if (medicineManufacturingLabel.hasMatch(text) ||
@@ -97,7 +113,16 @@ class LocalScanEvidence {
           batch.hasMatch(text)) {
         dateAnchors.add(i);
       }
+      if (owner.hasMatch(text)) ownerAnchors.add(i);
     }
+
+    // Strong explicit identity/form labels are cheap, high-value anchors. Keep a
+    // bounded handful before composition so a late PRODUCT NAME cannot disappear
+    // behind thousands of characters of legal/marketing copy.
+    for (final anchor in identityAnchors.take(4)) {
+      addBlock(anchor, min(limit - used, max(160, limit ~/ 6)), after: 2);
+    }
+
     final primary = ingredientAnchors.firstOrNull ?? doseAnchors.firstOrNull;
     if (primary != null) addBlock(primary, limit * 3 ~/ 5, after: 8);
     // Label + next line stay together when possible. Dates themselves are still
@@ -105,7 +130,17 @@ class LocalScanEvidence {
     for (final anchor in dateAnchors) {
       addBlock(anchor, limit - used);
     }
-    for (final anchor in [...ingredientAnchors, ...doseAnchors]) {
+    // Preserve explicit manufacturer ownership when it survives OCR. This is an
+    // optional identity fact, so it comes after temporal safety anchors and can
+    // never displace them when the evidence budget is tight.
+    for (final anchor in ownerAnchors.take(3)) {
+      addBlock(anchor, limit - used, after: 1);
+    }
+    for (final anchor in [
+      ...identityAnchors,
+      ...ingredientAnchors,
+      ...doseAnchors,
+    ]) {
       addBlock(anchor, limit - used, after: 4);
     }
 
