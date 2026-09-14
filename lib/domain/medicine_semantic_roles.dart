@@ -242,7 +242,7 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
 
       final explicitBrand = _semanticLabelValue(lines, index, _brandLabel);
       if (explicitBrand.isNotEmpty) {
-        rememberText(brandVotes, _stripPresentation(explicitBrand), .97);
+        rememberText(brandVotes, _stripTradePresentation(explicitBrand), .97);
       }
       final explicitGeneric = _semanticLabelValue(lines, index, _genericLabel);
       if (explicitGeneric.isNotEmpty) {
@@ -328,6 +328,11 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
       ),
     );
   }
+  // Composition disagreement is field-local. Do not let a conflicting dose or
+  // salt erase independently clean trade-name evidence. Abstain from semantic
+  // composition entirely and let the baseline/resolver keep that field in
+  // review, while brand inference remains usable.
+  if (componentConflict) resolvedComponents.clear();
 
   double textScore(_TextVote vote) =>
       (vote.confidence + min(.08, max(0, vote.support - 1) * .03))
@@ -361,7 +366,9 @@ MedicineSemanticResolution inferMedicineSemanticRoles(
 
   final brand = chooseText(brandVotes, brand: true);
   final generic = chooseText(genericVotes, brand: false);
-  var conflicted = componentConflict;
+  // Only an emitted semantic lane may poison that lane. Composition conflict
+  // above abstains instead of globally suppressing brand identity.
+  var conflicted = false;
 
   if (brand != null) {
     // Conflict evaluation must use the same support-aware ordering that selected
@@ -764,12 +771,31 @@ String _afterSemanticLabel(String raw, RegExp pattern) {
   if (inline.isNotEmpty && _isSemanticValueCandidate(inline)) {
     return (inline, index);
   }
-  if (!_isStandaloneSemanticLabel(raw, pattern) || index + 1 >= lines.length) {
-    return null;
+  if (!_isStandaloneSemanticLabel(raw, pattern)) return null;
+
+  // OCR/layout streams sometimes place a pure presentation row (TABLETS,
+  // CAPSULES, etc.) between a printed field label and its real value. Look
+  // ahead at most two rows, skipping only presentation/dose-only noise. Stop at
+  // another semantic/legal/date boundary so ownership can never jump fields.
+  for (var next = index + 1; next < lines.length && next <= index + 2; next++) {
+    final adjacent = lines[next].text.trim();
+    if (adjacent.isEmpty) continue;
+    final normalized = searchText(adjacent);
+    if (_brandLabel.hasMatch(normalized) ||
+        _genericLabel.hasMatch(normalized) ||
+        _semanticLegalNoise.hasMatch(normalized) ||
+        _semanticDateNoise.hasMatch(normalized) ||
+        _manufacturerNoise.hasMatch(normalized) ||
+        _compositionCue.hasMatch(normalized)) {
+      return null;
+    }
+    if (_isSemanticValueCandidate(adjacent)) return (adjacent, next);
+    final presentationOnly =
+        _semanticNoiseOnly(searchText(_stripPresentation(adjacent))) ||
+        _isDoseOnlyLine(adjacent);
+    if (!presentationOnly) return null;
   }
-  final adjacent = lines[index + 1].text.trim();
-  if (!_isSemanticValueCandidate(adjacent)) return null;
-  return (adjacent, index + 1);
+  return null;
 }
 
 String _semanticLabelValue(
@@ -792,12 +818,15 @@ bool _isStandaloneSemanticLabel(String raw, RegExp pattern) {
 
 bool _isSemanticValueCandidate(String raw) {
   final value = raw.trim();
-  if (value.length < 3 || value.length > 120) return false;
+  if (value.length < 3 || value.length > 120 || _isDoseOnlyLine(value)) {
+    return false;
+  }
   if (!RegExp(r'[A-Za-z].*[A-Za-z]|[A-Za-z]{2,}').hasMatch(value)) {
     return false;
   }
   final normalized = searchText(value);
   return normalized.isNotEmpty &&
+      !_semanticNoiseOnly(normalized) &&
       !_compositionCue.hasMatch(normalized) &&
       !_brandLabel.hasMatch(normalized) &&
       !_genericLabel.hasMatch(normalized) &&
@@ -827,6 +856,19 @@ String _stripPresentation(String raw) {
   value = value.replaceAll(medicineFormPresentationPattern, ' ');
   value = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   return value;
+}
+
+// A printed trade name often carries a dose unit ("CROCIN 650 mg TABLETS").
+// Keep the dose number because it can be part of the commercial variant, but do
+// not let the unit/form contaminate the brand field or create a false conflict
+// against canonical product identity.
+String _stripTradePresentation(String raw) {
+  var value = _stripPresentation(raw);
+  value = value.replaceAllMapped(_strengthPattern, (match) {
+    final dose = RegExp(r'\d+(?:[.,]\d+)?').firstMatch(match.group(0) ?? '');
+    return dose == null ? ' ' : ' ${dose.group(0)} ';
+  });
+  return value.replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
 String _stripGenericPresentation(String raw) => _stripPresentation(raw)
