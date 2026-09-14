@@ -1,0 +1,61 @@
+name: Diagnose V18 Release Date Pipeline
+
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-v18-release.yml'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+      - name: Reuse V4 patch set
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/repair-final-release-v4.yml').read_text()
+          marker = '      - name: Apply final release fixes\n'
+          start = text.index(marker)
+          run_at = text.index('        run: |\n', start) + len('        run: |\n')
+          end = text.index('\n      - name: Resolve pinned dependencies', run_at)
+          block = text[run_at:end]
+          lines = []
+          for line in block.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply-v4.sh').write_text('\n'.join(lines) + '\n')
+          PY
+          bash /tmp/apply-v4.sh
+
+      - name: Add stage trace
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('lib/domain/medicine_resolution_v2.dart')
+          text = p.read_text()
+          old = """      final frames = _resolverFramesForDraft(draft, bySequence);\n      final spatialSafe = _applySpatialTraceability(draft, frames);\n      final regulatorySafe = _applyRegulatoryTraceability(spatialSafe, frames);\n      final temporalSafe = _applyDateIntelligence(\n        regulatorySafe,\n        frames,\n        _referenceDate,\n      );\n      final semanticSafe = _applySemanticMedicineRoles(temporalSafe, frames);\n      drafts.add(_resolveProduct(semanticSafe, frames));\n"""
+          new = """      final frames = _resolverFramesForDraft(draft, bySequence);\n      String dateSnapshot(String label, MedicineScanDraft value) {\n        final mfg = value.field('mfg');\n        final expiry = value.field('expiry');\n        return '\\$label mfg=\\${mfg.value}@\\${mfg.confidence} conflict=\\${mfg.conflicted} expiry=\\${expiry.value}@\\${expiry.confidence} conflict=\\${expiry.conflicted}';\n      }\n      print('V18TRACE frames=\\${frames.length}');\n      for (final frame in frames) {\n        print('V18TRACE text=\\${frame.text.replaceAll('\\n', ' | ')}');\n        print('V18TRACE layout=\\${frame.layoutLines.map((e) => e.text).join(' || ')}');\n      }\n      final spatialHints = inferSpatialTraceability(frames);\n      print('V18TRACE hints mfg=\\${spatialHints.mfg?.value}@\\${spatialHints.mfg?.confidence} exp=\\${spatialHints.expiry?.value}@\\${spatialHints.expiry?.confidence}');\n      print('V18TRACE ' + dateSnapshot('baseline', draft));\n      final spatialSafe = _applySpatialTraceability(draft, frames);\n      print('V18TRACE ' + dateSnapshot('spatial', spatialSafe));\n      final regulatorySafe = _applyRegulatoryTraceability(spatialSafe, frames);\n      print('V18TRACE ' + dateSnapshot('regulatory', regulatorySafe));\n      final temporalSafe = _applyDateIntelligence(\n        regulatorySafe,\n        frames,\n        _referenceDate,\n      );\n      print('V18TRACE ' + dateSnapshot('temporal', temporalSafe));\n      final semanticSafe = _applySemanticMedicineRoles(temporalSafe, frames);\n      print('V18TRACE ' + dateSnapshot('semantic', semanticSafe));\n      final resolved = _resolveProduct(semanticSafe, frames);\n      print('V18TRACE ' + dateSnapshot('resolved', resolved));\n      drafts.add(resolved);\n"""
+          if text.count(old) != 1:
+              raise SystemExit('reconcile trace target not found exactly once')
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Run only V18 trace
+        run: flutter test --reporter expanded test/medicine_extraction_hardening_v18_test.dart
