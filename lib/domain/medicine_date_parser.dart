@@ -1,9 +1,9 @@
 final medicineManufacturingLabel = RegExp(
-  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd](?![.\s]*(?:by|at)\b)\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+(?:by|at)\b)(?:\s*(?:date|dt|on))?|production\s*date|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:m[.\s]*f[.\s]*[gd](?![.\s]*(?:by|at)\b)\.?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*m\.?(?:[\s.:_-]*(?:date|dt|on))?|(?:date\s*of\s*)?manufactur(?:e|ed|ing)(?![A-Za-z]|\s+(?:by|at)\b)(?:\s*(?:date|dt|on))?|prod(?:uction)?\s*(?:date|dt)|निर्माण\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineExpiryLabel = RegExp(
-  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+(?:expiry|expiration)|b[.\s]*b[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
+  r'(?<![A-Za-z])(?:e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?(?:[\s.:_-]*(?:date|dt|on))?|d[.\s]*o[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|date\s+of\s+(?:expiry|expiration)|b[.\s]*b[.\s]*e\.?(?:[\s.:_-]*(?:date|dt|on))?|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to)|समाप्ति\s*(?:तिथि|दिनांक)?)(?=$|[^A-Za-z]|[OoIlL०-९٠-٩۰-۹０-９](?=[0-9०-९٠-٩۰-۹０-９OoIlL]{3,}(?:$|[^A-Za-z0-9])))',
   caseSensitive: false,
 );
 final medicineNonDateLabel = RegExp(
@@ -145,6 +145,26 @@ List<MedicineDateMatch> extractMedicineDateMatches(
   );
 
   if (allowCompact) {
+    // OCR frequently drops punctuation around alphabetic month names. Month
+    // letters are strong date syntax, but a glued token is still marked compact
+    // so an unlabeled singleton cannot become an authoritative EXP/MFG fact.
+    add(
+      RegExp(
+        '(?<![A-Za-z0-9])(\\d{1,2})($monthNames)(20\\d{2}|\\d{2})(?![A-Za-z0-9])',
+        caseSensitive: false,
+      ),
+      (m) => _date(_year(m[3]!), _month(m[2]!), int.parse(m[1]!)),
+      compact: true,
+    );
+    add(
+      RegExp(
+        '(?<![A-Za-z0-9])($monthNames)(20\\d{2}|\\d{2})(?![A-Za-z0-9])',
+        caseSensitive: false,
+      ),
+      (m) => _date(_year(m[2]!), _month(m[1]!), null),
+      compact: true,
+    );
+
     // Four-digit years make an 8-digit full date self-validating enough for the
     // downstream chronology engine: try both DDMMYYYY and YYYYMMDD and accept
     // only one unique valid calendar interpretation. It is not marked role-
@@ -273,7 +293,10 @@ String _repairNumericOcr(String raw) {
     RegExp(r'(?<![A-Za-z0-9])([0-9OoIlL]{1,8})(?![A-Za-z0-9])'),
     (m) {
       final token = m[1]!;
-      if (!RegExp(r'\d').hasMatch(token) && token.length == 1) return token;
+      // Require at least one real digit before interpreting O/I/l/L as numeric
+      // OCR confusions. Pure words such as OIL or LOLL must never be converted
+      // into identifier-like 0/1 strings that can masquerade as compact dates.
+      if (!RegExp(r'\d').hasMatch(token)) return token;
       return _repairOcrDigitToken(token);
     },
   );
