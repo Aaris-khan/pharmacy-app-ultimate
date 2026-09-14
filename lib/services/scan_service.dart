@@ -8,6 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import '../domain/capture_quality.dart';
 import '../domain/medicine_machine_code_safety.dart';
+import '../domain/medicine_evidence_normalization.dart';
 import '../domain/medicine_ocr_reliability.dart';
 import '../domain/medicine_ocr_text.dart';
 import '../domain/medicine_understanding.dart';
@@ -71,6 +72,9 @@ class MedicineVisionService {
     // Acquire the native-recognizer lease synchronously before the first await.
     // close() therefore cannot race between admission and the in-flight count.
     if (_closing || _closed) throw StateError('Medicine scanner is closed.');
+    if (_inFlight != 0) {
+      throw StateError('Medicine scanner is already processing a frame.');
+    }
     _inFlight++;
     try {
       Object? latin;
@@ -135,7 +139,7 @@ class MedicineVisionService {
       // used only to choose among duplicate OCR layout lines. Downstream capture,
       // date and evidence-graph logic therefore continues to read `quality` as
       // focus/contrast/exposure, never as a model correctness probability.
-      return ScanEvidence(
+      return normalizeMedicineFrameEvidence(ScanEvidence(
         barcode: barcodes.isEmpty ? '' : barcodes.first,
         barcodes: barcodes,
         layoutLines: layoutLines,
@@ -144,7 +148,7 @@ class MedicineVisionService {
         sequence: sequence,
         timestampMs: timestampMs,
         quality: measuredQuality,
-      );
+      ));
     } finally {
       _inFlight--;
       if (_inFlight == 0) {

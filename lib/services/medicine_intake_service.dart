@@ -10,6 +10,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../domain/medicine.dart';
 import '../domain/medicine_intake.dart';
+import '../domain/medicine_evidence_normalization.dart';
 import '../domain/medicine_resolution_v2.dart';
 import '../domain/medicine_understanding.dart';
 import 'canonical_medicine_catalog_service.dart';
@@ -348,6 +349,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
   Future<MedicineUnderstandingResult> _understand(
     List<MedicineFrameEvidence> frames,
   ) async {
+    frames = normalizeMedicineReviewEvidence(frames);
     final revision = _revision?.call();
     if (_knowledge == null ||
         revision == null ||

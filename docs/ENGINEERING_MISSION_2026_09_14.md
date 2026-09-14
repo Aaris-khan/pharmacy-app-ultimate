@@ -59,10 +59,12 @@ Earlier documents' recorded test results are not evidence for this pass.
 4. Native video sampling computes low-resolution quality but currently emits every
    decoded bucket. Deduplication must preserve fine date/strength changes and
    never replace product evidence with a coarse visual-similarity guess.
-5. Queue OCR bypasses the interactive review's missing-text/layout reconstruction.
-   Detector geometry can therefore survive one entry path and be lost in another.
-6. Core dates already support many requested numeric forms; named dates glued
-   directly to MFG/EXP need contextual boundary review, not global OCR replacement.
+5. Before V2 normalization, the video worker drops frames whose text/barcode are
+   empty even when layout contains observed text. Live preview has the same early
+   gate. V2 does reconstruct layout, but cannot recover a frame discarded earlier.
+6. Core dates already support the requested numeric forms. Further tracing found
+   that the existing OCR canonicalizer also splits named months glued to MFG/EXP.
+   Preserve this functioning grammar; no speculative date rewrite is warranted.
 7. Existing camera and local-runtime ownership are substantial; preserve them.
    Do not introduce overlapping recognizers, timers, runtime owners or inventory DBs.
 
@@ -101,3 +103,28 @@ Implementation and final verification evidence will be appended to this record.
   old unsaved key/model so another vendor cannot receive an old credential.
 - Added 12 focused provider/stream regression tests, not executed in this session.
   Source review preserves existing bounded retries, ownership and [skip ci].
+
+## Checkpoint: evidence ownership and bounded adaptive retrieval
+
+- Moved existing layout-only reconstruction to one pure domain helper, used by
+  the detector, intake and review boundaries. Raw nonempty OCR remains unchanged;
+  frame identity, geometry and quality survive. Oversized frame sets fail explicitly.
+- Date geometry sorting used a pairwise row tolerance, which was nontransitive
+  for three overlapping rows. Total spatial sorting now precedes row grouping;
+  geometry-free detector lines retain their original order. The existing labelled
+  compact/named-month parser and chronological validation are preserved.
+- Vision service now rejects overlapping frame operations before its first await;
+  Latin/Devanagari/barcode detectors still run concurrently within one frame.
+- Adaptive alias counts and Top-256 retrieval use one read transaction. An alias
+  contributes only when all its competing rows are present and structurally valid.
+  Strength/form/barcode compatibility remains ahead of historical arbitration.
+- New confirmations cap support at 32; reads clamp legacy counts and use logarithmic
+  weight with existing recency decay. This prevents old repetition from growing
+  without bound. Same human-confirmation receipts and capacity limits are retained.
+- Learning failures emit stage/type-only debug diagnostics; no OCR or medicine
+  identity is logged. Failure continues to fall back to original knowledge.
+- Inventory startup reads metadata, medicines, sales and receipts in one SQLite
+  transaction. No schema, migration, inventory representation or index changed.
+- Added 9 regression cases for truncation/corruption, layout preservation and
+  date sorting/grammar. These Dart tests have not been executed. A JavaScript
+  reproduction demonstrated the old comparator cycle and the new total ordering.

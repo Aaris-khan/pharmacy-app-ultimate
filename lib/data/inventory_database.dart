@@ -579,8 +579,15 @@ class SqliteInventoryStorage implements InventoryStorage {
   }
 
   @override
-  Future<InventorySnapshot> load() async =>
-      _cached = await _read(await _open());
+  Future<InventorySnapshot> load() async {
+    final db = await _open();
+    // Metadata, medicines, sales and receipts describe one revision. Reading
+    // them in separate autocommit statements can mix revisions if another
+    // connection commits between queries (startup/restore/recovery).
+    final snapshot = await db.transaction((tx) => _read(tx));
+    _cached = snapshot;
+    return snapshot;
+  }
   @override
   Future<InventorySnapshot> commit(InventoryMutation mutation) async {
     final db = await _open();

@@ -26,8 +26,11 @@ List<List<String>> _dateLineStreams(MedicineFrameEvidence frame) {
       .toList(growable: false);
 
   final raw = clean(frame.text.split(RegExp(r'[\r\n]+')));
-  final layoutEvidence = frame.layoutLines.take(120).toList(growable: false)
-    ..sort(_compareDateLayoutReadingOrder);
+  final layoutEvidence = frame.layoutLines.take(120).toList(growable: false);
+  if (layoutEvidence.any((line) =>
+      line.height > 0 || line.width > 0 || line.left != 0 || line.top != 0)) {
+    layoutEvidence.sort(compareMedicineDateLayoutPosition);
+  }
 
   // Raw RecognizedText is assembled from multiple script recognizers and does
   // not carry physical column ownership. Once detector geometry exists, it is
@@ -104,21 +107,18 @@ List<String> _mergeDateLayoutRows(List<MedicineTextLineEvidence> lines) {
   return result;
 }
 
-int _compareDateLayoutReadingOrder(
+int compareMedicineDateLayoutPosition(
   MedicineTextLineEvidence left,
   MedicineTextLineEvidence right,
 ) {
-  final leftCenterY = left.top + left.height / 2;
-  final rightCenterY = right.top + right.height / 2;
-  final rowTolerance = max(3.0, min(left.height, right.height) * .65);
-  if ((leftCenterY - rightCenterY).abs() > rowTolerance) {
-    final vertical = left.top.compareTo(right.top);
-    if (vertical != 0) return vertical;
-  }
-  final horizontal = left.left.compareTo(right.left);
-  if (horizontal != 0) return horizontal;
+  // Approximate row membership is not a transitive comparison: A can be close
+  // to B, B close to C, while A and C are on different rows. Mixing that test
+  // with horizontal ordering creates cycles and input-order-dependent dates.
+  // Sort by a total spatial order first; _mergeDateLayoutRows owns row tolerance.
   final vertical = left.top.compareTo(right.top);
   if (vertical != 0) return vertical;
+  final horizontal = left.left.compareTo(right.left);
+  if (horizontal != 0) return horizontal;
   return left.text.compareTo(right.text);
 }
 

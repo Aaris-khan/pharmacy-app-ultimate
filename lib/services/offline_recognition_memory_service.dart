@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -24,6 +25,7 @@ class OfflineRecognitionMemoryService {
   static const _schemaVersion = 2;
   static const _maxRows = 16000;
   static const _maxFeedbackRows = 32000;
+  static const _maxAliasSupport = 32;
   static const _saltAliasPrefix = 'salt:';
   Database? _database;
   Future<void>? _initializing;
@@ -138,7 +140,7 @@ CREATE TABLE recognition_aliases (
                VALUES (?, ?, ?, 1, ?)
                ON CONFLICT(identity_key, normalized_alias) DO UPDATE SET
                  alias=excluded.alias,
-                 support=MIN(recognition_aliases.support + 1, 1000000),
+                 support=MIN(recognition_aliases.support + 1, $_maxAliasSupport),
                  last_confirmed=excluded.last_confirmed''',
             <Object?>[identityKey, alias, normalized, now],
           );
@@ -191,7 +193,8 @@ CREATE TABLE recognition_aliases (
           );
         }
       });
-    } catch (_) {
+    } catch (error) {
+      _diagnoseRecognitionMemory('confirmation_write', error);
       // A local-learning accelerator must never make capture/review unavailable.
     }
   }
@@ -230,24 +233,36 @@ CREATE TABLE recognition_aliases (
       if (keys.isEmpty) return knowledge;
 
       final placeholders = List.filled(keys.length, '?').join(',');
-      final rows = await db.rawQuery(
-        '''SELECT identity_key, alias, normalized_alias, support, last_confirmed
-           FROM recognition_aliases
-           WHERE normalized_alias IN ($placeholders)
-           ORDER BY support DESC, last_confirmed DESC
-           LIMIT 256''',
-        keys,
+      // Count collisions and retrieve candidates from ONE SQLite snapshot.
+      // A global Top-K limit is a latency bound, not proof that the surviving
+      // alias is unique. Missing competitors make the entire alias abstain.
+      final retrieved = await db.transaction((txn) async {
+        final counts = await txn.rawQuery(
+          '''SELECT normalized_alias, COUNT(*) AS alias_count
+             FROM recognition_aliases
+             WHERE normalized_alias IN ($placeholders)
+             GROUP BY normalized_alias''',
+          keys,
+        );
+        final rows = await txn.rawQuery(
+          '''SELECT identity_key, alias, normalized_alias, support, last_confirmed
+             FROM recognition_aliases
+             WHERE normalized_alias IN ($placeholders)
+             ORDER BY support DESC, last_confirmed DESC
+             LIMIT 256''',
+          keys,
+        );
+        return (counts, rows);
+      });
+      final byAlias = completeRecognitionAliasGroups(
+        retrieved.$2,
+        <String, int>{
+          for (final row in retrieved.$1)
+            if (row['normalized_alias'] is String && row['alias_count'] is int)
+              row['normalized_alias'] as String: row['alias_count'] as int,
+        },
       );
-      if (rows.isEmpty) return knowledge;
-
-      final byAlias = <String, List<Map<String, Object?>>>{};
-      for (final row in rows) {
-        final normalized = row['normalized_alias'];
-        if (normalized is! String || normalized.isEmpty) continue;
-        byAlias
-            .putIfAbsent(normalized, () => <Map<String, Object?>>[])
-            .add(row);
-      }
+      if (byAlias.isEmpty) return knowledge;
 
       final knowledgeByIdentity = <String, List<MedicineKnowledgeEntry>>{};
       for (final item in knowledge) {
@@ -303,12 +318,13 @@ CREATE TABLE recognition_aliases (
               !compatibleIdentities.contains(identity)) {
             continue;
           }
-          final count = max(1, support.toInt());
+          final count = support.toInt().clamp(1, _maxAliasSupport).toInt();
           final last = row['last_confirmed'];
           final lastConfirmed = last is num ? last.toInt() : now;
           final ageDays = max(0, now - lastConfirmed) / 86400000.0;
           final recency = pow(.5, ageDays / 180.0).toDouble();
-          final weight = count * recency;
+          // Diminishing returns: repetition is corroboration, not certainty.
+          final weight = log(1 + count) * recency;
           weightByIdentity.update(
             identity,
             (value) => value + weight,
@@ -429,10 +445,47 @@ CREATE TABLE recognition_aliases (
       return changed
           ? List<MedicineKnowledgeEntry>.unmodifiable(result)
           : knowledge;
-    } catch (_) {
+    } catch (error) {
+      _diagnoseRecognitionMemory('candidate_read', error);
       return knowledge;
     }
   }
+}
+
+void _diagnoseRecognitionMemory(String stage, Object error) {
+  if (kDebugMode) {
+    debugPrint('recognition_memory:$stage:${error.runtimeType}');
+  }
+}
+
+/// Only complete, valid collision groups may influence recognition. Inventory
+/// remains useful when memory is truncated/corrupt: omitted groups add no aliases.
+Map<String, List<Map<String, Object?>>> completeRecognitionAliasGroups(
+  List<Map<String, Object?>> rows,
+  Map<String, int> expectedCounts,
+) {
+  final grouped = <String, List<Map<String, Object?>>>{};
+  final invalid = <String>{};
+  for (final row in rows) {
+    final key = row['normalized_alias'];
+    if (key is! String || key.isEmpty) continue;
+    final identity = row['identity_key'];
+    final alias = row['alias'];
+    final support = row['support'];
+    final last = row['last_confirmed'];
+    if (identity is! String || identity.isEmpty ||
+        alias is! String || alias.trim().isEmpty || alias.length > 300 ||
+        support is! int || support < 1 ||
+        last is! int || last < 0) {
+      invalid.add(key);
+      continue;
+    }
+    grouped.putIfAbsent(key, () => <Map<String, Object?>>[]).add(row);
+  }
+  grouped.removeWhere((key, values) =>
+      invalid.contains(key) || expectedCounts[key] != values.length ||
+      values.map((row) => row['identity_key']).toSet().length != values.length);
+  return grouped;
 }
 
 /// Stable privacy-safe identity key. Raw OCR is never part of this digest.
