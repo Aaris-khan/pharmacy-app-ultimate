@@ -153,15 +153,16 @@ Map<String, Object?> understandMedicineEvidenceV2Message(
 ) {
   final rawEvidence = message['evidence'];
   final evidence = rawEvidence is List
-      ? rawEvidence
-            .whereType<Map>()
-            .map(
-              (value) => MedicineFrameEvidence.fromMessage(
-                Map<Object?, Object?>.from(value),
-              ),
-            )
-            .take(maxMedicineEvidenceFrames)
-            .toList(growable: false)
+      ? _normalizeResolverEvidence(
+          rawEvidence
+              .whereType<Map>()
+              .map(
+                (value) => MedicineFrameEvidence.fromMessage(
+                  Map<Object?, Object?>.from(value),
+                ),
+              )
+              .take(maxMedicineEvidenceFrames),
+        )
       : const <MedicineFrameEvidence>[];
 
   final rawKnowledge = message['knowledge'];
@@ -205,6 +206,13 @@ Map<String, Object?> understandMedicineEvidenceV2Message(
   // only by the coherent ProductHypothesis resolver below.
   final baseMessage = <String, Object?>{
     ...message,
+    // The baseline parser consumes the same canonicalized evidence as V2. ML
+    // recognizers can retain valid geometry while their merged text stream is
+    // empty or incomplete; promoting only observed layout text here prevents
+    // those facts from disappearing before date/composition reasoning begins.
+    'evidence': evidence
+        .map((value) => value.toMessage())
+        .toList(growable: false),
     'knowledge': localKnowledge
         .take(maxMedicineKnowledgeEntries)
         .map((value) => value.toMessage())
@@ -221,6 +229,76 @@ Map<String, Object?> understandMedicineEvidenceV2Message(
         ? DateTime.tryParse(message['referenceDate']! as String)
         : null,
   ).reconcile(baseline, evidence).toMessage();
+}
+
+/// Builds one bounded OCR surface per physical frame without inventing text.
+/// The merged recognizer stream remains first-authority; detector geometry only
+/// contributes observed lines that are missing from it. This keeps the fast
+/// text parser and the geometry-aware semantic layers on the same evidence set.
+List<MedicineFrameEvidence> _normalizeResolverEvidence(
+  Iterable<MedicineFrameEvidence> source,
+) {
+  final result = <MedicineFrameEvidence>[];
+  for (final frame in source.take(maxMedicineEvidenceFrames)) {
+    if (frame.layoutLines.isEmpty) {
+      result.add(frame);
+      continue;
+    }
+
+    final output = <String>[];
+    final seen = <String>{};
+    var characters = 0;
+
+    void addLine(String raw) {
+      if (output.length >= 220 || characters >= 30000) return;
+      var clean = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (clean.isEmpty) return;
+      if (clean.length > 300) clean = clean.substring(0, 300);
+      final key = clean.toLowerCase();
+      if (!seen.add(key)) return;
+      final remaining = 30000 - characters;
+      if (remaining <= 0) return;
+      if (clean.length > remaining) clean = clean.substring(0, remaining);
+      output.add(clean);
+      characters += clean.length + 1;
+    }
+
+    for (final line in frame.text.split(RegExp(r'[\r\n]+')).take(180)) {
+      addLine(line);
+    }
+
+    final layout = frame.layoutLines.take(240).toList(growable: false)
+      ..sort((a, b) {
+        final vertical = a.top.compareTo(b.top);
+        if (vertical != 0) return vertical;
+        final horizontal = a.left.compareTo(b.left);
+        if (horizontal != 0) return horizontal;
+        return a.text.compareTo(b.text);
+      });
+    for (final line in layout) {
+      addLine(line.text);
+    }
+
+    final normalizedText = output.join('\n');
+    if (normalizedText.isEmpty || normalizedText == frame.text) {
+      result.add(frame);
+      continue;
+    }
+    result.add(
+      MedicineFrameEvidence(
+        barcode: frame.barcode,
+        barcodes: frame.barcodes,
+        layoutLines: frame.layoutLines,
+        text: normalizedText,
+        source: frame.source,
+        sequence: frame.sequence,
+        timestampMs: frame.timestampMs,
+        quality: frame.quality,
+        startsNewItem: frame.startsNewItem,
+      ),
+    );
+  }
+  return List<MedicineFrameEvidence>.unmodifiable(result);
 }
 
 class MedicineProductResolverV2 {
@@ -242,15 +320,15 @@ class MedicineProductResolverV2 {
     List<MedicineFrameEvidence> evidence,
   ) {
     if (baseline.drafts.isEmpty) return baseline;
-    final bySequence = <int, MedicineFrameEvidence>{
-      for (final frame in evidence) frame.sequence: frame,
-    };
+    final bySequence = <int, List<MedicineFrameEvidence>>{};
+    for (final frame in evidence) {
+      bySequence.putIfAbsent(frame.sequence, () => <MedicineFrameEvidence>[]).add(
+        frame,
+      );
+    }
     final drafts = <MedicineScanDraft>[];
     for (final draft in baseline.drafts) {
-      final frames = draft.frameSequences
-          .map((sequence) => bySequence[sequence])
-          .whereType<MedicineFrameEvidence>()
-          .toList(growable: false);
+      final frames = _resolverFramesForDraft(draft, bySequence);
       final spatialSafe = _applySpatialTraceability(draft, frames);
       final regulatorySafe = _applyRegulatoryTraceability(spatialSafe, frames);
       final temporalSafe = _applyDateIntelligence(
@@ -423,6 +501,58 @@ class MedicineProductResolverV2 {
     }
     return draft;
   }
+}
+
+/// Selects every physical frame that belongs to a draft without allowing a
+/// duplicate/default sequence number to overwrite earlier evidence. Duplicate
+/// IDs are correlated against the baseline draft's observed text/barcode; when
+/// there is no correlation signal (for example a directly constructed draft),
+/// retaining all candidates is safer than silently discarding a camera view.
+List<MedicineFrameEvidence> _resolverFramesForDraft(
+  MedicineScanDraft draft,
+  Map<int, List<MedicineFrameEvidence>> bySequence,
+) {
+  final result = <MedicineFrameEvidence>[];
+  final rawLineKeys = draft.rawText
+      .split(RegExp(r'[\r\n]+'))
+      .map(_resolverEvidenceLineKey)
+      .where((value) => value.isNotEmpty)
+      .toSet();
+  final draftBarcode = _canonicalBarcode(draft.barcode);
+
+  for (final sequence in draft.frameSequences.toSet()) {
+    final candidates = bySequence[sequence];
+    if (candidates == null || candidates.isEmpty) continue;
+    if (candidates.length == 1) {
+      result.add(candidates.single);
+      continue;
+    }
+
+    final matched = candidates.where((frame) {
+      if (draftBarcode.isNotEmpty) {
+        for (final barcode in frame.allBarcodes) {
+          if (_canonicalBarcode(barcode) == draftBarcode) return true;
+        }
+      }
+      for (final line in frame.text.split(RegExp(r'[\r\n]+')).take(180)) {
+        final key = _resolverEvidenceLineKey(line);
+        if (key.isEmpty) continue;
+        final tokens = key.split(' ');
+        if (tokens.length == 1 && _resolverNoise.contains(key)) continue;
+        if (rawLineKeys.contains(key)) return true;
+      }
+      return false;
+    }).toList(growable: false);
+
+    result.addAll(matched.isEmpty ? candidates : matched);
+  }
+  return List<MedicineFrameEvidence>.unmodifiable(result);
+}
+
+String _resolverEvidenceLineKey(String raw) {
+  final key = searchText(raw);
+  if (key.length < 3) return '';
+  return key;
 }
 
 List<CanonicalMedicineProduct> _collapseLocalKnowledge(
@@ -1936,8 +2066,9 @@ MedicineScanDraft _applyRegulatoryTraceability(
       final structured = parseRegulatoryMedicineCode(raw);
       if (structured == null) continue;
       if (structured.gtin.isNotEmpty) gtins.add(structured.gtin);
-      if (structured.batchLot.isNotEmpty)
+      if (structured.batchLot.isNotEmpty) {
         batches.add(structured.batchLot.trim());
+      }
       if (structured.manufacturingYyMmDd.isNotEmpty) {
         final value = _gs1Date(structured.manufacturingYyMmDd);
         if (value.isNotEmpty) mfgs.add(value);
