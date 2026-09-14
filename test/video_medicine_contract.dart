@@ -215,9 +215,10 @@ Map<String, void Function()> videoMedicineContract() => {
       _check(carry.length <= 48, 'Unbounded video memory');
     }
     _check(completed.length == 18, 'Expected 18 lots, got ${completed.length}');
+    final batches = completed.map((draft) => draft.batchNumber).toList();
     _check(
-      completed.map((d) => d.batchNumber).toSet().length == 18,
-      'Lot lost or duplicated',
+      batches.toSet().length == 18,
+      'Lot lost or duplicated: $batches',
     );
   },
   'carry retains a unique middle panel during a slow long pan': () {
