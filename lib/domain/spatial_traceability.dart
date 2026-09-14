@@ -97,6 +97,9 @@ final _labelPattern = RegExp(
   caseSensitive: false,
 );
 
+const _maxAssignedSpatialLabelsPerKind = 8;
+const _maxSpatialProposalsPerLabel = 12;
+
 List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
   final lines = frame.layoutLines
       .where(
@@ -114,6 +117,27 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
   final result = <_SpatialObservation>[];
   final proposals = <_SpatialProposal>[];
   final quality = frame.quality.clamp(0, 1).toDouble();
+  final lineHasLabel = List<bool>.generate(
+    lines.length,
+    (index) => _labelPattern.hasMatch(lines[index].text),
+    growable: false,
+  );
+
+  // Candidate parsing is deliberately cached per physical OCR line. MFG and
+  // EXP share the same date candidates, so repeatedly running the date parser
+  // once per label multiplied work on label-dense packs and videos.
+  final dateCandidatesByLine = <int, List<_SpatialValueCandidate>>{};
+  final batchCandidatesByLine = <int, List<_SpatialValueCandidate>>{};
+  for (var index = 0; index < lines.length; index++) {
+    if (lineHasLabel[index]) continue;
+    final line = lines[index];
+    final dates = _valueCandidates(_TraceKind.mfg, line);
+    if (dates.isNotEmpty) dateCandidatesByLine[index] = dates;
+    final batches = _valueCandidates(_TraceKind.batch, line);
+    if (batches.isNotEmpty) batchCandidatesByLine[index] = batches;
+  }
+
+  final assignedLabelsByKind = <_TraceKind, int>{};
   var nextLabelId = 0;
 
   for (var labelIndex = 0; labelIndex < lines.length; labelIndex++) {
@@ -141,6 +165,11 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
         continue;
       }
 
+      // Bound only labels that actually have plausible geometry proposals.
+      // Inline evidence above is never discarded by this adversarial-work cap.
+      final acceptedForKind = assignedLabelsByKind[kind] ?? 0;
+      if (acceptedForKind >= _maxAssignedSpatialLabelsPerKind) continue;
+
       // Bind geometry to the actual marker span instead of the whole OCR line.
       // ML Kit may merge "MFG     EXP" into one line; using the full box makes
       // both labels appear to occupy the same place and can swap their values.
@@ -150,23 +179,21 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
         match.end,
         match.group(0) ?? '',
       );
+      final candidatesByLine = kind == _TraceKind.batch
+          ? batchCandidatesByLine
+          : dateCandidatesByLine;
+      final localProposals = <_SpatialProposal>[];
 
-      for (
-        var candidateIndex = 0;
-        candidateIndex < lines.length;
-        candidateIndex++
-      ) {
+      for (final entry in candidatesByLine.entries) {
+        final candidateIndex = entry.key;
         if (candidateIndex == labelIndex) continue;
-        final candidateLine = lines[candidateIndex];
-        if (_labelPattern.hasMatch(candidateLine.text)) continue;
-        final values = _valueCandidates(kind, candidateLine);
-        for (final candidate in values) {
+        for (final candidate in entry.value) {
           final geometry = _geometryScore(labelAnchor, candidate.anchor);
           if (geometry < .78) continue;
           final confidence = (geometry * (.92 + quality * .08))
               .clamp(0, .95)
               .toDouble();
-          proposals.add(
+          localProposals.add(
             _SpatialProposal(
               labelId: labelId,
               // A printed substring is a finite piece of evidence. Do not let
@@ -182,36 +209,179 @@ List<_SpatialObservation> _frameObservations(MedicineFrameEvidence frame) {
           );
         }
       }
+
+      if (localProposals.isEmpty) continue;
+      localProposals.sort(_compareSpatialProposal);
+      proposals.addAll(localProposals.take(_maxSpatialProposalsPerLabel));
+      assignedLabelsByKind[kind] = acceptedForKind + 1;
     }
   }
 
-  // Resolve all non-inline labels together. Previous per-label greedy matching
-  // allowed one nearby date to be reused for MFG and EXP while a second date was
-  // visible a little farther away. A global confidence ordering with one-to-one
-  // token ownership preserves the strongest geometry and forces the remaining
-  // label to use independent evidence (or abstain).
-  proposals.sort((a, b) {
-    final confidence = b.observation.confidence.compareTo(
-      a.observation.confidence,
-    );
-    if (confidence != 0) return confidence;
-    final label = a.labelId.compareTo(b.labelId);
-    if (label != 0) return label;
-    return a.candidateId.compareTo(b.candidateId);
-  });
-  final usedLabels = <int>{};
-  final usedCandidates = <String>{};
-  for (final proposal in proposals) {
-    if (usedLabels.contains(proposal.labelId) ||
-        usedCandidates.contains(proposal.candidateId)) {
-      continue;
-    }
-    usedLabels.add(proposal.labelId);
-    usedCandidates.add(proposal.candidateId);
+  // Resolve all non-inline labels as a true maximum-weight one-to-one
+  // assignment. A descending greedy pass can consume the locally strongest
+  // token for the wrong label and force the remaining MFG/EXP label onto a
+  // globally worse date. Exact bipartite assignment maximizes total geometric
+  // confidence while dummy columns let weak labels abstain safely.
+  for (final proposal in _selectSpatialProposals(proposals)) {
     result.add(proposal.observation);
   }
 
-  return result;
+  // Repeated printing inside one image is correlated evidence, not independent
+  // frame support. Keep the strongest same-value observation once per frame;
+  // distinct competing values survive so the resolver can still flag conflict.
+  return _collapseFrameObservations(result);
+}
+
+int _compareSpatialProposal(_SpatialProposal a, _SpatialProposal b) {
+  final confidence = b.observation.confidence.compareTo(
+    a.observation.confidence,
+  );
+  if (confidence != 0) return confidence;
+  final candidate = a.candidateId.compareTo(b.candidateId);
+  if (candidate != 0) return candidate;
+  return a.labelId.compareTo(b.labelId);
+}
+
+List<_SpatialProposal> _selectSpatialProposals(
+  List<_SpatialProposal> proposals,
+) {
+  if (proposals.isEmpty) return const <_SpatialProposal>[];
+
+  final labelIds = proposals.map((value) => value.labelId).toSet().toList()
+    ..sort();
+  final candidateIds = proposals.map((value) => value.candidateId).toSet().toList()
+    ..sort();
+  if (labelIds.isEmpty || candidateIds.isEmpty) {
+    return const <_SpatialProposal>[];
+  }
+
+  final labelIndex = <int, int>{
+    for (var index = 0; index < labelIds.length; index++) labelIds[index]: index,
+  };
+  final candidateIndex = <String, int>{
+    for (var index = 0; index < candidateIds.length; index++)
+      candidateIds[index]: index,
+  };
+  final bestByPair = <(int, String), _SpatialProposal>{};
+  for (final proposal in proposals) {
+    final key = (proposal.labelId, proposal.candidateId);
+    final current = bestByPair[key];
+    if (current == null ||
+        proposal.observation.confidence > current.observation.confidence) {
+      bestByPair[key] = proposal;
+    }
+  }
+
+  final rowCount = labelIds.length;
+  final realColumnCount = candidateIds.length;
+  // One dummy column per label guarantees columns >= rows and gives every label
+  // a zero-score abstention path without stealing a real OCR token.
+  final columnCount = realColumnCount + rowCount;
+  final weights = List<List<double>>.generate(
+    rowCount,
+    (_) => List<double>.filled(columnCount, 0),
+    growable: false,
+  );
+  for (final proposal in bestByPair.values) {
+    final row = labelIndex[proposal.labelId];
+    final column = candidateIndex[proposal.candidateId];
+    if (row == null || column == null) continue;
+    weights[row][column] = proposal.observation.confidence;
+  }
+
+  // Hungarian algorithm, expressed as minimum cost where cost = 1 - weight.
+  // With the hard bounds above this is small (<=24 label rows) and deterministic.
+  final u = List<double>.filled(rowCount + 1, 0);
+  final v = List<double>.filled(columnCount + 1, 0);
+  final matching = List<int>.filled(columnCount + 1, 0);
+  final way = List<int>.filled(columnCount + 1, 0);
+  const epsilon = 1e-12;
+
+  for (var row = 1; row <= rowCount; row++) {
+    matching[0] = row;
+    var column0 = 0;
+    final minimum = List<double>.filled(
+      columnCount + 1,
+      double.infinity,
+    );
+    final used = List<bool>.filled(columnCount + 1, false);
+
+    do {
+      used[column0] = true;
+      final row0 = matching[column0];
+      var delta = double.infinity;
+      var column1 = 0;
+      for (var column = 1; column <= columnCount; column++) {
+        if (used[column]) continue;
+        final cost = 1 - weights[row0 - 1][column - 1];
+        final reduced = cost - u[row0] - v[column];
+        if (reduced < minimum[column] - epsilon) {
+          minimum[column] = reduced;
+          way[column] = column0;
+        }
+        if (minimum[column] < delta - epsilon ||
+            ((minimum[column] - delta).abs() <= epsilon &&
+                (column1 == 0 || column < column1))) {
+          delta = minimum[column];
+          column1 = column;
+        }
+      }
+
+      for (var column = 0; column <= columnCount; column++) {
+        if (used[column]) {
+          u[matching[column]] += delta;
+          v[column] -= delta;
+        } else if (column > 0) {
+          minimum[column] -= delta;
+        }
+      }
+      column0 = column1;
+    } while (matching[column0] != 0);
+
+    do {
+      final column1 = way[column0];
+      matching[column0] = matching[column1];
+      column0 = column1;
+    } while (column0 != 0);
+  }
+
+  final selected = <_SpatialProposal>[];
+  for (var column = 1; column <= realColumnCount; column++) {
+    final row = matching[column];
+    if (row == 0) continue;
+    final proposal = bestByPair[(labelIds[row - 1], candidateIds[column - 1])];
+    if (proposal != null) selected.add(proposal);
+  }
+  selected.sort((a, b) {
+    final label = a.labelId.compareTo(b.labelId);
+    return label != 0 ? label : _compareSpatialProposal(a, b);
+  });
+  return selected;
+}
+
+List<_SpatialObservation> _collapseFrameObservations(
+  List<_SpatialObservation> observations,
+) {
+  if (observations.length < 2) return observations;
+  final best = <(String, String), _SpatialObservation>{};
+  for (final observation in observations) {
+    final valueKey = observation.field == 'batchNumber'
+        ? searchText(observation.value)
+        : observation.value.trim().toLowerCase();
+    if (valueKey.isEmpty) continue;
+    final key = (observation.field, valueKey);
+    final current = best[key];
+    if (current == null || observation.confidence > current.confidence) {
+      best[key] = observation;
+    }
+  }
+  final collapsed = best.values.toList(growable: false)
+    ..sort((a, b) {
+      final field = a.field.compareTo(b.field);
+      if (field != 0) return field;
+      return a.value.compareTo(b.value);
+    });
+  return collapsed;
 }
 
 _TraceKind? _kind(String raw) {
