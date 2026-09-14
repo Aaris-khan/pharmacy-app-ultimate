@@ -208,12 +208,12 @@ CREATE TABLE recognition_aliases (
       final frameContexts = _recognitionFrameContexts(evidence);
 
       // Identity aliases may accelerate product recognition only for identities
-      // that still exist in current knowledge. Current same-frame package
-      // evidence narrows collisions in the order barcode -> strength -> form.
-      // Historical support/recency is consulted only after that compatibility
-      // filter, preventing a popular old variant from owning another variant's
-      // OCR alias and preventing deleted/stale identities from suppressing live
-      // candidates.
+      // that still exist in current knowledge. Same-frame barcode, strength and
+      // form evidence narrow collisions only when they agree; contradictory
+      // evidence makes adaptive memory abstain. Historical support/recency is
+      // consulted only after compatibility filtering, preventing a popular old
+      // variant from owning another variant's OCR alias and preventing stale
+      // identities from suppressing live candidates.
       final learnedIdentity = <String, List<String>>{};
       final now = DateTime.now().millisecondsSinceEpoch;
       for (final entry in byAlias.entries) {
@@ -398,9 +398,10 @@ String recognitionIdentityKey({
 /// Pure compatibility policy used before historical adaptive-memory arbitration.
 ///
 /// It deliberately does not choose a winner when current evidence cannot
-/// distinguish variants. Callers may then use bounded historical confidence or
-/// abstain. Evidence is tied to the same frame that contains [alias], preventing
-/// a strength/form from another medicine in a video from leaking across items.
+/// distinguish variants. It also abstains when barcode, strength or form
+/// evidence points at incompatible variants. Evidence is tied to the same frame
+/// that contains [alias], preventing another medicine in a video from leaking
+/// variant evidence across items.
 Set<String> recognitionVariantCompatibleIdentityKeys({
   required String alias,
   required Iterable<MedicineKnowledgeEntry> candidates,
@@ -681,15 +682,15 @@ Set<String> _variantCompatibleIdentityKeys({
   required Map<String, List<MedicineKnowledgeEntry>> knowledgeByIdentity,
   required List<_RecognitionFrameContext> contexts,
 }) {
-  var compatible = candidateIdentities
+  final liveCandidates = candidateIdentities
       .where(knowledgeByIdentity.containsKey)
       .toSet();
-  if (compatible.length <= 1) return compatible;
+  if (liveCandidates.length <= 1) return liveCandidates;
 
   final relevantContexts = contexts
       .where((context) => context.identityKeys.contains(aliasKey))
       .toList(growable: false);
-  if (relevantContexts.isEmpty) return compatible;
+  if (relevantContexts.isEmpty) return liveCandidates;
 
   Set<String> matching(
     bool Function(
@@ -698,7 +699,7 @@ Set<String> _variantCompatibleIdentityKeys({
     ) predicate,
   ) {
     final matches = <String>{};
-    for (final identity in compatible) {
+    for (final identity in liveCandidates) {
       final entries = knowledgeByIdentity[identity];
       if (entries == null || entries.isEmpty) continue;
       final supported = entries.any(
@@ -713,23 +714,38 @@ Set<String> _variantCompatibleIdentityKeys({
     final expected = _recognitionBarcodeKey(entry.barcode);
     return expected.length >= 6 && context.barcodes.contains(expected);
   });
-  if (barcodeMatches.isNotEmpty) compatible = barcodeMatches;
-  if (compatible.length <= 1) return compatible;
-
   final strengthMatches = matching((entry, context) {
     final expected = _recognitionStrengthKeys(entry.strength);
     return expected.isNotEmpty && context.strengthKeys.containsAll(expected);
   });
-  if (strengthMatches.isNotEmpty) compatible = strengthMatches;
-  if (compatible.length <= 1) return compatible;
-
   final formMatches = matching((entry, context) {
     final expected = normalizeForm(entry.form);
     return expected.isNotEmpty &&
         expected != 'Other' &&
         context.forms.contains(expected);
   });
-  if (formMatches.isNotEmpty) compatible = formMatches;
+
+  var compatible = liveCandidates;
+  if (barcodeMatches.isNotEmpty) compatible = barcodeMatches;
+
+  if (strengthMatches.isNotEmpty) {
+    if (barcodeMatches.isNotEmpty) {
+      final overlap = compatible.intersection(strengthMatches);
+      if (overlap.isEmpty) return const <String>{};
+      compatible = overlap;
+    } else {
+      compatible = strengthMatches;
+    }
+  }
+
+  if (formMatches.isNotEmpty) {
+    final overlap = compatible.intersection(formMatches);
+    if (overlap.isEmpty &&
+        (barcodeMatches.isNotEmpty || strengthMatches.isNotEmpty)) {
+      return const <String>{};
+    }
+    compatible = overlap.isEmpty ? formMatches : overlap;
+  }
   return compatible;
 }
 
