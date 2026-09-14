@@ -12,7 +12,7 @@ final medicineNonDateLabel = RegExp(
 );
 
 final _medicineCompactDatePrefix = RegExp(
-  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?)'
+  r'(?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|prod(?:uction)?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
   r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*$',
   caseSensitive: false,
 );
@@ -282,7 +282,7 @@ String _repairNumericOcr(String raw) {
   // global letter-to-digit replacement would corrupt medicine names/batch IDs.
   text = text.replaceAllMapped(
     RegExp(
-      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?)'
+      r'((?:m[.\s]*f[.\s]*[gd]\.?|e[.\s]*x[.\s]*p\.?(?:iry|ires|iration)?|d[.\s]*o[.\s]*[me]\.?|b[.\s]*b[.\s]*e\.?|prod(?:uction)?\s*(?:date|dt)|use\s*(?:before|by|till|until|up\s*to|upto)|best\s*before(?:\s*end)?|valid\s*(?:till|until|upto|up\s*to))'
       r'(?:[\s.:_-]*(?:date|dt|on))?[\s.:_-]*)([0-9OoIlL]{4,8})(?![A-Za-z0-9])',
       caseSensitive: false,
     ),
