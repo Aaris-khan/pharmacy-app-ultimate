@@ -40,6 +40,14 @@ final _medicineOcrPerConcentration = RegExp(
   r'(?<![A-Za-z0-9])(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|meq|iu|i\.u\.|units?|%))\s+per\s+(?:(\d+(?:[.,]\d+)?)\s*)?(ml|millilit(?:er|re)s?|g|gram(?:me)?s?|dose|actuation)(?![A-Za-z])',
   caseSensitive: false,
 );
+final _medicineOcrCompositionBasis = RegExp(
+  r'(?<![A-Za-z0-9])(?:each\s+)?(\d+(?:[.,]\d+)?)\s*(ml|g)\s+(?:of\s+(?:(?:the|reconstituted)\s+)?(?:suspension|solution|syrup)\s+)?contains?\b',
+  caseSensitive: false,
+);
+final _medicineOcrBasisOwnedStrength = RegExp(
+  r'(?<![A-Za-z0-9/])(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|meq|iu|i\.u\.|units?))(?!\s*/)',
+  caseSensitive: false,
+);
 
 String _cleanMedicineOcrLine(String value) => value
     // Unicode bidi/zero-width controls are formatting code points, not word
@@ -162,6 +170,34 @@ String _canonicalMedicineOcrSurface(String value) {
         ? '${match[1]}/$unit'
         : '${match[1]}/$denominator $unit';
   });
+
+  // Liquid labels very often express the denominator before the ingredients:
+  // "Each 5 ml contains Paracetamol 125 mg". The old parser consumed the
+  // composition heading and then saw only "125 mg", silently losing the 5 ml
+  // basis. Bind that explicit basis to numerator strengths in the same bounded
+  // line before any semantic role extraction runs. Existing slash
+  // concentrations are left untouched, and the rule cannot fire without both
+  // an explicit numeric ml/g basis and the word "contains". The inserted
+  // semicolon preserves every printed token while making the heading/ingredient
+  // boundary explicit to the existing semantic segmenter.
+  final basis = _medicineOcrCompositionBasis.firstMatch(result);
+  if (basis != null) {
+    final denominator = basis[1]!;
+    final denominatorUnit = basis[2]!.toLowerCase();
+    final head = result.substring(0, basis.end);
+    final tail = result.substring(basis.end);
+    var rewrites = 0;
+    final boundTail = tail.replaceAllMapped(_medicineOcrBasisOwnedStrength, (
+      match,
+    ) {
+      if (rewrites >= 6) return match[0]!;
+      final before = tail.substring(0, match.start).trimRight();
+      if (before.endsWith('/')) return match[0]!;
+      rewrites++;
+      return '${match[1]}/$denominator $denominatorUnit';
+    });
+    result = '$head;$boundTail';
+  }
 
   return result.replaceAll(_medicineOcrWhitespace, ' ').trim();
 }
