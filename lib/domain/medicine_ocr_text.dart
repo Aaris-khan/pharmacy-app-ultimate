@@ -51,13 +51,24 @@ final _medicineOcrGluedTraceabilityLabel = RegExp(
   caseSensitive: false,
 );
 
+// Strong multi-word semantic labels survive OCR in several shapes: ordinary
+// spaces, punctuation separators, or completely collapsed text. Canonicalize
+// only roles whose semantics are already explicit. Bare BRAND/GENERIC/SALT are
+// deliberately excluded because prefix words can be legitimate product text.
+final _medicineOcrExplicitSemanticLabel = RegExp(
+  r'(?<![A-Za-z])('
+  r'(?:brand|product|generic|proprietary|manufacturer|salt)\s*[._/-]*\s*name|'
+  r'trade\s*[._/-]*\s*(?:name|mark)|'
+  r'active\s*[._/-]*\s*ingredients?(?:\s*[._/-]*\s*name)?'
+  r')(?=$|[^A-Za-z])',
+  caseSensitive: false,
+);
+
 // Multi-word field labels are especially easy for OCR to collapse into one
-// token. These are strong explicit packaging roles, so recognizer casing is not
-// semantic evidence: ML Kit may return ALL-CAPS, TitleCase or lowercase for the
-// same print. Bare BRAND/GENERIC prefixes remain excluded. MANUFACTURERNAME is
-// matched before MANUFACTURER so the word NAME can never leak into the value.
+// token. Longer roles are matched first so words such as NAME can never leak
+// into the extracted value (ACTIVEINGREDIENTNAMEPARACETAMOL, for example).
 final _medicineOcrGluedSemanticLabel = RegExp(
-  r'(?<![A-Za-z])(BRANDNAME|TRADENAME|PRODUCTNAME|GENERICNAME|ACTIVEINGREDIENTS?|MANUFACTURERNAME|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
+  r'(?<![A-Za-z])(ACTIVEINGREDIENTS?NAME|MANUFACTURERNAME|PROPRIETARYNAME|BRANDNAME|TRADENAME|TRADEMARK|PRODUCTNAME|GENERICNAME|SALTNAME|ACTIVEINGREDIENTS?|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
   caseSensitive: false,
 );
 
@@ -104,7 +115,7 @@ final _medicineOcrGluedDose = RegExp(
   caseSensitive: false,
 );
 final _medicineOcrUnsafeOwningRole = RegExp(
-  r'(?:^|[\s;|])(?:mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack(?:\s*size)?)\b(?:\s*(?:date|dt|on)\.?)?\s*[:._-]?\s*$|'
+  r'(?:^|[\s;|])(?:mrp|price|mfg|mfd|dom|exp|expn|xpry|expiry|doe|pkd|pkg|pack(?:\s*size)?)\b(?:\s*(?:date|dt|on))?\.?\s*[:._-]?\s*$|'
   r'(?:^|[\s;|])(?:batch|lot|serial|licen[cs]e|gtin|barcode|code)\b(?:\s*(?:no|number)\.?)?\s*[:._-]?\s*(?:[A-Za-z0-9-]{1,24}\s+)?$',
   caseSensitive: false,
 );
@@ -203,18 +214,28 @@ String _canonicalMedicineDenominatorUnit(String value) {
 }
 
 String _canonicalMedicineSemanticLabel(String value) {
-  switch (value.toUpperCase()) {
+  final key = value
+      .toUpperCase()
+      .replaceAll(RegExp(r'[\s._/-]+'), '');
+  switch (key) {
     case 'BRANDNAME':
       return 'BRAND NAME';
     case 'TRADENAME':
       return 'TRADE NAME';
+    case 'TRADEMARK':
+      return 'TRADE MARK';
     case 'PRODUCTNAME':
       return 'PRODUCT NAME';
+    case 'PROPRIETARYNAME':
+      return 'PROPRIETARY NAME';
     case 'GENERICNAME':
+    case 'SALTNAME':
       return 'GENERIC NAME';
     case 'ACTIVEINGREDIENT':
+    case 'ACTIVEINGREDIENTNAME':
       return 'ACTIVE INGREDIENT';
     case 'ACTIVEINGREDIENTS':
+    case 'ACTIVEINGREDIENTSNAME':
       return 'ACTIVE INGREDIENTS';
     case 'MANUFACTURERNAME':
     case 'MANUFACTURER':
@@ -274,9 +295,16 @@ String _canonicalMedicineOcrSurface(String value) {
     return (code - zero).toString();
   });
 
-  // Recover strong explicit multi-word labels collapsed by OCR before any field
-  // parser sees them. Casing is detector presentation, not semantic evidence;
-  // the role prefix itself is exact and bare ambiguous labels remain excluded.
+  // Normalize visibly separated strong labels first. Punctuation such as
+  // PRODUCT-NAME or MANUFACTURER_NAME is presentation, not part of the value.
+  result = result.replaceAllMapped(
+    _medicineOcrExplicitSemanticLabel,
+    (match) => _canonicalMedicineSemanticLabel(match[1]!),
+  );
+
+  // Recover fully collapsed strong semantic labels before any field parser sees
+  // them. The replacement adds only the missing boundary; it never repairs or
+  // guesses the value that follows the role.
   result = result.replaceAllMapped(
     _medicineOcrGluedSemanticLabel,
     (match) => '${_canonicalMedicineSemanticLabel(match[1]!)} ',

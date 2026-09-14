@@ -119,21 +119,46 @@ List<MedicineDateMatch> extractMedicineDateMatches(
     RegExp('(?<!\\d)(\\d{1,2})$sep(\\d{1,2})$sep(20\\d{2}|\\d{2})(?!\\d)'),
     (m) => _date(_year(m[3]!), int.parse(m[2]!), int.parse(m[1]!)),
   );
+
+  // English and Hindi named months share one calendar grammar. Script digits
+  // are normalized before parsing, so a pack such as "अप्रैल २०२८" reaches the
+  // same chronology engine as "APR 2028" instead of falling through merely
+  // because the already-recognized Hindi MFG/EXP role used a Hindi month word.
   const monthNames =
-      r'JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?';
+      r'JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:T(?:EMBER)?)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?|'
+      r'जनवरी|फरवरी|फ़रवरी|फ़रवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर';
+  const namedMonthBoundary = r'A-Za-z0-9\u0900-\u097F';
+
   add(
     RegExp(
-      '(?<![A-Za-z0-9])(\\d{1,2})$sep($monthNames)$sep(20\\d{2}|\\d{2})(?!\\d)',
+      '(?<![$namedMonthBoundary])(\\d{1,2})$sep($monthNames)$sep(20\\d{2}|\\d{2})(?![$namedMonthBoundary])',
       caseSensitive: false,
     ),
     (m) => _date(_year(m[3]!), _month(m[2]!), int.parse(m[1]!)),
   );
+  // Year-first named dates are unambiguous when a four-digit year and literal
+  // month word are both present. Supporting this common import/OCR order costs
+  // no fuzzy guessing and remains inside the same calendar validator.
   add(
     RegExp(
-      '(?<![A-Za-z0-9])($monthNames)$sep(20\\d{2}|\\d{2})(?!\\d)',
+      '(?<![$namedMonthBoundary])(20\\d{2})$sep($monthNames)$sep(\\d{1,2})(?![$namedMonthBoundary])',
+      caseSensitive: false,
+    ),
+    (m) => _date(int.parse(m[1]!), _month(m[2]!), int.parse(m[3]!)),
+  );
+  add(
+    RegExp(
+      '(?<![$namedMonthBoundary])($monthNames)$sep(20\\d{2}|\\d{2})(?![$namedMonthBoundary])',
       caseSensitive: false,
     ),
     (m) => _date(_year(m[2]!), _month(m[1]!), null),
+  );
+  add(
+    RegExp(
+      '(?<![$namedMonthBoundary])(20\\d{2})$sep($monthNames)(?![$namedMonthBoundary])',
+      caseSensitive: false,
+    ),
+    (m) => _date(int.parse(m[1]!), _month(m[2]!), null),
   );
   add(
     RegExp('(?<!\\d)(20\\d{2})$sep(\\d{1,2})(?!\\d)'),
@@ -150,7 +175,7 @@ List<MedicineDateMatch> extractMedicineDateMatches(
     // so an unlabeled singleton cannot become an authoritative EXP/MFG fact.
     add(
       RegExp(
-        '(?<![A-Za-z0-9])(\\d{1,2})($monthNames)(20\\d{2}|\\d{2})(?![A-Za-z0-9])',
+        '(?<![$namedMonthBoundary])(\\d{1,2})($monthNames)(20\\d{2}|\\d{2})(?![$namedMonthBoundary])',
         caseSensitive: false,
       ),
       (m) => _date(_year(m[3]!), _month(m[2]!), int.parse(m[1]!)),
@@ -158,7 +183,7 @@ List<MedicineDateMatch> extractMedicineDateMatches(
     );
     add(
       RegExp(
-        '(?<![A-Za-z0-9])($monthNames)(20\\d{2}|\\d{2})(?![A-Za-z0-9])',
+        '(?<![$namedMonthBoundary])($monthNames)(20\\d{2}|\\d{2})(?![$namedMonthBoundary])',
         caseSensitive: false,
       ),
       (m) => _date(_year(m[2]!), _month(m[1]!), null),
@@ -254,22 +279,45 @@ ParsedMedicineDate? _date(int year, int month, int? day) {
 int _year(String value) =>
     value.length == 2 ? 2000 + int.parse(value) : int.parse(value);
 
-int _month(String value) =>
-    const {
-      'jan': 1,
-      'feb': 2,
-      'mar': 3,
-      'apr': 4,
-      'may': 5,
-      'jun': 6,
-      'jul': 7,
-      'aug': 8,
-      'sep': 9,
-      'oct': 10,
-      'nov': 11,
-      'dec': 12,
-    }[value.substring(0, 3).toLowerCase()] ??
-    0;
+int _month(String value) {
+  final key = value.trim().toLowerCase();
+  final hindi = const <String, int>{
+    'जनवरी': 1,
+    'फरवरी': 2,
+    'फ़रवरी': 2,
+    'फ़रवरी': 2,
+    'मार्च': 3,
+    'अप्रैल': 4,
+    'मई': 5,
+    'जून': 6,
+    'जुलाई': 7,
+    'अगस्त': 8,
+    'सितंबर': 9,
+    'सितम्बर': 9,
+    'अक्टूबर': 10,
+    'नवंबर': 11,
+    'नवम्बर': 11,
+    'दिसंबर': 12,
+    'दिसम्बर': 12,
+  }[key];
+  if (hindi != null) return hindi;
+  if (key.length < 3) return 0;
+  return const {
+        'jan': 1,
+        'feb': 2,
+        'mar': 3,
+        'apr': 4,
+        'may': 5,
+        'jun': 6,
+        'jul': 7,
+        'aug': 8,
+        'sep': 9,
+        'oct': 10,
+        'nov': 11,
+        'dec': 12,
+      }[key.substring(0, 3)] ??
+      0;
+}
 
 String _repairNumericOcr(String raw) {
   // Replace directional/invisible OCR artifacts one-for-one so date offsets
