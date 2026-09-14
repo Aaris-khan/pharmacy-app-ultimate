@@ -21,8 +21,9 @@ class OfflineRecognitionMemoryService {
   static final OfflineRecognitionMemoryService instance =
       OfflineRecognitionMemoryService._();
 
-  static const _schemaVersion = 1;
+  static const _schemaVersion = 2;
   static const _maxRows = 16000;
+  static const _maxFeedbackRows = 32000;
   static const _saltAliasPrefix = 'salt:';
   Database? _database;
   Future<void>? _initializing;
@@ -36,6 +37,20 @@ class OfflineRecognitionMemoryService {
   Future<void> _open() async {
     if (_database != null) return;
     final support = await getApplicationSupportDirectory();
+
+    Future<void> createFeedbackReceipts(Database db) async {
+      await db.execute('''
+CREATE TABLE IF NOT EXISTS recognition_feedback_receipts (
+  feedback_key TEXT PRIMARY KEY,
+  last_confirmed INTEGER NOT NULL
+)
+''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_recognition_feedback_recent '
+        'ON recognition_feedback_receipts(last_confirmed)',
+      );
+    }
+
     _database = await openDatabase(
       '${support.path}/aaris_offline_recognition_memory.db',
       version: _schemaVersion,
@@ -56,6 +71,10 @@ CREATE TABLE recognition_aliases (
         await db.execute(
           'CREATE INDEX idx_recognition_recent ON recognition_aliases(last_confirmed)',
         );
+        await createFeedbackReceipts(db);
+      },
+      onUpgrade: (db, oldVersion, _) async {
+        if (oldVersion < 2) await createFeedbackReceipts(db);
       },
     );
   }
@@ -91,6 +110,28 @@ CREATE TABLE recognition_aliases (
       await db.transaction((txn) async {
         Future<void> remember(String alias, String normalized) async {
           if (alias.trim().isEmpty || normalized.isEmpty) return;
+          final feedbackKey = _recognitionFeedbackKey(
+            confirmed: confirmed,
+            identityKey: identityKey,
+            normalizedAlias: normalized,
+          );
+          if (feedbackKey.isEmpty) return;
+
+          // The inventory commit is authoritative and can be reached from more
+          // than one review surface. A retry/double callback for the exact same
+          // persisted medicine revision must therefore be a no-op here rather
+          // than artificially increasing historical support.
+          final duplicate = await txn.rawQuery(
+            'SELECT 1 FROM recognition_feedback_receipts '
+            'WHERE feedback_key = ? LIMIT 1',
+            <Object?>[feedbackKey],
+          );
+          if (duplicate.isNotEmpty) return;
+          await txn.rawInsert(
+            '''INSERT INTO recognition_feedback_receipts
+               (feedback_key, last_confirmed) VALUES (?, ?)''',
+            <Object?>[feedbackKey, now],
+          );
           await txn.rawInsert(
             '''INSERT INTO recognition_aliases
                (identity_key, alias, normalized_alias, support, last_confirmed)
@@ -129,6 +170,24 @@ CREATE TABLE recognition_aliases (
                  LIMIT ?
                )''',
             <Object?>[overflow],
+          );
+        }
+
+        final feedbackCountRows = await txn.rawQuery(
+          'SELECT COUNT(*) AS count FROM recognition_feedback_receipts',
+        );
+        final feedbackCount = feedbackCountRows.isEmpty
+            ? 0
+            : (feedbackCountRows.first['count'] as num?)?.toInt() ?? 0;
+        final feedbackOverflow = max(0, feedbackCount - _maxFeedbackRows);
+        if (feedbackOverflow > 0) {
+          await txn.rawDelete(
+            '''DELETE FROM recognition_feedback_receipts WHERE rowid IN (
+                 SELECT rowid FROM recognition_feedback_receipts
+                 ORDER BY last_confirmed ASC
+                 LIMIT ?
+               )''',
+            <Object?>[feedbackOverflow],
           );
         }
       });
@@ -393,6 +452,24 @@ String recognitionIdentityKey({
   ].map(searchText).toList(growable: false);
   if (parts.every((value) => value.isEmpty)) return '';
   return sha256.convert(parts.join('|').codeUnits).toString();
+}
+
+String _recognitionFeedbackKey({
+  required Medicine confirmed,
+  required String identityKey,
+  required String normalizedAlias,
+}) {
+  final recordId = confirmed.id.trim();
+  if (recordId.isEmpty || identityKey.isEmpty || normalizedAlias.isEmpty) {
+    return '';
+  }
+  final payload = <String>[
+    recordId,
+    confirmed.revision.toString(),
+    identityKey,
+    normalizedAlias,
+  ].join('|');
+  return sha256.convert(payload.codeUnits).toString();
 }
 
 /// Pure compatibility policy used before historical adaptive-memory arbitration.
