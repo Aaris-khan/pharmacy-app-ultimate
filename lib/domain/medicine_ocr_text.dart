@@ -312,6 +312,11 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]} ',
   );
   result = result.replaceAllMapped(_medicineOcrGluedTraceabilityLabel, (match) {
+    // A token such as LOT100 can itself be the alphanumeric value of an already
+    // explicit Batch/Lot role. Do not reinterpret an owned value as a new role.
+    if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+      return match[0]!;
+    }
     final qualifier = match[2];
     return qualifier == null ? '${match[1]} ' : '${match[1]} NO ';
   });
