@@ -8,6 +8,10 @@ MedicineDateResolution inferMedicineDateIntelligence({
   double existingMfgConfidence = 0,
   double existingExpiryConfidence = 0,
 }) {
+  final sourceFrames = selectOfflineEvidenceFrames(
+    frames,
+    maxFrames: 16,
+  ).toList(growable: false);
   final evidence = <MedicineDateEvidence>[];
   final grouped = <String, MedicineDateEvidence>{};
   final today = DateTime.utc(
@@ -57,9 +61,36 @@ MedicineDateResolution inferMedicineDateIntelligence({
     );
   }
 
-  final graph = buildOfflineEvidenceGraph(frames, maxFrames: 16);
+  final spatial = inferSpatialTraceability(sourceFrames);
+  void rememberSpatial(
+    SpatialTraceabilityField? hint,
+    MedicineDateRole role,
+  ) {
+    if (hint == null ||
+        hint.conflicted ||
+        hint.value.trim().isEmpty ||
+        hint.confidence < .80) {
+      return;
+    }
+    final parsed = parseMedicineDateText(hint.value);
+    if (parsed == null) return;
+    remember(
+      MedicineDateEvidence(
+        date: parsed,
+        role: role,
+        confidence: hint.confidence.clamp(.80, .99).toDouble(),
+        support: max(1, hint.support),
+        explicitLabel: true,
+      ),
+    );
+  }
+
+  rememberSpatial(spatial.mfg, MedicineDateRole.manufacturing);
+  rememberSpatial(spatial.expiry, MedicineDateRole.expiry);
+
+  final graph = buildOfflineEvidenceGraph(sourceFrames, maxFrames: 16);
   final independentFrames = graph.groups.isEmpty
-      ? frames.take(16)
+      ? sourceFrames
       : graph.groups.map((group) => group.representative);
   for (final frame in independentFrames) {
     final quality = frame.quality.clamp(0, 1).toDouble();

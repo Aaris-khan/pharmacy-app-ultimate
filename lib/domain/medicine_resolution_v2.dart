@@ -241,13 +241,32 @@ Map<String, Object?> understandMedicineEvidenceV2Message(
 List<MedicineFrameEvidence> _normalizeResolverEvidence(
   Iterable<MedicineFrameEvidence> source,
 ) {
+  String normalizeLayoutLine(String raw) {
+    final gaps = RegExp(r'\s{4,}').allMatches(raw).toList(growable: false);
+    if (gaps.isEmpty) return normalizeMedicineOcrLine(raw);
+    final output = StringBuffer();
+    var cursor = 0;
+    for (final gap in gaps) {
+      final segment = normalizeMedicineOcrLine(
+        raw.substring(cursor, gap.start),
+      );
+      if (segment.isNotEmpty) output.write(segment);
+      final width = max(4, gap.end - gap.start);
+      output.write(List<String>.filled(width, ' ').join());
+      cursor = gap.end;
+    }
+    final tail = normalizeMedicineOcrLine(raw.substring(cursor));
+    if (tail.isNotEmpty) output.write(tail);
+    return output.toString().trim();
+  }
+
   final result = <MedicineFrameEvidence>[];
   for (final frame in source.take(maxMedicineEvidenceFrames)) {
     final normalizedLayout = <MedicineTextLineEvidence>[];
     var layoutChanged = false;
     var retainedLayout = 0;
     for (final line in frame.layoutLines.take(240)) {
-      var clean = normalizeMedicineOcrLine(line.text);
+      var clean = normalizeLayoutLine(line.text);
       if (clean.length > 300) clean = clean.substring(0, 300);
       if (clean.isEmpty) {
         layoutChanged = true;
@@ -2008,13 +2027,34 @@ MedicineScanDraft _applySpatialTraceability(
         ? ''
         : _fieldIdentity(key, current.value);
     final hintIdentity = _fieldIdentity(key, hint.value);
+    final oppositeHint = key == 'mfg'
+        ? hints.expiry
+        : key == 'expiry'
+        ? hints.mfg
+        : null;
+    final oppositeIdentity = oppositeHint == null
+        ? ''
+        : _fieldIdentity(key, oppositeHint.value);
+    final crossRoleAlias =
+        (key == 'mfg' || key == 'expiry') &&
+        !hint.conflicted &&
+        oppositeHint != null &&
+        !oppositeHint.conflicted &&
+        current != null &&
+        !current.isEmpty &&
+        currentIdentity.isNotEmpty &&
+        hintIdentity.isNotEmpty &&
+        oppositeIdentity.isNotEmpty &&
+        currentIdentity == oppositeIdentity &&
+        currentIdentity != hintIdentity;
     final strongConflict =
         current != null &&
         !current.isEmpty &&
         current.confidence >= .90 &&
         currentIdentity.isNotEmpty &&
         hintIdentity.isNotEmpty &&
-        currentIdentity != hintIdentity;
+        currentIdentity != hintIdentity &&
+        !crossRoleAlias;
     if (strongConflict) {
       fields[key] = ExtractedMedicineField(
         value: current.value,
@@ -2035,8 +2075,18 @@ MedicineScanDraft _applySpatialTraceability(
       );
       return;
     }
+    final spatialDateCorrection =
+        (key == 'mfg' || key == 'expiry') &&
+        current != null &&
+        !current.isEmpty &&
+        current.confidence < .90 &&
+        currentIdentity.isNotEmpty &&
+        hintIdentity.isNotEmpty &&
+        currentIdentity != hintIdentity;
     if (current == null ||
         current.isEmpty ||
+        crossRoleAlias ||
+        spatialDateCorrection ||
         hint.confidence > current.confidence + .025) {
       fields[key] = ExtractedMedicineField(
         value: hint.value,

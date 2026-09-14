@@ -3,6 +3,7 @@ import 'dart:math';
 import 'medicine_date_parser.dart';
 import 'medicine_understanding.dart';
 import 'offline_evidence_graph.dart';
+import 'spatial_traceability.dart';
 
 export 'medicine_date_parser.dart'
     show ParsedMedicineDate, parseMedicineDateText;

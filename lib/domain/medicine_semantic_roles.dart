@@ -825,7 +825,7 @@ String _stripPresentation(String raw) {
   value = value.replaceAll(_pharmacopoeiaHint, ' ');
   value = value.replaceAll(
     RegExp(
-      r'\b(?:tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?)\b',
+      r'\b(?:oral\s+(?:suspension|solution)|tablets?|capsules?|syrup|suspension|solution|injection|cream|ointment|gel|lotion|drops?|spray|inhaler|powder|sachets?)\b',
       caseSensitive: false,
     ),
     ' ',

@@ -38,7 +38,7 @@ class MedicineTextLineEvidence {
     }
 
     final rawText = map['text'];
-    final text = rawText is String ? _cleanLine(rawText) : '';
+    final text = rawText is String ? _cleanLayoutLine(rawText) : '';
     return MedicineTextLineEvidence(
       text: text.length <= 300 ? text : text.substring(0, 300),
       left: finiteNumber('left'),
@@ -2165,6 +2165,15 @@ final _compositionStop = RegExp(
   caseSensitive: false,
 );
 
+String _cleanLayoutLine(String value) => value
+    .replaceAll(RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F]'), ' ')
+    .replaceAll(
+      RegExp(r'[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]'),
+      ' ',
+    )
+    .replaceAll(RegExp(r'[\t\r\n]+'), ' ')
+    .trim();
+
 String _cleanLine(String value) => value
     .replaceAll(RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F]'), ' ')
     .replaceAll(
@@ -2224,11 +2233,14 @@ _ParsedDate? _dateNearLabel(
         _compositionStop.hasMatch(normalized)) {
       break;
     }
-    final value = parseMedicineDateText(next)?.value;
-    if (value != null) {
-      final base = nextIndex == index + 1 ? .89 : .84;
-      return _ParsedDate(value, value.length == 7 ? base : base + .02);
-    }
+    final adjacentMatches = extractMedicineDateMatches(
+      next,
+      allowCompact: true,
+    );
+    if (adjacentMatches.length != 1) continue;
+    final value = adjacentMatches.single.date.value;
+    final base = nextIndex == index + 1 ? .89 : .84;
+    return _ParsedDate(value, value.length == 7 ? base : base + .02);
   }
   return null;
 }
@@ -2289,6 +2301,7 @@ List<String> _strengths(String line) {
           ),
           (unit) => ' ${unit[1]!.toLowerCase()}',
         )
+        .toLowerCase()
         .trim();
     if (!values.map(_strengthKey).contains(_strengthKey(value))) {
       values.add(value);
