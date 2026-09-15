@@ -21,7 +21,8 @@ class AiConfiguration {
 
   /// null preserves the legacy default: JSON mode for Gemini, prompt-only for
   /// compatible servers. This is configured capability, never inferred from a
-  /// model's brand/name. Every result still passes the same domain validator.
+  /// model's brand/name. Conversational requests opt out; structured scan
+  /// requests retain this preference and their evidence validator.
   final bool? jsonModeEnabled;
   final int responseTimeoutSeconds;
 
@@ -31,6 +32,10 @@ class AiConfiguration {
 
   bool get useJsonMode =>
       jsonModeEnabled ?? protocol == AiProviderProtocol.gemini;
+
+  /// Conversation can return prose or an action envelope. Forcing JSON at the
+  /// provider overrides that choice. Do not change the saved scan preference.
+  AiConfiguration get forConversation => copyWith(jsonModeEnabled: false);
 
   Duration get responseTimeout {
     if (responseTimeoutSeconds < 10 || responseTimeoutSeconds > 180) {

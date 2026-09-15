@@ -88,7 +88,10 @@ class _ClosingClient extends MockClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final config in [_compatible, _gemini]) {
+  for (final config in [
+    _compatible.copyWith(jsonModeEnabled: true),
+    _gemini,
+  ]) {
     test(
       '${config.provider} chat sends to the explicit endpoint without starting local inference',
       () async {
@@ -109,15 +112,30 @@ void main() {
               expect(request.url.path, endsWith(':streamGenerateContent'));
             }
             final body = jsonDecode(request.body) as Map;
+            // A stored structured-scan preference must not force chat into JSON.
+            expect(config.useJsonMode, isTrue);
+            expect(body.containsKey('response_format'), isFalse);
+            expect(
+              (body['generationConfig'] as Map?)?.containsKey(
+                    'responseMimeType',
+                  ) ??
+                  false,
+              isFalse,
+            );
+            final system = config.provider == 'Gemini'
+                ? body['system_instruction']['parts'][0]['text'] as String
+                : body['messages'][0]['content'] as String;
+            expect(system, contains('CONVERSATION IS THE DEFAULT'));
+            expect(system, contains('general knowledge'));
             final input = config.provider == 'Gemini'
                 ? body['contents'][0]['parts'][0]['text'] as String
                 : body['messages'][1]['content'] as String;
             expect(input, contains('OWNER REQUEST:\nHello'));
             expect(input, isNot(contains('Owner: Hello')));
-            return _answer(config, '{"reply":"hello","actions":[]}');
+            return _answer(config, 'Hello! How can I help?');
           }),
         );
-        expect(await _ask(service, config), contains('hello'));
+        expect(await _ask(service, config), 'Hello! How can I help?');
         expect(calls, 1);
       },
     );
@@ -137,6 +155,15 @@ void main() {
           );
           expect(request.body, contains('Paracetamol'));
           expect(request.body, isNot(contains('INVENTORY FACTS')));
+          final body = jsonDecode(request.body) as Map;
+          if (config.provider == 'Gemini') {
+            expect(
+              body['generationConfig']['responseMimeType'],
+              'application/json',
+            );
+          } else {
+            expect(body['response_format']['type'], 'json_object');
+          }
           return _answer(config, '{"fields":{},"ingredients":[]}');
         }),
       );

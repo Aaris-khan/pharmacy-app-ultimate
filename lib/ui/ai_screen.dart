@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../domain/ai_conversation.dart';
 import '../domain/ai_protocol.dart';
 import '../domain/local_ai_protocol.dart';
 import '../domain/medicine.dart';
@@ -48,6 +49,7 @@ class _AiScreenState extends State<AiScreen> {
   final _scroll = ScrollController();
 
   final List<_AiChatMessage> _messages = [];
+  bool _aiConversationActive = false;
   int _localHistoryStart = 0;
   String _localSessionNotice = '';
 
@@ -185,6 +187,7 @@ class _AiScreenState extends State<AiScreen> {
     if (!mounted || generation != _generation) return;
     setState(() {
       _messages.add(_AiChatMessage(clean, false));
+      _aiConversationActive = true;
       _streamingText = '';
       _journey = _AiJourneyState.idle;
     });
@@ -196,6 +199,7 @@ class _AiScreenState extends State<AiScreen> {
     if (!mounted || generation != _generation || clean.isEmpty) return;
     setState(() {
       _messages.add(_AiChatMessage(clean, false));
+      _aiConversationActive = true;
       _streamingText = '';
       _journey = _AiJourneyState.idle;
     });
@@ -250,7 +254,7 @@ class _AiScreenState extends State<AiScreen> {
         _externalReady = true;
         _messages.add(
           const _AiChatMessage(
-            'Pharmacy TXT is ready and the AI prompt is copied. You can send it to an AI now, or save the TXT to Files/Drive and attach it manually later. When the AI finishes, copy its final pharmacy JSON and tap Paste & Review here.',
+            'Pharmacy TXT is ready and the AI prompt is copied. Attach both to your AI and chat normally about medicines, expiry or other questions. When you ask it to add or update stock, copy the change JSON it prepares and tap Paste & Review here.',
             false,
           ),
         );
@@ -287,7 +291,7 @@ class _AiScreenState extends State<AiScreen> {
         return null;
       }
       setState(() {
-        _plan = plan;
+        _plan = plan.changes.isEmpty ? null : plan;
         _selected = {
           for (var i = 0; i < plan.changes.length; i++)
             if (plan.changes[i].possibleDuplicates.isEmpty &&
@@ -372,7 +376,10 @@ class _AiScreenState extends State<AiScreen> {
     _scrollToEnd();
 
     try {
-      final recentStart = _messages.length > 6 ? _messages.length - 6 : 0;
+      final historyLimit = _configuration.localBrainEnabled ? 6 : 16;
+      final recentStart = _messages.length > historyLimit
+          ? _messages.length - historyLimit
+          : 0;
       final historyStart =
           _configuration.localBrainEnabled && _localHistoryStart > recentStart
           ? _localHistoryStart
@@ -419,27 +426,23 @@ class _AiScreenState extends State<AiScreen> {
           if (!mounted || generation != _generation || delta.isEmpty) return;
           rawStream.write(delta);
           final snapshot = rawStream.toString();
-          final lead = snapshot.trimLeft();
-          if (lead.isEmpty) return;
-          structuredStream =
-              structuredStream ||
-              lead.startsWith('{') ||
-              lead.startsWith('```') ||
-              (lead.contains('aaris.pharmacy.v1') && lead.contains('actions'));
+          final visible = aiConversationPreview(snapshot);
+          structuredStream = structuredStream || visible != snapshot;
           setState(() {
             _journey = _AiJourneyState.streaming;
-            _streamingText = structuredStream ? '' : snapshot;
+            _streamingText = visible;
           });
           _scrollToEnd();
         },
       );
       if (!mounted || generation != _generation) return;
 
-      if (!_looksLikeAiResponse(result)) {
+      final response = AiConversationResponse.parse(result);
+      if (response.planJson == null) {
         if (!structuredStream && rawStream.isNotEmpty) {
-          _finishLiveAssistantReply(result, generation);
+          _finishLiveAssistantReply(response.reply, generation);
         } else {
-          await _streamAssistantReply(result, generation);
+          await _streamAssistantReply(response.reply, generation);
         }
         return;
       }
@@ -448,7 +451,7 @@ class _AiScreenState extends State<AiScreen> {
         _journey = _AiJourneyState.thinking;
         _streamingText = '';
       });
-      _input.text = result;
+      _input.text = response.planJson!;
       final plan = await _review(announce: false);
       if (!mounted || generation != _generation) return;
       if (plan == null) {
@@ -484,26 +487,6 @@ class _AiScreenState extends State<AiScreen> {
     }
   }
 
-  bool _looksLikeAiResponse(String text) {
-    var clean = text.trim();
-    if (clean.startsWith('```')) {
-      final firstLine = clean.indexOf('\n');
-      final end = clean.lastIndexOf('```');
-      if (firstLine < 0 || end <= firstLine) return false;
-      final language = clean.substring(3, firstLine).trim().toLowerCase();
-      if (language.isNotEmpty &&
-          language != 'json' &&
-          !language.endsWith('+json')) {
-        return false;
-      }
-      clean = clean.substring(firstLine + 1, end).trim();
-    }
-    return clean.startsWith('{') &&
-        clean.contains('"schema"') &&
-        clean.contains(pharmacySchema) &&
-        (clean.contains('"actions"') || clean.contains('"operations"'));
-  }
-
   Future<void> _sendComposer() async {
     if (_localCommanding ||
         _preparingRequest ||
@@ -515,18 +498,17 @@ class _AiScreenState extends State<AiScreen> {
     final text = _request.text.trim();
     if (text.isEmpty) return;
 
-    if (_looksLikeAiResponse(text)) {
+    if ((text.startsWith('{') || text.contains('```')) &&
+        containsAiConversationJson(text)) {
       setState(() {
-        _input.text = text;
         _request.clear();
-        _externalReady = false;
-        _messages.add(
-          const _AiChatMessage('External AI response pasted for review.', true),
-        );
-        _error = '';
       });
-      _scrollToEnd();
-      await _review();
+      await _receiveExternalResponse(text);
+      return;
+    }
+
+    if (_aiConversationActive && _hasAiRoute && isAiConversationFollowUp(text)) {
+      await _ask();
       return;
     }
 
@@ -551,6 +533,7 @@ class _AiScreenState extends State<AiScreen> {
       if (localReply != null) {
         final reply = localReply.trim();
         setState(() {
+          _aiConversationActive = false;
           _request.clear();
           _messages.add(_AiChatMessage(text, true));
           if (reply.isNotEmpty) _messages.add(_AiChatMessage(reply, false));
@@ -580,6 +563,7 @@ class _AiScreenState extends State<AiScreen> {
     try {
       final reply = await handler(action);
       if (!mounted || reply == null || reply.trim().isEmpty) return;
+      _aiConversationActive = false;
       _appendMessage(reply.trim(), false);
     } catch (error) {
       if (mounted) {
@@ -597,20 +581,38 @@ class _AiScreenState extends State<AiScreen> {
     if (!mounted) return;
     if (raw.isEmpty) {
       setState(
-        () => _error = 'Clipboard is empty. Copy the final AI JSON first.',
+        () => _error = 'Clipboard is empty. Ask the AI for your stock changes, then copy its JSON.',
       );
       return;
     }
-    setState(() {
-      _input.text = raw;
-      _externalReady = false;
-      _messages.add(
-        const _AiChatMessage('External AI response pasted for review.', true),
-      );
-      _error = '';
-    });
-    _scrollToEnd();
-    await _review();
+    await _receiveExternalResponse(raw);
+  }
+
+  Future<void> _receiveExternalResponse(String raw) async {
+    try {
+      final response = AiConversationResponse.parse(raw);
+      setState(() {
+        _plan = null;
+        _selected = {};
+        _input.text = response.planJson ?? '';
+        _error = '';
+        if (response.planJson != null) _externalReady = false;
+      });
+      if (response.planJson == null) {
+        _appendMessage(response.reply, false);
+        return;
+      }
+      _appendMessage('External AI response pasted for review.', true);
+      await _review();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _plan = null;
+          _selected = {};
+          _error = _friendlyAiError(error);
+        });
+      }
+    }
   }
 
   Future<void> _apply() async {
@@ -1315,12 +1317,12 @@ class _ExternalAiReadyCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Waiting for Other AI',
+                'Chat with your other AI',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900),
               ),
               SizedBox(height: 2),
               Text(
-                'Copy its final JSON, then review here.',
+                'Ask for stock changes, then paste its JSON.',
                 style: TextStyle(color: muted, fontSize: 10.5),
               ),
             ],
@@ -1799,7 +1801,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                'Share TXT · bring JSON back for review',
+                                'Share TXT · chat · review requested changes',
                                 style: TextStyle(color: muted, fontSize: 11.5),
                               ),
                             ],

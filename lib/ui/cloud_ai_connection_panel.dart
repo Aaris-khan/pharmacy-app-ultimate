@@ -430,7 +430,7 @@ class _CloudAiConnectionPanelState extends State<CloudAiConnectionPanel> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Provider supports JSON mode'),
                   subtitle: const Text(
-                    'Turn off if this model rejects JSON mode.',
+                    'For structured scans. Chat replies normally. Turn off if this model rejects JSON mode.',
                   ),
                   value: _configuration.useJsonMode,
                   onChanged: editable
