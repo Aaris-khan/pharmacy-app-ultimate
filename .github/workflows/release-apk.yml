@@ -1,7 +1,7 @@
 name: Aaris Pharmacy Release APK
 # Release builder: committed repository source is authoritative. CI never rewrites
 # production Dart code before analysis, tests, or APK generation.
-# Build refresh requested 2026-09-15 for final APK verification.
+# Release verification refreshed after Local AI/scanner static-gate cleanup.
 
 on:
   push:
