@@ -15,8 +15,10 @@ class LocalAiRuntime {
   LocalAiRuntime({
     LlamaEngine engine = const LibLlamaCpp(),
     Duration generationWallClockLimit = const Duration(minutes: 2),
+    Duration terminalErrorDrainBudget = const Duration(seconds: 15),
   }) : _engine = engine,
-       _generationWallClockLimit = generationWallClockLimit {
+       _generationWallClockLimit = generationWallClockLimit,
+       _terminalErrorDrainBudget = terminalErrorDrainBudget {
     if (generationWallClockLimit <= Duration.zero) {
       throw ArgumentError.value(
         generationWallClockLimit,
@@ -24,15 +26,22 @@ class LocalAiRuntime {
         'Must be positive.',
       );
     }
+    if (terminalErrorDrainBudget <= Duration.zero) {
+      throw ArgumentError.value(
+        terminalErrorDrainBudget,
+        'terminalErrorDrainBudget',
+        'Must be positive.',
+      );
+    }
   }
 
-  static const _terminalErrorDrainBudget = Duration(seconds: 15);
   static const _maxVisibleResponseCharacters = 32000;
   static const _maxRawResponseCharacters = 128000;
   static const _maxContextTokens = 32768;
 
   final LlamaEngine _engine;
   final Duration _generationWallClockLimit;
+  final Duration _terminalErrorDrainBudget;
   StreamController<LlamaCommand>? _commands;
   StreamSubscription<LlamaResponse>? _subscription;
   Completer<String>? _pending;
@@ -79,10 +88,12 @@ class LocalAiRuntime {
               // budget for a missing Done only creates a false "connection stuck"
               // state. Give the native actor a short bounded drain window, then retire
               // the transport through the same epoch-safe recovery path.
-              _commandError ??=
-                  LocalContextBudgetFailure.fromMessage(response.message) ??
-                  StateError(response.message);
-              _armStallWatchdog(epoch, _terminalErrorDrainBudget);
+              if (_commandError == null) {
+                _commandError =
+                    LocalContextBudgetFailure.fromMessage(response.message) ??
+                    StateError(response.message);
+                _armStallWatchdog(epoch, _terminalErrorDrainBudget);
+              }
             } else if (response is LlamaTokenResponse) {
               _touchStallWatchdog(epoch);
               // Once native inference has failed, trailing tokens belong to the
@@ -117,10 +128,12 @@ class LocalAiRuntime {
                     : null;
               }
             } else if (response is LlamaToolCallResponse) {
-              _commandError ??= StateError(
-                'Return the app JSON contract, not native function calls.',
-              );
-              _armStallWatchdog(epoch, _terminalErrorDrainBudget);
+              if (_commandError == null) {
+                _commandError = StateError(
+                  'Return the app JSON contract, not native function calls.',
+                );
+                _armStallWatchdog(epoch, _terminalErrorDrainBudget);
+              }
             } else if (response is LlamaDoneResponse) {
               _complete();
             }
@@ -188,9 +201,10 @@ class LocalAiRuntime {
         epoch,
         commands,
         subscription,
-        StateError(
-          'Local runtime transport stopped making progress. The stalled transport was retired safely and can be retried.',
-        ),
+        _commandError ??
+            StateError(
+              'Local runtime transport stopped making progress. The stalled transport was retired safely and can be retried.',
+            ),
         StackTrace.current,
       );
     });
@@ -219,6 +233,9 @@ class LocalAiRuntime {
   void _touchStallWatchdog(int epoch) {
     final budget = _activeStallBudget;
     if (budget == null ||
+        // After an error, this timer is a fixed drain deadline. Trailing
+        // tokens/state events must not keep a failed native actor alive.
+        _commandError != null ||
         _pending == null ||
         _closed ||
         epoch != _transportEpoch) {
@@ -406,16 +423,15 @@ class LocalAiRuntime {
       throw StateError('Local runtime is unavailable or still processing.');
     }
 
-    // Stream callbacks retire failed transforms asynchronously. Serialize that
-    // teardown with the next command so a fresh llama.cpp actor can never race
-    // a previous subscription/controller that is still closing.
-    await _transportCleanup;
-    if (_closed || busy || (_closing && !disposing)) {
-      throw StateError('Local runtime is unavailable or still processing.');
-    }
-
+    // Reserve the lease before waiting for a retiring actor. Stop must also
+    // cancel a command queued behind teardown, before it loads new weights.
     final pending = Completer<String>();
     _pending = pending;
+    // Cancellation can complete this reservation while teardown is pending.
+    // Attach an observer now; the original future still propagates its error.
+    unawaited(
+      pending.future.then<void>((_) {}, onError: (Object _, StackTrace __) {}),
+    );
     _text.clear();
     _reasoningFilter.reset();
     _rawResponseCharacters = 0;
@@ -424,6 +440,11 @@ class LocalAiRuntime {
     _loading = command is LlamaLoadModelCommand;
 
     try {
+      await _transportCleanup;
+      if (!identical(_pending, pending)) return pending.future;
+      if (_closed || (_closing && !disposing)) {
+        throw StateError('Local runtime is unavailable or still processing.');
+      }
       _start();
       final commands = _commands;
       final subscription = _subscription;
@@ -436,15 +457,7 @@ class LocalAiRuntime {
       }
       commands.add(command);
     } catch (error, stack) {
-      _clearStallWatchdog();
-      _clearGenerationDeadline();
-      _pending = null;
-      _loading = false;
-      _commandError = null;
-      _onToken = null;
-      _rawResponseCharacters = 0;
-      _reasoningFilter.reset();
-      pending.completeError(error, stack);
+      if (identical(_pending, pending)) _fail(error, stack);
     }
     return pending.future;
   }

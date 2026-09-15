@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import '../domain/ai_conversation.dart';
@@ -66,6 +67,9 @@ class _AiScreenState extends State<AiScreen> {
   int _generation = 0;
   int _configurationGeneration = 0;
   bool _connectionsOpen = false;
+  Timer? _streamPreviewTimer;
+  bool _scrollScheduled = false;
+  bool _followResponse = true;
 
   bool get _cancellableRequest =>
       _journey == _AiJourneyState.thinking ||
@@ -106,6 +110,7 @@ class _AiScreenState extends State<AiScreen> {
   @override
   void dispose() {
     ++_generation;
+    _clearStreamPreview();
     _service.cancel();
     if (widget.controller.aiPreparing) widget.controller.cancelAi();
     _input.dispose();
@@ -114,18 +119,22 @@ class _AiScreenState extends State<AiScreen> {
     super.dispose();
   }
 
-  void _scrollToEnd() {
-    void jumpAfterLayout() {
-      if (!mounted || !_scroll.hasClients) return;
+  void _clearStreamPreview() {
+    _streamPreviewTimer?.cancel();
+    _streamPreviewTimer = null;
+  }
+
+  void _scrollToEnd({bool force = false}) {
+    if (force) _followResponse = true;
+    if (!_followResponse || _scrollScheduled) return;
+    _scrollScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
+      if (!mounted || !_scroll.hasClients || !_followResponse) return;
       final target = _scroll.position.maxScrollExtent;
       if ((_scroll.offset - target).abs() > .5) {
         _scroll.jumpTo(target);
       }
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      jumpAfterLayout();
-      WidgetsBinding.instance.addPostFrameCallback((_) => jumpAfterLayout());
     });
   }
 
@@ -133,7 +142,7 @@ class _AiScreenState extends State<AiScreen> {
     final clean = text.trim();
     if (!mounted || clean.isEmpty) return;
     setState(() => _messages.add(_AiChatMessage(clean, user)));
-    _scrollToEnd();
+    _scrollToEnd(force: user);
   }
 
   String _friendlyAiError(Object error) {
@@ -156,42 +165,6 @@ class _AiScreenState extends State<AiScreen> {
     return raw.isEmpty
         ? 'The AI request could not finish. No inventory changes were made.'
         : raw;
-  }
-
-  Future<void> _streamAssistantReply(String text, int generation) async {
-    final clean = text.trim();
-    if (!mounted || generation != _generation || clean.isEmpty) return;
-    final runes = clean.runes.toList(growable: false);
-    var chunkSize = (runes.length / 90).ceil();
-    if (chunkSize < 4) chunkSize = 4;
-    if (chunkSize > 24) chunkSize = 24;
-
-    setState(() {
-      _journey = _AiJourneyState.streaming;
-      _streamingText = '';
-    });
-    _scrollToEnd();
-
-    for (var end = 0; end < runes.length;) {
-      if (!mounted || generation != _generation) return;
-      end += chunkSize;
-      if (end > runes.length) end = runes.length;
-      final visible = String.fromCharCodes(runes.take(end));
-      setState(() => _streamingText = visible);
-      _scrollToEnd();
-      if (end < runes.length) {
-        await Future<void>.delayed(const Duration(milliseconds: 16));
-      }
-    }
-
-    if (!mounted || generation != _generation) return;
-    setState(() {
-      _messages.add(_AiChatMessage(clean, false));
-      _aiConversationActive = true;
-      _streamingText = '';
-      _journey = _AiJourneyState.idle;
-    });
-    _scrollToEnd();
   }
 
   void _finishLiveAssistantReply(String text, int generation) {
@@ -364,7 +337,6 @@ class _AiScreenState extends State<AiScreen> {
     final generation = ++_generation;
     final ownerMessageIndex = _messages.length;
     final rawStream = StringBuffer();
-    var structuredStream = false;
     setState(() {
       _journey = _AiJourneyState.thinking;
       _streamingText = '';
@@ -373,7 +345,7 @@ class _AiScreenState extends State<AiScreen> {
       _messages.add(_AiChatMessage(request, true));
       _request.clear();
     });
-    _scrollToEnd();
+    _scrollToEnd(force: true);
 
     try {
       final historyLimit = _configuration.localBrainEnabled ? 6 : 16;
@@ -415,7 +387,7 @@ class _AiScreenState extends State<AiScreen> {
         onStreamReset: () {
           if (!mounted || generation != _generation) return;
           rawStream.clear();
-          structuredStream = false;
+          _clearStreamPreview();
           setState(() {
             _journey = _AiJourneyState.thinking;
             _streamingText = '';
@@ -425,25 +397,27 @@ class _AiScreenState extends State<AiScreen> {
         onDelta: (delta) {
           if (!mounted || generation != _generation || delta.isEmpty) return;
           rawStream.write(delta);
-          final snapshot = rawStream.toString();
-          final visible = aiConversationPreview(snapshot);
-          structuredStream = structuredStream || visible != snapshot;
-          setState(() {
-            _journey = _AiJourneyState.streaming;
-            _streamingText = visible;
+          // Batch provider/native token bursts into one preview update. Parsing
+          // and rebuilding the conversation for every tiny token causes jank.
+          _streamPreviewTimer ??= Timer(const Duration(milliseconds: 32), () {
+            _streamPreviewTimer = null;
+            if (!mounted || generation != _generation) return;
+            final visible = aiConversationPreview(rawStream.toString());
+            if (_streamingText == visible) return;
+            setState(() {
+              _journey = _AiJourneyState.streaming;
+              _streamingText = visible;
+            });
+            _scrollToEnd();
           });
-          _scrollToEnd();
         },
       );
       if (!mounted || generation != _generation) return;
 
+      _clearStreamPreview();
       final response = AiConversationResponse.parse(result);
       if (response.planJson == null) {
-        if (!structuredStream && rawStream.isNotEmpty) {
-          _finishLiveAssistantReply(response.reply, generation);
-        } else {
-          await _streamAssistantReply(response.reply, generation);
-        }
+        _finishLiveAssistantReply(response.reply, generation);
         return;
       }
 
@@ -467,7 +441,7 @@ class _AiScreenState extends State<AiScreen> {
           : plan.changes.isEmpty
           ? 'Done. No inventory change is needed.'
           : '${plan.changes.length} proposed change${plan.changes.length == 1 ? '' : 's'} are ready below. Review them before saving.';
-      await _streamAssistantReply(reply, generation);
+      _finishLiveAssistantReply(reply, generation);
     } catch (e) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -477,6 +451,7 @@ class _AiScreenState extends State<AiScreen> {
         });
       }
     } finally {
+      if (generation == _generation) _clearStreamPreview();
       if (mounted &&
           generation == _generation &&
           (_journey == _AiJourneyState.thinking ||
@@ -651,6 +626,7 @@ class _AiScreenState extends State<AiScreen> {
   void _cancelRequest() {
     if (!_cancellableRequest) return;
     final cancellationGeneration = ++_generation;
+    _clearStreamPreview();
     final drainingLocal = _service.cancel();
     setState(() {
       _journey = drainingLocal
@@ -978,71 +954,81 @@ class _AiScreenState extends State<AiScreen> {
               ),
             ),
           Expanded(
-            child: ListView(
-              controller: _scroll,
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-              children: [
-                for (final message in _messages)
-                  _AiMessageBubble(message: message),
-                if (_journey == _AiJourneyState.thinking)
-                  _AiThinkingBubble(
-                    detail:
-                        _configuration.localBrainEnabled && _local.hasSelection
-                        ? _local.status
-                        : 'AI route connected · preparing answer',
-                  ),
-                if (_journey == _AiJourneyState.streaming &&
-                    _streamingText.isEmpty)
-                  const _AiThinkingBubble(
-                    detail: 'Receiving and validating streamed response…',
-                  ),
-                if (_journey == _AiJourneyState.streaming &&
-                    _streamingText.isNotEmpty)
-                  _AiMessageBubble(
-                    message: _AiChatMessage(_streamingText, false),
-                  ),
-                if (_journey == _AiJourneyState.stopping)
-                  const _AiThinkingBubble(
-                    detail: 'Stopping local inference safely · next Send unlocks when the native lease is free',
-                  ),
-                if (_error.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
-                    child: Surface(
-                      color: errorSoft,
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.error_outline_rounded,
-                            color: red,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 9),
-                          Expanded(
-                            child: SelectableText(
-                              _error,
-                              style: const TextStyle(color: red, fontSize: 12),
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: (notification) {
+                if (notification.depth == 0 &&
+                    notification.direction != ScrollDirection.idle &&
+                    _scroll.hasClients) {
+                  _followResponse = _scroll.position.extentAfter <= 80;
+                }
+                return false;
+              },
+              child: ListView(
+                controller: _scroll,
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                children: [
+                  for (final message in _messages)
+                    _AiMessageBubble(message: message),
+                  if (_journey == _AiJourneyState.thinking)
+                    _AiThinkingBubble(
+                      detail:
+                          _configuration.localBrainEnabled && _local.hasSelection
+                          ? _local.status
+                          : 'AI route connected · preparing answer',
+                    ),
+                  if (_journey == _AiJourneyState.streaming &&
+                      _streamingText.isEmpty)
+                    const _AiThinkingBubble(
+                      detail: 'Receiving and validating streamed response…',
+                    ),
+                  if (_journey == _AiJourneyState.streaming &&
+                      _streamingText.isNotEmpty)
+                    _AiMessageBubble(
+                      message: _AiChatMessage(_streamingText, false),
+                    ),
+                  if (_journey == _AiJourneyState.stopping)
+                    const _AiThinkingBubble(
+                      detail: 'Stopping local inference safely · next Send unlocks when the native lease is free',
+                    ),
+                  if (_error.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+                      child: Surface(
+                        color: errorSoft,
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.error_outline_rounded,
+                              color: red,
+                              size: 20,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: SelectableText(
+                                _error,
+                                style: const TextStyle(color: red, fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+                  if (_plan != null) _reviewPanel(context),
+                  MedicineIntakePanel(
+                    controller: widget.controller,
+                    onAsk: (evidence) {
+                      _request.text =
+                          'Explain only the captured identity, salt and expiry and check existing stock; do not add stock or give treatment advice. OCR DATA: '
+                          '${evidence.length > 2200 ? evidence.substring(0, 2200) : evidence}';
+                      unawaited(_ask());
+                    },
                   ),
-                if (_plan != null) _reviewPanel(context),
-                MedicineIntakePanel(
-                  controller: widget.controller,
-                  onAsk: (evidence) {
-                    _request.text =
-                        'Explain only the captured identity, salt and expiry and check existing stock; do not add stock or give treatment advice. OCR DATA: '
-                        '${evidence.length > 2200 ? evidence.substring(0, 2200) : evidence}';
-                    unawaited(_ask());
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
           ),
         ],

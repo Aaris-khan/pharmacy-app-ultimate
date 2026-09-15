@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'ai_protocol.dart';
 import 'local_scan_evidence.dart';
 import 'medicine.dart';
+import 'medicine_strength.dart';
 import 'medicine_understanding.dart';
 import 'search.dart';
 import 'tracking.dart';
@@ -434,6 +435,29 @@ double _verifiedScanOverallConfidence(
   return average > fallback ? average.clamp(0, .99).toDouble() : fallback;
 }
 
+final _evidenceWord = RegExp(r'[a-z0-9µμ\u0900-\u097f]');
+
+// A verbatim substring alone is insufficient: "DOLO" in "DOLOMET" or
+// "DOLO-PLUS" is a different product. Locate complete source tokens before
+// granting a quoted field any confidence, including repeated ingredient quotes.
+int _sourceQuoteOffset(String source, String quote, {int from = 0}) {
+  if (quote.isEmpty) return -1;
+  bool wordAt(int index) => index >= 0 && index < source.length &&
+      _evidenceWord.hasMatch(source[index]);
+  for (var start = source.indexOf(quote, from); start >= 0;
+      start = source.indexOf(quote, start + 1)) {
+    final end = start + quote.length;
+    final joinsLeft = _evidenceWord.hasMatch(quote[0]) &&
+        (wordAt(start - 1) ||
+            (start > 0 && source[start - 1] == '-' && wordAt(start - 2)));
+    final joinsRight = _evidenceWord.hasMatch(quote[quote.length - 1]) &&
+        (wordAt(end) ||
+            (end < source.length && source[end] == '-' && wordAt(end + 1)));
+    if (!joinsLeft && !joinsRight) return start;
+  }
+  return -1;
+}
+
 /// A model may label evidence; it may not invent it or turn model confidence
 /// into save authority. Priority identity fields can become preview-ready only
 /// after this validator proves exact bounded-source support and only when the
@@ -490,7 +514,7 @@ MedicineScanDraft validateLocalScan(
         .toLowerCase()
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    if (!sources.any((source) => source.contains(normalizedQuote))) {
+    if (!sources.any((source) => _sourceQuoteOffset(source, normalizedQuote) >= 0)) {
       throw const FormatException(
         'AI cited text that was not in this medicine group.',
       );
@@ -505,6 +529,11 @@ MedicineScanDraft validateLocalScan(
     if (key == 'mfg' || key == 'expiry') continue;
     final cleanValue = searchText(value), cleanQuote = searchText(quote);
     final pairBackedIdentity = hasPairs && (key == 'salt' || key == 'strength');
+    final literalValue = value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (!pairBackedIdentity && normalizedQuote.contains(literalValue) &&
+        _sourceQuoteOffset(normalizedQuote, literalValue) < 0) {
+      throw const FormatException('AI value cuts through a printed product token.');
+    }
     // For combination medicines the canonical field is intentionally a joined
     // projection ("Salt A + Salt B" / "500 mg + 125 mg"). That joined string
     // usually does not occur contiguously on the wrapper because each dose sits
@@ -569,7 +598,7 @@ MedicineScanDraft validateLocalScan(
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
       if (normalizedQuote.isEmpty ||
-          !sources.any((source) => source.contains(normalizedQuote))) {
+          !sources.any((source) => _sourceQuoteOffset(source, normalizedQuote) >= 0)) {
         throw const FormatException(
           'Ingredient quote is not in this medicine.',
         );
@@ -583,12 +612,13 @@ MedicineScanDraft validateLocalScan(
       // Ingredients of a combination must share one uninterrupted OCR span.
       // A missing section may contain another pack, panel or conflicting dose.
       ingredientSource ??= sources.firstWhere(
-        (source) => source.contains(normalizedQuote),
+        (source) => _sourceQuoteOffset(source, normalizedQuote) >= 0,
       );
       final raw = ingredientSource;
-      final sourceStart = raw.indexOf(
+      final sourceStart = _sourceQuoteOffset(
+        raw,
         normalizedQuote,
-        previousEnd < 0 ? 0 : previousEnd,
+        from: previousEnd < 0 ? 0 : previousEnd,
       );
       if (sourceStart < 0)
         throw const FormatException(
@@ -604,6 +634,7 @@ MedicineScanDraft validateLocalScan(
       final printedAmount = strengthPattern.firstMatch(sourceTail);
 
       if (amount == null ||
+          !hasCompleteMedicineStrength(strength) ||
           amount.start > 35 ||
           _compactDose(amount[0]!) != _compactDose(strength) ||
           printedAmount == null ||
@@ -682,9 +713,5 @@ MedicineScanDraft validateLocalScan(
   );
 }
 
-String _compactDose(String value) =>
-    value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
-final _printedDosePattern = RegExp(
-  r'(?<![\d.,])\d+(?:\.\d+)?\s*(?:mcg|mg|gm|g|ml|iu|%)(?:\s*/\s*(?:\d+(?:\.\d+)?\s*)?(?:ml|g))?(?![a-z\d/])',
-  caseSensitive: false,
-);
+String _compactDose(String value) => medicineStrengthKey(value);
+final _printedDosePattern = medicineStrengthPattern;

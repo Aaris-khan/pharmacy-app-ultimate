@@ -84,8 +84,6 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
     title: 'Aaris Pharmacy',
     debugShowCheckedModeBanner: false,
     theme: _appTheme(),
-    builder: (context, child) =>
-        PharmacyBackdrop(child: child ?? const SizedBox.shrink()),
     home: _Shell(controller: widget.controller, autopilot: _autopilot),
   );
 }
@@ -102,6 +100,13 @@ class _ShellState extends State<_Shell> {
   int tab = 0;
   final _visited = <int, Widget>{};
 
+  void _selectTab(int next) {
+    if (next == tab) return;
+    // A retained offstage tab must not keep its text field and keyboard active.
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => tab = next);
+  }
+
   void _openSection(AppSection section) {
     final next = switch (section) {
       AppSection.home => 0,
@@ -110,7 +115,7 @@ class _ShellState extends State<_Shell> {
       AppSection.calculator => 3,
       AppSection.profile => 4,
     };
-    if (next != tab) setState(() => tab = next);
+    _selectTab(next);
   }
 
   void _openAutopilotQueue() {
@@ -147,7 +152,7 @@ class _ShellState extends State<_Shell> {
       () => switch (tab) {
         0 => HomeScreen(
           controller: c,
-          onDatabase: () => setState(() => tab = 1),
+          onDatabase: () => _selectTab(1),
         ),
         1 => SearchScreen(
           controller: c,
@@ -202,7 +207,6 @@ class _ShellState extends State<_Shell> {
         child: GlassPanel(
           tint: Colors.white,
           radius: 24,
-          blurSigma: 10,
           elevation: .65,
           child: AnimatedBuilder(
             animation: widget.autopilot,
@@ -212,7 +216,7 @@ class _ShellState extends State<_Shell> {
               final badgeCount = issues > 99 ? 99 : issues;
               return NavigationBar(
                 selectedIndex: tab,
-                onDestinationSelected: (index) => setState(() => tab = index),
+                onDestinationSelected: _selectTab,
                 destinations: [
                   const NavigationDestination(
                     icon: Icon(Icons.home_outlined),

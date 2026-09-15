@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../domain/date_input.dart';
@@ -22,50 +20,6 @@ const amber = Color(0xFF90600C);
 const successSoft = Color(0xFFEDF7F1);
 const warningSoft = Color(0xFFFFF5E3);
 const errorSoft = Color(0xFFFFEFF1);
-
-class PharmacyBackdrop extends StatelessWidget {
-  const PharmacyBackdrop({super.key, required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Stack(
-    fit: StackFit.expand,
-    children: [
-      const RepaintBoundary(child: CustomPaint(painter: _AmbientPainter())),
-      BackdropGroup(child: child),
-    ],
-  );
-}
-
-class _AmbientPainter extends CustomPainter {
-  const _AmbientPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bounds = Offset.zero & size;
-    canvas.drawRect(bounds, Paint()..color = const Color(0xFFF3F5F8));
-    _glow(canvas, bounds, const Alignment(-1.15, -1.2), .88, green.withAlpha(28));
-    _glow(canvas, bounds, const Alignment(1.15, 1.18), .96, primary.withAlpha(24));
-    _glow(canvas, bounds, const Alignment(.08, 1.24), .68, amber.withAlpha(10));
-  }
-
-  void _glow(Canvas canvas, Rect bounds, Alignment center, double radius, Color color) {
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..blendMode = BlendMode.srcOver
-        ..shader = RadialGradient(
-          center: center,
-          radius: radius,
-          colors: [color, color.withValues(alpha: color.a * .35), Colors.transparent],
-          stops: const [0, .45, 1],
-        ).createShader(bounds),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _AmbientPainter oldDelegate) => false;
-}
 
 int _alpha(int value, double elevation) =>
     (value * elevation.clamp(.25, 1.5)).round().clamp(0, 255);
@@ -107,7 +61,6 @@ class GlassPanel extends StatelessWidget {
     this.radius = 24,
     this.padding = EdgeInsets.zero,
     this.dark = false,
-    this.blurSigma = 0,
     this.elevation = 1,
     this.accentColor,
     this.shadowColor,
@@ -118,7 +71,6 @@ class GlassPanel extends StatelessWidget {
   final double radius;
   final EdgeInsets padding;
   final bool dark;
-  final double blurSigma;
   final double elevation;
   final Color? accentColor;
   final Color? shadowColor;
@@ -285,12 +237,8 @@ class GlassPanel extends StatelessWidget {
       child: ClipRRect(
         borderRadius: r,
         clipBehavior: Clip.antiAlias,
-        child: highContrast || blurSigma <= 0
-            ? face
-            : BackdropFilter.grouped(
-                filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-                child: face,
-              ),
+        // The face is opaque; a backdrop blur cannot contribute visible pixels.
+        child: face,
       ),
     );
   }
@@ -648,7 +596,8 @@ ThemeData pharmacyTheme() => ThemeData(
     onError: Colors.white,
     outline: outline,
   ),
-  scaffoldBackgroundColor: Colors.transparent,
+  // Each route paints its own surface throughout push/pop transitions.
+  scaffoldBackgroundColor: canvas,
   canvasColor: Colors.white,
   fontFamily: 'Manrope',
   fontFamilyFallback: const ['NotoSansDevanagari'],

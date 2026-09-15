@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'medicine.dart';
+import 'medicine_strength.dart';
 import 'medicine_date_parser.dart';
 import 'medicine_discovery.dart';
 import 'search.dart';
@@ -2285,10 +2286,7 @@ List<String> _strengths(String line) {
         ),
         (_) => '0',
       );
-  final matches = RegExp(
-    r'(?<![a-z0-9])\d+(?:[.,]\d+)?\s*(?:mcg|ug|µg|mg|gm|g|meq|iu|i\.u\.|units?|%)(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?',
-    caseSensitive: false,
-  ).allMatches(normalized);
+  final matches = medicineStrengthPattern.allMatches(normalized);
   final values = <String>[];
   for (final match in matches.take(4)) {
     final value = match[0]!
@@ -2310,7 +2308,7 @@ List<String> _strengths(String line) {
   return values;
 }
 
-String _strengthKey(String value) => searchText(value).replaceAll(' ', '');
+String _strengthKey(String value) => medicineStrengthKey(value);
 
 String _saltValue(String raw) {
   var value = raw

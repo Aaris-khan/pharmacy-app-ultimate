@@ -152,6 +152,37 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
+  testWidgets('Changing tabs releases keyboard focus and preserves the query', (
+    tester,
+  ) async {
+    final controller = await seeded();
+    await tester.pumpWidget(PharmacyApp(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stock').last);
+    await tester.pumpAndSettle();
+    final query = find.descendant(
+      of: find.byType(SearchScreen),
+      matching: find.byType(TextField),
+    ).first;
+    await tester.enterText(query, 'Azithromycin');
+    await tester.pumpAndSettle();
+    final editable = tester.widget<EditableText>(find.byType(EditableText).first);
+    final searchState = tester.state(find.byType(SearchScreen));
+    expect(editable.focusNode.hasFocus, isTrue);
+
+    await tester.tap(find.text('Home').last);
+    await tester.pumpAndSettle();
+    expect(editable.focusNode.hasFocus, isFalse);
+    await tester.tap(find.text('Stock').last);
+    await tester.pumpAndSettle();
+    expect(tester.state(find.byType(SearchScreen)), same(searchState));
+    expect(tester.widget<TextField>(query).controller!.text, 'Azithromycin');
+    expect(editable.focusNode.hasFocus, isFalse);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets('All main tabs fit a narrow phone at large text scale', (
     tester,
   ) async {
@@ -230,7 +261,6 @@ void main() {
             key: key,
             child: MaterialApp(
               theme: pharmacyTheme(),
-              builder: (context, child) => PharmacyBackdrop(child: child!),
               home: entry.value,
             ),
           ),

@@ -59,7 +59,6 @@ class ScannerView extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             child: GlassPanel(
               tint: canvas,
-              blurSigma: 0,
               radius: 22,
               padding: const EdgeInsets.all(12),
               child: Wrap(
@@ -159,7 +158,6 @@ class ScannerView extends StatelessWidget {
                     GlassPanel(
                       tint: canvas,
                       radius: 28,
-                      blurSigma: 0,
                       elevation: 1.1,
                       padding: const EdgeInsets.all(20),
                       child: Column(

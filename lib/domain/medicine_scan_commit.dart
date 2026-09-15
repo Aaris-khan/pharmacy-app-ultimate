@@ -1,5 +1,6 @@
 import 'intake_resolution.dart';
 import 'medicine.dart';
+import 'medicine_strength.dart';
 import 'medicine_understanding.dart';
 
 /// Final, deterministic gate between a scan preview and a one-tap inventory add.
@@ -93,13 +94,7 @@ String _trustedIdentityFieldIssue(
 List<String> _compositionParts(String value) => value
     .split(RegExp(r'\s*\+\s*'))
     .map((part) => part.trim())
-    .where((part) => part.isNotEmpty)
     .toList(growable: false);
-
-bool _hasExplicitStrengthUnit(String value) => RegExp(
-  r'\d+(?:\.\d+)?\s*(?:mcg|µg|μg|ug|mg|gm|g|ml|iu|i\.u\.|units?|%)(?:\s*/\s*(?:\d+(?:\.\d+)?\s*)?(?:mcg|µg|μg|ug|mg|gm|g|ml|l|iu|i\.u\.|units?))?(?:\s*(?:w\s*/\s*v|w\s*/\s*w|v\s*/\s*v))?',
-  caseSensitive: false,
-).hasMatch(value);
 
 /// Salt and strength are persisted as parallel, ordered composition lists.
 /// Confidence on each field alone is not enough: a combination with two salts
@@ -110,10 +105,11 @@ bool _hasExplicitStrengthUnit(String value) => RegExp(
 String _compositionPairingIssue(MedicineScanDraft draft) {
   final salts = _compositionParts(draft.salt);
   final strengths = _compositionParts(draft.strength);
-  if (salts.isEmpty || strengths.isEmpty) {
+  if (salts.any((part) => part.isEmpty) ||
+      strengths.any((part) => part.isEmpty)) {
     return 'Salt and strength still need review before one-tap add.';
   }
-  if (strengths.any((strength) => !_hasExplicitStrengthUnit(strength))) {
+  if (strengths.any((strength) => !hasCompleteMedicineStrength(strength))) {
     return 'Strength needs an explicit printed dose unit before one-tap add; a brand or pack number is not enough.';
   }
   if ((salts.length > 1 || strengths.length > 1) &&

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'medicine.dart';
+import 'medicine_strength.dart';
 import 'medicine_understanding.dart';
 import 'offline_evidence_graph.dart';
 import 'search.dart';
@@ -1026,7 +1027,7 @@ String _normalizeStrength(String raw) => raw
     .trim()
     .toLowerCase();
 
-String _strengthKey(String raw) => searchText(raw).replaceAll(' ', '');
+String _strengthKey(String raw) => medicineStrengthKey(raw);
 
 bool _semanticNoiseOnly(String value) {
   if (value.isEmpty) return true;
@@ -1122,10 +1123,7 @@ final _equivalentToHint = RegExp(
   r'\bequivalent\s+to\b',
   caseSensitive: false,
 );
-final _strengthPattern = RegExp(
-  r'(?<![\d.])\d+(?:[.,]\d+)?\s*(?:mcg|ug|µg|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?',
-  caseSensitive: false,
-);
+final _strengthPattern = medicineStrengthPattern;
 
 const _ingredientNoise = <String>{
   'equivalent',

@@ -424,7 +424,6 @@ class _WarningSelector extends StatelessWidget {
     child: GlassPanel(
       tint: Colors.white,
       radius: 999,
-      blurSigma: 0,
       elevation: .35,
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 14),
       child: Row(

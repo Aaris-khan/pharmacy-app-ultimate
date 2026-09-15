@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'gs1_healthcare.dart';
 import 'medicine.dart';
+import 'medicine_strength.dart';
 import 'medicine_confusion_firewall.dart';
 import 'medicine_date_intelligence.dart';
 import 'medicine_ocr_text.dart';
@@ -2267,9 +2268,7 @@ bool _isStrongProductBarcodeKey(String value) {
 }
 
 String _strengthIdentity(String value) =>
-    searchText(normalizeMedicineOcrLine(value))
-        .replaceAll(' ', '')
-        .replaceAll('ug', 'mcg');
+    medicineStrengthKey(normalizeMedicineOcrLine(value));
 
 double _weightedTextSimilarity(String rawObserved, String rawCanonical) {
   final canonical = _compactForOcr(rawCanonical);
