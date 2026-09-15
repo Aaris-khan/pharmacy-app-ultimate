@@ -11,6 +11,7 @@ import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../domain/local_ai_protocol.dart';
+import '../domain/local_scan_request.dart';
 import '../domain/gguf_metadata.dart';
 import '../domain/local_model.dart';
 import '../domain/local_model_checks.dart';
@@ -526,8 +527,14 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
   Future<T> _exclusive<T>(
     Future<T> Function(int generation) action, {
     void Function()? onLeaseAcquired,
+    LocalScanRequest? scanRequest,
   }) async {
-    await initialize();
+    scanRequest?.checkCurrent();
+    if (scanRequest == null) {
+      await initialize();
+    } else {
+      await scanRequest.wait(initialize);
+    }
     if (_working || _transferring)
       throw StateError('Local AI is busy. Wait for the current operation.');
     _working = true;
@@ -541,9 +548,13 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
     }
     notifyListeners();
     Future<T> run() async {
+      final lease = Object();
       try {
+        scanRequest?.bind(lease, cancelRequest);
+        _checkRequest(generation);
         return await action(generation);
       } finally {
+        scanRequest?.release(lease);
         if (_releaseForMemory) {
           _releaseForMemory = false;
           try {
@@ -569,9 +580,9 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     // LocalAiRuntime owns both progress-aware stall detection and the bounded
-    // generation deadline. Do not stack another service-level timeout here:
-    // runtime retirement must remain the single authority that invalidates the
-    // native transport epoch/isolate and prevents late callbacks from leaking.
+    // generation deadline. A scan's shorter workflow deadline uses owned
+    // cancellation through this same runtime; it never abandons a live native
+    // operation with Future.timeout or releases its lease to another caller.
     return run();
   }
 
@@ -673,86 +684,95 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> activate(
     String id, {
     void Function()? onLeaseAcquired,
-  }) => _exclusive((generation) async {
-    final model = _models.where((m) => m.id == id).firstOrNull;
-    if (model == null) throw StateError('Download or import this model first.');
-    if (isModelReady(id)) {
-      _setupStage = LocalModelSetupStage.ready;
-      _status = isModelScanVerified(id)
-          ? 'Local AI Ready'
-          : 'Local AI Ready · scan extraction is available with review warning';
-      return;
-    }
-    final previous = _activeId;
-    await _release();
-    _activeId = id;
-    try {
-      final file = _weights(id);
-      _setupStage = LocalModelSetupStage.verifying;
-      _status = 'Checking model…';
-      notifyListeners();
-      final metadata = await _checkGguf(file);
-      if (await _hash(file.path) != id) {
-        throw StateError(
-          'Model changed since installation. Re-import a trusted file.',
-        );
+    LocalScanRequest? scanRequest,
+  }) => _exclusive(
+    (generation) async {
+      void checkCurrent() {
+        scanRequest?.checkCurrent();
+        _checkRequest(generation);
       }
-      _checkRequest(generation);
-      _setupStage = LocalModelSetupStage.connecting;
-      _status = 'Connecting on this device…';
-      notifyListeners();
-      await _loadSelected(requestGeneration: generation);
-      _checkRequest(generation);
 
-      _setupStage = LocalModelSetupStage.testing;
-      final scanTestPassed = await probeLocalScanExtraction(
-        generate: (system, source, budget) =>
-            _runtime!.generate(system, source, maxTokens: budget),
-        checkCurrent: () => _checkRequest(generation),
-        onProbe: () {
-          _status = 'Testing optional scan review…';
-          notifyListeners();
-        },
-      );
-      _checkRequest(generation);
-      _models[_models.indexOf(model)] = InstalledLocalModel(
-        id: model.id,
-        label: model.label,
-        bytes: model.bytes,
-        source: model.source,
-        loadTestPassed: true,
-        smokeTestPassed: scanTestPassed,
-        metadata: metadata,
-        testedRuntime: scanTestPassed
-            ? '$localRuntimeBuild/setup-$localSetupCheckVersion'
-            : '$localRuntimeBuild/chat-load',
-      );
-      await _save();
-      _setupStage = LocalModelSetupStage.ready;
-      _status = scanTestPassed
-          ? 'Local AI Ready'
-          : 'Local AI Ready · scan extraction is available with review warning';
-    } catch (_) {
-      _activeId = previous;
-      final index = _models.indexWhere((m) => m.id == model.id);
-      if (index >= 0) _models[index] = model;
+      checkCurrent();
+      final model = _models.where((m) => m.id == id).firstOrNull;
+      if (model == null)
+        throw StateError('Download or import this model first.');
+      if (isModelReady(id)) {
+        _setupStage = LocalModelSetupStage.ready;
+        _status = isModelScanVerified(id) ? 'Local AI Ready' : 'Local AI Ready · scan extraction is available with review warning';
+        return;
+      }
+      final previous = _activeId;
       await _release();
-      _setupStage = ready
-          ? LocalModelSetupStage.ready
-          : LocalModelSetupStage.attention;
-      _status = ready
-          ? 'That model could not start · previous Local AI is still Ready'
-          : 'This model could not become Ready';
-      rethrow;
-    }
-  }, onLeaseAcquired: onLeaseAcquired);
+      _activeId = id;
+      try {
+        final file = _weights(id);
+        _setupStage = LocalModelSetupStage.verifying;
+        _status = 'Checking model…';
+        notifyListeners();
+        final metadata = await _checkGguf(file);
+        if (await _hash(file.path) != id) {
+          throw StateError(
+            'Model changed since installation. Re-import a trusted file.',
+          );
+        }
+        checkCurrent();
+        _setupStage = LocalModelSetupStage.connecting;
+        _status = 'Connecting on this device…';
+        notifyListeners();
+        await _loadSelected(requestGeneration: generation);
+        checkCurrent();
 
-  Future<void> suspend() => _exclusive((_) async {
-    await _release();
-    _status = hasSelection
-        ? 'Local model selected · Aaris Brain off'
-        : 'Local AI stopped';
-  });
+        _setupStage = LocalModelSetupStage.testing;
+        final scanTestPassed = await probeLocalScanExtraction(
+          generate: (system, source, budget) =>
+              _runtime!.generate(system, source, maxTokens: budget),
+          checkCurrent: checkCurrent,
+          onProbe: () {
+            _status = 'Testing optional scan review…';
+            notifyListeners();
+          },
+        );
+        checkCurrent();
+        _models[_models.indexOf(model)] = InstalledLocalModel(
+          id: model.id,
+          label: model.label,
+          bytes: model.bytes,
+          source: model.source,
+          loadTestPassed: true,
+          smokeTestPassed: scanTestPassed,
+          metadata: metadata,
+          testedRuntime: scanTestPassed
+              ? '$localRuntimeBuild/setup-$localSetupCheckVersion'
+              : '$localRuntimeBuild/chat-load',
+        );
+        await _save();
+        _setupStage = LocalModelSetupStage.ready;
+        _status = scanTestPassed ? 'Local AI Ready' : 'Local AI Ready · scan extraction is available with review warning';
+      } catch (_) {
+        _activeId = previous;
+        final index = _models.indexWhere((m) => m.id == model.id);
+        if (index >= 0) _models[index] = model;
+        await _release();
+        _setupStage = ready
+            ? LocalModelSetupStage.ready
+            : LocalModelSetupStage.attention;
+        _status = ready
+            ? 'That model could not start · previous Local AI is still Ready'
+            : 'This model could not become Ready';
+        rethrow;
+      }
+    },
+    onLeaseAcquired: onLeaseAcquired,
+    scanRequest: scanRequest,
+  );
+
+  Future<void> suspend({LocalScanRequest? scanRequest}) =>
+      _exclusive((_) async {
+        await _release();
+        _status = hasSelection
+            ? 'Local model selected · Aaris Brain off'
+            : 'Local AI stopped';
+      }, scanRequest: scanRequest);
 
   Future<void> deactivate() => _exclusive((_) async {
     await _release();
@@ -842,34 +862,50 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
   Future<MedicineScanDraft> understand(
     MedicineScanDraft draft, {
     void Function()? onLeaseAcquired,
+    LocalScanRequest? scanRequest,
   }) async {
-    await initialize();
-    if (!hasSelection || !scannerEnabled || !scanReady) return draft;
-    return _exclusive((generation) async {
-      await _loadSelected(requestGeneration: generation);
-      _checkRequest(generation);
-      final result = await runLocalScanTurn(
-        draft: draft,
-        sourceLimit: _executionPlan!.evidenceCharacters,
-        outputTokens: _executionPlan!.outputTokens.clamp(1, 1000),
-        checkCurrent: () => _checkRequest(generation),
-        onAttempt: (handoff, attempt) {
-          _status = attempt > 0
-              ? 'Local AI · fitting scan evidence to this phone’s context…'
-              : 'Local AI · verifying ${handoff.sourceCharacters} OCR characters for preview…';
+    final request = scanRequest ?? LocalScanRequest();
+    try {
+      await request.wait(initialize);
+      if (!hasSelection || !scannerEnabled || !scanReady) return draft;
+      return await _exclusive(
+        (generation) async {
+          void checkCurrent() {
+            request.checkCurrent();
+            _checkRequest(generation);
+          }
+
+          checkCurrent();
+          await _loadSelected(requestGeneration: generation);
+          checkCurrent();
+          final result = await runLocalScanTurn(
+            draft: draft,
+            sourceLimit: _executionPlan!.evidenceCharacters,
+            outputTokens: _executionPlan!.outputTokens.clamp(1, 1000),
+            checkCurrent: checkCurrent,
+            onAttempt: (handoff, attempt) {
+              _status = attempt > 0
+                  ? 'Local AI · fitting scan evidence to this phone’s context…'
+                  : 'Local AI · verifying ${handoff.sourceCharacters} OCR characters for preview…';
+              notifyListeners();
+            },
+            generate: (handoff, budget) => _runtime!.generate(
+              handoff.systemPrompt,
+              handoff.userPayload,
+              maxTokens: budget,
+            ),
+          );
+          checkCurrent();
+          _status = 'Scan details ready to review';
           notifyListeners();
+          return result;
         },
-        generate: (handoff, budget) => _runtime!.generate(
-          handoff.systemPrompt,
-          handoff.userPayload,
-          maxTokens: budget,
-        ),
+        onLeaseAcquired: onLeaseAcquired,
+        scanRequest: request,
       );
-      _checkRequest(generation);
-      _status = 'AI scan evidence verified · deterministic save gate deciding next step';
-      notifyListeners();
-      return result;
-    }, onLeaseAcquired: onLeaseAcquired);
+    } finally {
+      if (scanRequest == null) request.close();
+    }
   }
 }
 

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/medicine.dart';
+import '../domain/local_scan_request.dart';
 import '../domain/medicine_intake.dart';
 import '../domain/medicine_evidence_normalization.dart';
 import '../domain/medicine_resolution_v2.dart';
@@ -40,6 +41,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void>? _initializing;
   Future<void> _intakeWrites = Future.value();
   final _workBarrier = MedicineIntakeWorkBarrier();
+  final _scanRequests = <String, LocalScanRequest>{};
   bool _running = false, _appActive = true;
   bool _ready = false, _preferReasoning = false, _observingMemory = false;
   String persistenceError = '';
@@ -128,6 +130,10 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _appActive = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     _ready = true;
+    for (final job in _jobs) {
+      if (job.status == 'reasoning' && job.drafts.isNotEmpty)
+        _scanRequestFor(job);
+    }
     notifyListeners();
   }
 
@@ -203,7 +209,51 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
         throw StateError('Capture checkpoint could not be saved.');
       }
     }
+    if (job.status == 'reasoning' && job.drafts.isNotEmpty) {
+      _scanRequestFor(job);
+    } else {
+      _scanRequests.remove(job.id)?.close();
+    }
     notifyListeners();
+  }
+
+  LocalScanRequest _scanRequestFor(MedicineIntakeJob job) {
+    final existing = _scanRequests[job.id];
+    if (existing != null) return existing;
+    late final LocalScanRequest request;
+    request = LocalScanRequest(
+      onTimeout: () {
+        if (!identical(_scanRequests[job.id], request)) return;
+        unawaited(
+          continueWithDraft(job, timedOut: true).catchError((Object error) {
+            persistenceError = 'Capture checkpoint needs attention: $error';
+            notifyListeners();
+          }),
+        );
+      },
+    );
+    _scanRequests[job.id] = request;
+    return request;
+  }
+
+  /// Freeze the available draft before navigation, without waiting for optional
+  /// inference. A scope revokes only this scan's lease; late results are ignored.
+  Future<void> continueWithDraft(
+    MedicineIntakeJob job, {
+    bool timedOut = false,
+  }) async {
+    if (!_jobs.contains(job) ||
+        !job.finishOptionalReview(
+          message: timedOut
+              ? 'Local AI review timed out. Scanned details are ready to check.'
+              : '',
+        ))
+      return;
+    _scanRequests.remove(job.id)?.close();
+    notifyListeners();
+    await _enqueue(() async {
+      if (_jobs.contains(job)) await _persist(job);
+    });
   }
 
   Future<void> _enqueue(Future<void> Function() action) {
@@ -590,10 +640,13 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     LocalAiService local,
     String routedModelId,
     MedicineScanDraft draft,
+    LocalScanRequest scanRequest,
   ) async {
+    scanRequest.checkCurrent();
     try {
-      return await local.understand(draft);
+      return await local.understand(draft, scanRequest: scanRequest);
     } catch (error, stack) {
+      scanRequest.checkCurrent();
       if (!_recoverableLocalTransportFailure(error)) {
         Error.throwWithStackTrace(error, stack);
       }
@@ -613,8 +666,9 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
       // to still be selected before retrying. A model/switch change can never
       // resurrect a stale result under a different Local AI identity.
       try {
-        await local.suspend();
+        await local.suspend(scanRequest: scanRequest);
       } catch (suspendError) {
+        scanRequest.checkCurrent();
         // Another caller can win the exclusive lease in the event-loop gap
         // between the availability snapshot above and suspend(). Preserve this
         // durable job in `reasoning` so it retries after that lease is released.
@@ -631,80 +685,100 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
           'Aaris Brain route changed while recovering this scan. Deterministic OCR draft retained for review.',
         );
       }
+      scanRequest.checkCurrent();
 
       // Durable intake never uses the instant-review mayReasonWith timeout here.
       // If a caller races into the lease after this route check, understand()
       // throws the normal busy signal and _reason keeps the same AI index queued.
-      return local.understand(draft);
+      return local.understand(draft, scanRequest: scanRequest);
     }
   }
 
   Future<void> _reason(MedicineIntakeJob job) async {
-    final local = LocalAiService.instance;
-    final readiness = await LocalBrainRoutePolicy.reasoningReadiness(
-      local,
-      job.modelId,
-    );
-    if (readiness == LocalBrainRouteReadiness.retryWhenIdle) {
-      job.error = _waitingForLocalAi;
-      job.status = 'reasoning';
-      return;
-    }
-    if (readiness != LocalBrainRouteReadiness.ready) {
-      job.error = 'Aaris Brain is off, not scan-ready, or the selected Local AI changed. Deterministic OCR draft retained for review.';
-      job.status = 'review';
-      return;
-    }
-    if (job.aiIndex >= job.drafts.length) {
-      job.status = 'review';
-      return;
-    }
-
-    // Bind one AI refinement to the exact Local AI route that owns this turn.
-    // The capture may legitimately wait through earlier model changes, but once
-    // inference starts its result is valid only for that concrete route. This is
-    // the same stale-callback principle used by the foreground import inbox.
-    final routedModelId = local.activeId;
-    if (routedModelId == null ||
-        !local.scannerEnabled ||
-        !local.isModelScanReady(routedModelId)) {
-      job.error = 'The active Local AI route disappeared before scan reasoning started. Deterministic OCR draft retained for review.';
-      job.status = 'review';
-      return;
-    }
-
-    final index = job.aiIndex;
-    final original = job.drafts[index];
+    if (job.status != 'reasoning') return;
+    final scanRequest = _scanRequestFor(job);
     try {
-      final candidate = await _understandWithRecovery(
+      scanRequest.checkCurrent();
+      final local = LocalAiService.instance;
+      final readiness = await LocalBrainRoutePolicy.reasoningReadiness(
         local,
-        routedModelId,
-        original,
+        job.modelId,
+        scanRequest: scanRequest,
       );
-      if (!await _routeStillOwnsResult(local, routedModelId)) {
-        job.error = 'Aaris Brain was turned off or its Local AI changed while this scan was being reviewed. The stale AI result was discarded; deterministic OCR was retained.';
-        job.status = 'review';
-        return;
-      }
-      job.drafts[index] = candidate;
-      if (job.error == _waitingForLocalAi) job.error = '';
-    } catch (e) {
-      // Foreground chat and scan refinement share one authoritative local-model
-      // lease. A narrow race can occur after the pump sees `busy == false` but
-      // before `understand()` acquires it. Contention is not an extraction
-      // failure: keep the same draft/index queued and resume when the lease is
-      // released instead of silently skipping AI refinement forever.
-      if (_localLeaseContention(e)) {
-        if (job.error.isEmpty) job.error = _waitingForLocalAi;
+      scanRequest.checkCurrent();
+      if (readiness == LocalBrainRouteReadiness.retryWhenIdle) {
+        job.error = _waitingForLocalAi;
         job.status = 'reasoning';
         return;
       }
-      job.error =
-          'Local AI could not validate all fields; original OCR draft retained. $e';
-    }
+      if (readiness != LocalBrainRouteReadiness.ready) {
+        job.error = 'Aaris Brain is off, not scan-ready, or the selected Local AI changed. Deterministic OCR draft retained for review.';
+        job.status = 'review';
+        return;
+      }
+      if (job.aiIndex >= job.drafts.length) {
+        job.status = 'review';
+        return;
+      }
 
-    job.aiIndex++;
-    if (job.aiIndex >= job.drafts.length) job.status = 'review';
+      // Bind one AI refinement to the exact Local AI route that owns this turn.
+      // The capture may legitimately wait through earlier model changes, but once
+      // inference starts its result is valid only for that concrete route. This is
+      // the same stale-callback principle used by the foreground import inbox.
+      final routedModelId = local.activeId;
+      if (routedModelId == null ||
+          !local.scannerEnabled ||
+          !local.isModelScanReady(routedModelId)) {
+        job.error = 'The active Local AI route disappeared before scan reasoning started. Deterministic OCR draft retained for review.';
+        job.status = 'review';
+        return;
+      }
+
+      final index = job.aiIndex;
+      final original = job.drafts[index];
+      try {
+        final candidate = await _understandWithRecovery(
+          local,
+          routedModelId,
+          original,
+          scanRequest,
+        );
+        scanRequest.checkCurrent();
+        if (!await _routeStillOwnsResult(local, routedModelId)) {
+          scanRequest.checkCurrent();
+          job.error = 'Aaris Brain was turned off or its Local AI changed while this scan was being reviewed. The stale AI result was discarded; deterministic OCR was retained.';
+          job.status = 'review';
+          return;
+        }
+        scanRequest.checkCurrent();
+        job.drafts[index] = candidate;
+        if (job.error == _waitingForLocalAi) job.error = '';
+      } catch (e) {
+        scanRequest.checkCurrent();
+        // Foreground chat and scan refinement share one authoritative local-model
+        // lease. A narrow race can occur after the pump sees `busy == false` but
+        // before `understand()` acquires it. Contention is not an extraction
+        // failure: keep the same draft/index queued and resume when the lease is
+        // released instead of silently skipping AI refinement forever.
+        if (_localLeaseContention(e)) {
+          if (job.error.isEmpty) job.error = _waitingForLocalAi;
+          job.status = 'reasoning';
+          return;
+        }
+        job.error =
+            'Local AI could not validate all fields; original OCR draft retained. $e';
+      }
+
+      job.aiIndex++;
+      if (job.aiIndex >= job.drafts.length) job.status = 'review';
+    } catch (error) {
+      // Timeout/Next already froze the draft. Never restore reasoning, advance
+      // its index, or publish an AI result after that boundary.
+      if (scanRequest.cancelled || job.status != 'reasoning') return;
+      job.error =
+          'Local AI review could not finish. Scanned details retained. $error';
+      job.status = 'review';
+    }
   }
 
   Future<void> retry(MedicineIntakeJob job, {bool rescanVideo = false}) async {

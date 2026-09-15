@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../domain/local_ai_protocol.dart';
+import '../domain/local_scan_request.dart';
 import '../domain/local_model.dart';
 import '../domain/model_catalogue.dart';
 import '../domain/medicine_understanding.dart';
@@ -43,9 +44,12 @@ class LocalAiService extends ChangeNotifier {
   Future<void> download(LocalModelFile file) async =>
       throw UnsupportedError(status);
   Future<void> importModel() async => throw UnsupportedError(status);
-  Future<void> activate(String id, {void Function()? onLeaseAcquired}) async =>
-      throw UnsupportedError(status);
-  Future<void> suspend() async {}
+  Future<void> activate(
+    String id, {
+    void Function()? onLeaseAcquired,
+    LocalScanRequest? scanRequest,
+  }) async => throw UnsupportedError(status);
+  Future<void> suspend({LocalScanRequest? scanRequest}) async {}
   Future<void> deactivate() async {}
   Future<void> remove(String id) async {}
   Future<void> setScannerEnabled(bool value) async {}
@@ -63,5 +67,6 @@ class LocalAiService extends ChangeNotifier {
   Future<MedicineScanDraft> understand(
     MedicineScanDraft draft, {
     void Function()? onLeaseAcquired,
+    LocalScanRequest? scanRequest,
   }) async => draft;
 }

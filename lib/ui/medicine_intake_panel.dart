@@ -27,6 +27,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   final queue = MedicineIntakeService.instance;
   int visible = 5;
   String error = '';
+  String? _openingJob;
 
   @override
   void initState() {
@@ -64,21 +65,31 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
       );
 
   Future<void> _review(MedicineIntakeJob job) async {
-    final drafts = _reviewDrafts(job);
-    final completed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MedicineReviewScreen(
-          controller: widget.controller,
-          input: MedicineReviewInput.prepared(
-            drafts,
-            singlePackExpected: _singlePackExpected(job),
+    if (_openingJob != null || !job.canReview) return;
+    setState(() => _openingJob = job.id);
+    try {
+      await queue.continueWithDraft(job);
+      if (!mounted) return;
+      final drafts = _reviewDrafts(job);
+      final completed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MedicineReviewScreen(
+            controller: widget.controller,
+            input: MedicineReviewInput.prepared(
+              drafts,
+              singlePackExpected: _singlePackExpected(job),
+            ),
           ),
         ),
-      ),
-    );
-    if (completed == true) {
-      await _run(() => queue.dismiss(job));
+      );
+      if (completed == true) {
+        await _run(() => queue.dismiss(job));
+      }
+    } catch (value) {
+      if (mounted) setState(() => error = _cleanError(value));
+    } finally {
+      if (mounted) setState(() => _openingJob = null);
     }
   }
 
@@ -130,41 +141,41 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
             return const SizedBox.shrink();
           }
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 16),
-              const Text(
-                'Medicine preview',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 5),
-              const Text(
-                'Your scan is read automatically. Check the details, then tap Next.',
-                style: TextStyle(color: muted, fontSize: 12, height: 1.35),
-              ),
-              if (queue.persistenceError.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  'Saved scan processing needs attention. Your medicine database was not changed.',
-                  style: TextStyle(color: red, fontSize: 12),
-                ),
-              ],
-              if (error.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(error, style: const TextStyle(color: red, fontSize: 12)),
-              ],
-              const SizedBox(height: 8),
-              for (final job in queue.jobs.reversed.take(visible)) _jobCard(job),
-              if (queue.jobs.length > visible)
-                TextButton(
-                  onPressed: () => setState(() => visible += 10),
-                  child: const Text('Show more'),
-                ),
-            ],
-          );
-        },
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 16),
+          const Text(
+            'Medicine preview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Your scan is read automatically. Check the details, then tap Next.',
+            style: TextStyle(color: muted, fontSize: 12, height: 1.35),
+          ),
+          if (queue.persistenceError.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Saved scan processing needs attention. Your medicine database was not changed.',
+              style: TextStyle(color: red, fontSize: 12),
+            ),
+          ],
+          if (error.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(error, style: const TextStyle(color: red, fontSize: 12)),
+          ],
+          const SizedBox(height: 8),
+          for (final job in queue.jobs.reversed.take(visible)) _jobCard(job),
+          if (queue.jobs.length > visible)
+            TextButton(
+              onPressed: () => setState(() => visible += 10),
+              child: const Text('Show more'),
+            ),
+        ],
       );
+    },
+  );
 
   Widget _jobCard(MedicineIntakeJob job) {
     final processing = !job.terminal;
@@ -207,9 +218,11 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        const Text(
-                          'Please wait a moment',
-                          style: TextStyle(color: muted, fontSize: 12),
+                        Text(
+                          job.canReview
+                              ? 'Check the details below. You can tap Next now.'
+                              : 'Please wait a moment',
+                          style: const TextStyle(color: muted, fontSize: 12),
                         ),
                       ],
                     ),
@@ -218,15 +231,17 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
               ),
               const SizedBox(height: 14),
               LinearProgressIndicator(
-                value: job.status == 'reasoning' && job.drafts.isNotEmpty
-                    ? job.aiIndex / job.drafts.length
+                value: job.status == 'reasoning'
+                    ? null
                     : job.kind == 'video'
                         ? job.videoProgress
                         : null,
                 minHeight: 5,
                 borderRadius: BorderRadius.circular(10),
               ),
-            ] else if (failedWithoutDraft) ...[
+              if (job.canReview) const SizedBox(height: 12),
+            ],
+            if (failedWithoutDraft) ...[
               const Row(
                 children: [
                   Icon(Icons.error_outline_rounded, color: amber),
@@ -251,8 +266,17 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                 label:
                     Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
               ),
-            ] else ...[
-              if (preview != null) _draftCard(preview, 0),
+            ] else if (job.canReview || !processing) ...[
+              if (preview != null) _draftCard(job, preview, 0),
+              if (preview != null &&
+                  !processing &&
+                  job.error.contains('Local AI')) ...[
+                const SizedBox(height: 6),
+                const Text(
+                  'AI review could not finish. Check the scanned details, then tap Next.',
+                  style: TextStyle(color: muted, fontSize: 12),
+                ),
+              ],
               if (reviewDrafts.length > 1)
                 Container(
                   margin: const EdgeInsets.only(top: 2, bottom: 4),
@@ -327,7 +351,9 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                       ),
                     ),
                   ),
-                  onPressed: reviewDrafts.isEmpty ? null : () => _review(job),
+                  onPressed: reviewDrafts.isEmpty || _openingJob != null
+                      ? null
+                      : () => _review(job),
                   icon: const Icon(Icons.arrow_forward_rounded),
                   label: const Text(
                     'Next',
@@ -357,7 +383,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     );
   }
 
-  Widget _draftCard(MedicineScanDraft draft, int index) {
+  Widget _draftCard(MedicineIntakeJob job, MedicineScanDraft draft, int index) {
     final name = confirmedScanName(draft).isEmpty
         ? 'Medicine ${index + 1}'
         : confirmedScanName(draft);
@@ -429,7 +455,10 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: () => widget.onAsk!(draft.rawText),
+                onPressed: () => _run(() async {
+                  await queue.continueWithDraft(job);
+                  if (mounted) widget.onAsk?.call(draft.rawText);
+                }),
                 icon: const Icon(Icons.auto_awesome_rounded, size: 18),
                 label: const Text('Ask AI'),
               ),
@@ -448,30 +477,30 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
       confirmedScanForm(draft).isEmpty;
 
   Widget _factRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 7),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 82,
-              child: Text(
-                label,
-                style: const TextStyle(color: muted, fontSize: 12.5),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                value,
-                style: TextStyle(
-                  color: value == 'Not found' ? amber : ink,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 82,
+          child: Text(
+            label,
+            style: const TextStyle(color: muted, fontSize: 12.5),
+          ),
         ),
-      );
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              color: value == 'Not found' ? amber : ink,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Future<void> _dismiss(MedicineIntakeJob job) async {
     final confirmed = await showDialog<bool>(

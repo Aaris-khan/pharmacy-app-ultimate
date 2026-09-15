@@ -31,6 +31,18 @@ class MedicineIntakeJob {
   List<MedicineScanDraft> drafts;
   bool get ready => status == 'review';
   bool get terminal => ready || status == 'failed';
+  bool get canReview =>
+      drafts.isNotEmpty && (terminal || status == 'reasoning');
+
+  /// End only the optional AI phase. Incomplete photo/video OCR stays owned by
+  /// the capture worker; a reviewed snapshot never grants an inventory write.
+  bool finishOptionalReview({String message = ''}) {
+    if (status != 'reasoning' || drafts.isEmpty) return false;
+    status = 'review';
+    error = message;
+    return true;
+  }
+
   double? get videoProgress => durationMs > 0 ? cursorMs / durationMs : null;
   bool get canRescanVideo =>
       kind == 'video' &&

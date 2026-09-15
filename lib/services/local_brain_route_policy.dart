@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../domain/local_scan_request.dart';
 import 'local_ai_service.dart';
 
 enum LocalBrainRouteReadiness { ready, retryWhenIdle, unavailable }
@@ -127,8 +128,12 @@ class LocalBrainRoutePolicy {
   /// narrow race instead of permanently losing its Local AI refinement.
   static Future<LocalBrainRouteReadiness> reasoningReadiness(
     LocalAiService local,
-    String? capturedModelId,
-  ) async {
+    String? capturedModelId, {
+    LocalScanRequest? scanRequest,
+  }) async {
+    scanRequest?.checkCurrent();
+    Future<T> read<T>(Future<T> Function() operation) =>
+        scanRequest == null ? operation() : scanRequest.wait(operation);
     if (capturedModelId == null) {
       return LocalBrainRouteReadiness.unavailable;
     }
@@ -138,7 +143,7 @@ class LocalBrainRoutePolicy {
     // Ready. The old ordering could advertise Ready and then immediately throw
     // "Local AI is busy" from understand(), dropping an otherwise valid OCR
     // handoff into deterministic-only review.
-    if (!await enabled()) return LocalBrainRouteReadiness.unavailable;
+    if (!await read(enabled)) return LocalBrainRouteReadiness.unavailable;
     if (local.busy || local.transferring) {
       return LocalBrainRouteReadiness.retryWhenIdle;
     }
@@ -147,8 +152,8 @@ class LocalBrainRoutePolicy {
     }
 
     try {
-      await local.initialize().timeout(_routeInitializationTimeout);
-      if (!await enabled()) return LocalBrainRouteReadiness.unavailable;
+      await read(() => local.initialize().timeout(_routeInitializationTimeout));
+      if (!await read(enabled)) return LocalBrainRouteReadiness.unavailable;
 
       // initialize()/secure-storage awaits can cross a foreground Send or model
       // operation. Re-snapshot lease state before trusting readiness or trying
@@ -169,8 +174,9 @@ class LocalBrainRoutePolicy {
       // it never falls through to cloud. A real activation failure remains a
       // deterministic-review fallback.
       try {
-        await local.activate(activeId);
+        await local.activate(activeId, scanRequest: scanRequest);
       } catch (error) {
+        scanRequest?.checkCurrent();
         // A foreground Send/model operation can acquire the exclusive lease in
         // the final event-loop gap after the busy snapshot above. That is queue
         // contention, not evidence that the selected model became invalid.
@@ -183,13 +189,14 @@ class LocalBrainRoutePolicy {
       // Activation can take long enough for the owner to change the Brain
       // switch. Re-check consent and the live route before exposing OCR to the
       // model; stale activation completion never grants inference authority.
-      if (!await enabled()) return LocalBrainRouteReadiness.unavailable;
+      if (!await read(enabled)) return LocalBrainRouteReadiness.unavailable;
       return local.activeId == activeId &&
               local.scannerEnabled &&
               local.isModelScanReady(activeId)
           ? LocalBrainRouteReadiness.ready
           : LocalBrainRouteReadiness.unavailable;
     } catch (error) {
+      scanRequest?.checkCurrent();
       // Initialization can also overlap a native lease transition. Preserve the
       // queued handoff only when current state/error identifies contention;
       // malformed configuration or a real model-load failure still fails closed.
@@ -209,34 +216,52 @@ class LocalBrainRoutePolicy {
   /// durable capture jobs call [reasoningReadiness] directly and remain queued.
   static Future<bool> mayReasonWith(
     LocalAiService local,
-    String? capturedModelId,
-  ) async {
-    var readiness = await reasoningReadiness(local, capturedModelId);
+    String? capturedModelId, {
+    LocalScanRequest? scanRequest,
+  }) async {
+    var readiness = await reasoningReadiness(
+      local,
+      capturedModelId,
+      scanRequest: scanRequest,
+    );
     if (readiness == LocalBrainRouteReadiness.ready) return true;
     if (readiness != LocalBrainRouteReadiness.retryWhenIdle) return false;
     if (local.transferring) return false;
 
     final watch = Stopwatch()..start();
     while (readiness == LocalBrainRouteReadiness.retryWhenIdle) {
+      scanRequest?.checkCurrent();
       // A transfer may begin while we were queued behind a short inference turn.
       // Instant review must stop waiting at that boundary; the deterministic OCR
       // preview remains available and no stale model lease is granted.
       if (local.transferring) return false;
-      final remaining = _instantLeaseWaitTimeout - watch.elapsed;
+      var remaining = _instantLeaseWaitTimeout - watch.elapsed;
+      if (scanRequest != null && scanRequest.remaining < remaining) {
+        remaining = scanRequest.remaining;
+      }
       if (remaining.isNegative ||
           remaining == Duration.zero ||
-          !await _waitUntilLocalLeaseIsIdle(local, remaining)) {
+          !await _waitUntilLocalLeaseIsIdle(
+            local,
+            remaining,
+            scanRequest: scanRequest,
+          )) {
         return false;
       }
-      readiness = await reasoningReadiness(local, capturedModelId);
+      readiness = await reasoningReadiness(
+        local,
+        capturedModelId,
+        scanRequest: scanRequest,
+      );
     }
     return readiness == LocalBrainRouteReadiness.ready;
   }
 
   static Future<bool> _waitUntilLocalLeaseIsIdle(
     LocalAiService local,
-    Duration timeout,
-  ) async {
+    Duration timeout, {
+    LocalScanRequest? scanRequest,
+  }) async {
     if (!local.busy && !local.transferring) return true;
     if (timeout.isNegative || timeout == Duration.zero) return false;
 
@@ -253,7 +278,11 @@ class LocalBrainRoutePolicy {
       // listener registration. notifyListeners() also fires when _exclusive or
       // a transfer releases its lease.
       onChanged();
-      await idle.future.timeout(timeout);
+      if (scanRequest == null) {
+        await idle.future.timeout(timeout);
+      } else {
+        await scanRequest.wait(() => idle.future.timeout(timeout));
+      }
       return true;
     } on TimeoutException {
       return false;

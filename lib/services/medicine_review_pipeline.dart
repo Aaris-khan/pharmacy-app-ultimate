@@ -7,6 +7,7 @@ import '../domain/medicine_evidence_normalization.dart';
 
 import '../domain/medicine_resolution_v2.dart';
 import '../domain/medicine_review_cardinality.dart';
+import '../domain/local_scan_request.dart';
 import '../domain/medicine_scan_commit.dart';
 import '../domain/medicine_understanding.dart';
 import 'ai_service.dart';
@@ -127,7 +128,7 @@ class MedicineReviewPipeline {
   final Map<String, MedicineScanDraft> _semanticCache =
       <String, MedicineScanDraft>{};
   bool _cancelled = false;
-  bool _ownsLocalAiLease = false;
+  LocalScanRequest? _localScanRequest;
 
   void _ensureActive() {
     if (_cancelled) throw StateError('Medicine review cancelled.');
@@ -137,9 +138,7 @@ class MedicineReviewPipeline {
     if (_cancelled) return;
     _cancelled = true;
     _cloud.cancel();
-    if (_ownsLocalAiLease) {
-      LocalAiService.instance.cancelRequest();
-    }
+    _localScanRequest?.cancel();
     _semanticCache.clear();
   }
 
@@ -248,71 +247,80 @@ class MedicineReviewPipeline {
 
     final prepared = <PreparedMedicineReviewDraft>[];
     var localBrainUsed = false;
-    for (final original in reviewDrafts) {
-      _ensureActive();
-      var draft = original;
-      ScanAutoSaveVerifier? autoSaveVerifier;
-      final leasedModelId = scanModelId;
-      if (leasedModelId != null) {
-        try {
-          final mayReason = await LocalBrainRoutePolicy.mayReasonWith(
-            local,
-            leasedModelId,
-          );
-          _ensureActive();
-          if (!mayReason) {
-            scanModelId = null;
-            warning =
-                'Local AI changed or became busy. Aaris kept the on-device result.';
-          } else {
-            final routedModelId = local.activeId;
-            if (routedModelId == null) {
+    final scanRequest = LocalScanRequest();
+    _localScanRequest = scanRequest;
+    try {
+      for (final original in reviewDrafts) {
+        _ensureActive();
+        var draft = original;
+        ScanAutoSaveVerifier? autoSaveVerifier;
+        final leasedModelId = scanModelId;
+        if (leasedModelId != null) {
+          try {
+            final mayReason = await LocalBrainRoutePolicy.mayReasonWith(
+              local,
+              leasedModelId,
+              scanRequest: scanRequest,
+            );
+            _ensureActive();
+            if (!mayReason) {
               scanModelId = null;
-              warning =
-                  'Local AI became unavailable. Aaris kept the on-device result.';
+              warning = 'Local AI changed or became busy. Aaris kept the on-device result.';
             } else {
-              final key = '$routedModelId:${jsonEncode(original.toMessage())}';
-              final candidate = _takeSemanticCache(key) ??
-                  await _understandWithRecovery(
-                    local,
-                    routedModelId,
-                    original,
-                  );
-              _ensureActive();
-              final leaseStillValid =
-                  await LocalBrainRoutePolicy.mayReasonWith(
-                        local,
-                        routedModelId,
-                      ) &&
-                      local.activeId == routedModelId;
-              _ensureActive();
-              if (leaseStillValid) {
-                draft = candidate;
-                _rememberSemanticCache(key, candidate);
-                localBrainUsed = true;
-                if (local.isModelScanVerified(routedModelId)) {
-                  autoSaveVerifier = ScanAutoSaveVerifier.localAi;
-                }
-                scanModelId = routedModelId;
-              } else {
+              final routedModelId = local.activeId;
+              if (routedModelId == null) {
                 scanModelId = null;
-                warning =
-                    'Local AI changed during review. Aaris kept the on-device result.';
+                warning = 'Local AI became unavailable. Aaris kept the on-device result.';
+              } else {
+                final key =
+                    '$routedModelId:${jsonEncode(original.toMessage())}';
+                final candidate =
+                    _takeSemanticCache(key) ??
+                    await _understandWithRecovery(
+                      local,
+                      routedModelId,
+                      original,
+                      scanRequest,
+                    );
+                _ensureActive();
+                final leaseStillValid =
+                    await LocalBrainRoutePolicy.mayReasonWith(
+                      local,
+                      routedModelId,
+                      scanRequest: scanRequest,
+                    ) &&
+                    local.activeId == routedModelId;
+                _ensureActive();
+                if (leaseStillValid) {
+                  draft = candidate;
+                  _rememberSemanticCache(key, candidate);
+                  localBrainUsed = true;
+                  if (local.isModelScanVerified(routedModelId)) {
+                    autoSaveVerifier = ScanAutoSaveVerifier.localAi;
+                  }
+                  scanModelId = routedModelId;
+                } else {
+                  scanModelId = null;
+                  warning = 'Local AI changed during review. Aaris kept the on-device result.';
+                }
               }
             }
+          } catch (_) {
+            if (_cancelled) _ensureActive();
+            if (scanRequest.cancelled) scanModelId = null;
+            warning = 'Local AI could not finish this scan. Aaris kept the on-device result.';
           }
-        } catch (_) {
-          if (_cancelled) _ensureActive();
-          warning =
-              'Local AI could not finish this scan. Aaris kept the on-device result.';
         }
+        prepared.add(
+          PreparedMedicineReviewDraft(
+            draft: draft,
+            autoSaveVerifier: autoSaveVerifier,
+          ),
+        );
       }
-      prepared.add(
-        PreparedMedicineReviewDraft(
-          draft: draft,
-          autoSaveVerifier: autoSaveVerifier,
-        ),
-      );
+    } finally {
+      scanRequest.close();
+      if (identical(_localScanRequest, scanRequest)) _localScanRequest = null;
     }
 
     _ensureActive();
@@ -461,11 +469,19 @@ class MedicineReviewPipeline {
   Future<bool> _routeStillOwnsScan(
     LocalAiService local,
     String routedModelId,
+    LocalScanRequest scanRequest,
   ) async {
     _ensureActive();
-    final owns = await LocalBrainRoutePolicy.mayReasonWith(local, routedModelId) &&
+    scanRequest.checkCurrent();
+    final owns =
+        await LocalBrainRoutePolicy.mayReasonWith(
+          local,
+          routedModelId,
+          scanRequest: scanRequest,
+        ) &&
         local.activeId == routedModelId;
     _ensureActive();
+    scanRequest.checkCurrent();
     return owns;
   }
 
@@ -473,29 +489,23 @@ class MedicineReviewPipeline {
     LocalAiService local,
     String routedModelId,
     MedicineScanDraft draft,
+    LocalScanRequest scanRequest,
   ) async {
     var transportRecovered = false;
     var contentionAttempt = 0;
     while (true) {
       _ensureActive();
+      scanRequest.checkCurrent();
       try {
-        _ownsLocalAiLease = false;
-        try {
-          return await local.understand(
-            draft,
-            onLeaseAcquired: () {
-              _ownsLocalAiLease = true;
-              if (_cancelled) local.cancelRequest();
-            },
-          );
-        } finally {
-          _ownsLocalAiLease = false;
-        }
+        return await local.understand(draft, scanRequest: scanRequest);
       } catch (error, stack) {
         if (_cancelled) _ensureActive();
+        scanRequest.checkCurrent();
         if (_localLeaseContention(error)) {
-          if (!await _routeStillOwnsScan(local, routedModelId)) {
-            throw StateError('Local AI route changed while this scan was waiting.');
+          if (!await _routeStillOwnsScan(local, routedModelId, scanRequest)) {
+            throw StateError(
+              'Local AI route changed while this scan was waiting.',
+            );
           }
           final delay = medicineReviewContentionDelay(contentionAttempt++);
           if (delay == null) {
@@ -514,14 +524,16 @@ class MedicineReviewPipeline {
         var suspendAttempt = 0;
         while (true) {
           _ensureActive();
+          scanRequest.checkCurrent();
           try {
-            await local.suspend();
+            await local.suspend(scanRequest: scanRequest);
             _ensureActive();
             break;
           } catch (suspendError) {
             if (_cancelled) _ensureActive();
+            scanRequest.checkCurrent();
             if (!_localLeaseContention(suspendError) ||
-                !await _routeStillOwnsScan(local, routedModelId)) {
+                !await _routeStillOwnsScan(local, routedModelId, scanRequest)) {
               Error.throwWithStackTrace(error, stack);
             }
             final delay = medicineReviewContentionDelay(suspendAttempt++);
@@ -532,8 +544,10 @@ class MedicineReviewPipeline {
             _ensureActive();
           }
         }
-        if (!await _routeStillOwnsScan(local, routedModelId)) {
-          throw StateError('Local AI route changed while recovering this scan.');
+        if (!await _routeStillOwnsScan(local, routedModelId, scanRequest)) {
+          throw StateError(
+            'Local AI route changed while recovering this scan.',
+          );
         }
         contentionAttempt = 0;
       }
