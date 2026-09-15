@@ -21,6 +21,7 @@ import '../domain/medicine_understanding.dart';
 import 'local_ai_runtime.dart';
 import 'local_chat_turn.dart';
 import 'local_scan_turn.dart';
+import 'local_scan_probe.dart';
 
 class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
   static final instance = LocalAiService();
@@ -703,30 +704,17 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
       await _loadSelected(requestGeneration: generation);
       _checkRequest(generation);
 
-      var scanTestPassed = true;
       _setupStage = LocalModelSetupStage.testing;
-      for (var i = 0; i < localSetupChecks.length; i++) {
-        final probe = localSetupChecks[i];
-        _status = 'Testing optional scan review…';
-        notifyListeners();
-        final raw = await _runtime!.generate(
-          localSetupPrompt,
-          jsonEncode({'SOURCE': probe.source}),
-          maxTokens: 180,
-        );
-        _checkRequest(generation);
-        Map<String, dynamic> answer;
-        try {
-          answer = localJsonObject(raw);
-        } on FormatException {
-          scanTestPassed = false;
-          break;
-        }
-        if (!passesLocalSetup(answer, probe)) {
-          scanTestPassed = false;
-          break;
-        }
-      }
+      final scanTestPassed = await probeLocalScanExtraction(
+        generate: (system, source, budget) =>
+            _runtime!.generate(system, source, maxTokens: budget),
+        checkCurrent: () => _checkRequest(generation),
+        onProbe: () {
+          _status = 'Testing optional scan review…';
+          notifyListeners();
+        },
+      );
+      _checkRequest(generation);
       _models[_models.indexOf(model)] = InstalledLocalModel(
         id: model.id,
         label: model.label,

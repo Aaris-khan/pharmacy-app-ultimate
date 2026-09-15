@@ -44,6 +44,13 @@ has been added.
    replaces these with one generic timeout message. Progress resets per command;
    errors contain no prompts, OCR, paths or hidden reasoning. These observations
    do not by themselves prove which native computation was slow or why.
+5. A failed optional extraction generation previously escaped `activate()` and
+   undid a successful model load. This could prevent even a short chat from
+   reaching the model. Extraction timeouts/context/native generation errors now
+   leave the load-tested model selected with the existing scan warning and no
+   scan-verification authority. Subsequent chat can reload a retired runtime.
+   Actual load/hash failures remain fatal; Stop/model changes still abort setup.
+   The successful seven-probe suite, prompts and evidence checks are unchanged.
 
 ## Verification
 
@@ -53,7 +60,10 @@ has been added.
 - `tool/check_local_ai_error_drain.dart`: 12 checks including native-error versus
   deadline ordering, stale traffic, cancellation, transport retirement/reload.
 - `tool/check_local_ai.dart`: 70 existing contract and medicine evidence checks.
-- Total: 171 focused Dart checks. Runtime lifecycle checks use a controlled native
+- `tool/check_local_scan_probe.dart`: 25 checks of advisory extraction failures,
+  the unchanged successful suite, malformed output and cancellation. The old
+  optional-generation behavior reproduced a fatal timeout before the fix.
+- Total: 196 focused Dart checks. Runtime lifecycle checks use a controlled native
   boundary, not a real GGUF. No Flutter test suite, analyzer or APK build ran.
 
 ## Remaining phone verification
@@ -79,3 +89,6 @@ References: [Google AI Edge Gallery](https://github.com/google-ai-edge/gallery),
 The complete embedded patch verifies before/after file hashes, refuses divergent
 or symlink targets, and is idempotent. `--check` verifies without writing. It does
 not commit, push, download a model or build an APK.
+
+For the subsequent activation-probe fix from the first published chat-fix commit:
+`python3 tool/apply_scan_probe_readiness_fix.py --repo /path/to/repository`.
