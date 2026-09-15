@@ -427,7 +427,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
 
     try {
       final today = controller.today;
-      final start = today.subtract(const Duration(days: 29));
+      final start = today.subtract(const Duration(days: 30));
       final activeById = <String, Medicine>{
         for (final medicine in controller.records)
           if (!medicine.archived) medicine.id: medicine,
@@ -436,7 +436,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
       final saleHistorySales = <Map<String, dynamic>>[];
       for (final sale in controller.sales) {
         final saleDay = civilDay(sale.occurredAt);
-        if (!saleDay.isBefore(start) && !saleDay.isAfter(today)) {
+        if (!saleDay.isBefore(start)) {
           recentSales.add(sale.toJson());
         }
         if (isSaleHistoryIntegrityCandidate(
@@ -450,7 +450,9 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
 
       // Capture only operational fields. Large OCR/notes text is intentionally
       // excluded because it is irrelevant to integrity, FEFO, risk and reorder.
-      // Recent sales drive velocity/risk; the second list contains only exact
+      // Thirty completed days plus today drive daily demand. Future events
+      // are retained for the same review gate as the foreground calculation.
+      // The second list contains only exact
       // full-history anomalies that can become immutable-ledger safety tasks.
       final payload = <String, dynamic>{
         'records': <Map<String, dynamic>>[

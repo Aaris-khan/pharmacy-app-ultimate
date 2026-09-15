@@ -37,6 +37,7 @@ class AttentionItem {
     required this.detail,
     this.stockIds = const [],
     this.productKey,
+    this.expiryRisk,
   });
 
   final String key;
@@ -46,6 +47,7 @@ class AttentionItem {
   final String detail;
   final List<String> stockIds;
   final String? productKey;
+  final ExpiryWasteRisk? expiryRisk;
 
   bool get isReorder =>
       kind == AttentionKind.urgentReorder ||
@@ -381,6 +383,7 @@ class PharmacyAttentionReport {
               '${risk.stockCue} · about ${risk.atRiskUnits} of ${risk.batchQuantity} known units may remain by ${dateText(risk.expiry)} if the recent recorded sales pace continues. Planning pace ${risk.planningUnitsPerDay.toStringAsFixed(1)} units/day from ${risk.saleEvents} sale records (${risk.confidenceLabel}). Review FEFO placement and the next reorder; Aaris will not change stock or ordering automatically.',
           stockIds: List.unmodifiable(<String>[risk.stockId]),
           productKey: risk.productKey,
+          expiryRisk: risk,
         ),
       );
     }
@@ -397,7 +400,7 @@ class PharmacyAttentionReport {
           title:
               '${suggestion.title} · ${urgent ? 'urgent reorder' : 'reorder review'}',
           detail:
-              '${suggestion.reason} · suggested ${suggestion.suggestedQuantity} · ${suggestion.confidenceLabel}${suggestion.reviewRequired ? ' · pharmacist review required' : ''}.',
+              '${suggestion.reason} · ${suggestion.suggestedQuantity == null ? 'enter quantity after review' : 'suggested ${suggestion.suggestedQuantity}'} · ${suggestion.confidenceLabel}${suggestion.reviewRequired ? ' · pharmacist review required' : ''}.',
           stockIds: suggestion.stockIds,
           productKey: suggestion.productKey,
         ),

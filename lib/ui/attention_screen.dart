@@ -7,6 +7,7 @@ import '../domain/stock_guidance.dart';
 import '../domain/tracking.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
+import 'demand_history_sheet.dart';
 import 'editor_screen.dart';
 import 'order_screen.dart';
 
@@ -45,6 +46,10 @@ class _AttentionScreenState extends State<AttentionScreen> {
     final orders = {
       for (final order in tracking.reorder) order.productKey: order,
     };
+    final dailyDemand = {
+      for (final movement in tracking.movements.values)
+        if (movement.demand != null) movement.key: movement.demand!,
+    };
     _tasks = [
       for (final step in plan.steps)
         StockGuidance.fromStep(
@@ -52,6 +57,7 @@ class _AttentionScreenState extends State<AttentionScreen> {
           records: snapshot.records,
           orders: orders,
           today: today,
+          dailyDemand: dailyDemand,
         ),
       ...stockMovementGuidance(
         tracking: tracking,
@@ -95,6 +101,10 @@ class _AttentionScreenState extends State<AttentionScreen> {
         return;
       }
       final step = task.step;
+      if (step == null && task.demand != null) {
+        await _showHistory(task);
+        return;
+      }
       final target = step == null
           ? null
           : step.blocked
@@ -182,6 +192,29 @@ class _AttentionScreenState extends State<AttentionScreen> {
       final live = widget.controller.snapshot.records[id];
       if (!mounted || live == null || live.archived) return;
       await openEditor(context, widget.controller, record: live);
+    } finally {
+      _opening = false;
+    }
+  }
+
+  Future<void> _showHistory(StockGuidance task) async {
+    final key =
+        task.step?.item.productKey ??
+        widget.controller.snapshot.records[task.stockIds.firstOrNull]?.identity;
+    if (key == null) return;
+    await showDemandHistory(
+      context,
+      widget.controller,
+      productKey: key,
+      title: task.title,
+    );
+  }
+
+  Future<void> _history(StockGuidance task) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      await _showHistory(task);
     } finally {
       _opening = false;
     }
@@ -275,6 +308,9 @@ class _AttentionScreenState extends State<AttentionScreen> {
                 key: ValueKey(task.key),
                 task: task,
                 onTap: () => _open(task),
+                onHistory: task.demand != null && task.step != null
+                    ? () => _history(task)
+                    : null,
               );
             },
           );
@@ -285,9 +321,15 @@ class _AttentionScreenState extends State<AttentionScreen> {
 }
 
 class _AttentionCard extends StatelessWidget {
-  const _AttentionCard({super.key, required this.task, required this.onTap});
+  const _AttentionCard({
+    super.key,
+    required this.task,
+    required this.onTap,
+    this.onHistory,
+  });
   final StockGuidance task;
   final VoidCallback onTap;
+  final VoidCallback? onHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -355,6 +397,12 @@ class _AttentionCard extends StatelessWidget {
                         height: 1.4,
                       ),
                     ),
+                    if (onHistory != null)
+                      TextButton.icon(
+                        onPressed: onHistory,
+                        icon: const Icon(Icons.bar_chart_rounded, size: 18),
+                        label: const Text('दिनवार बिक्री'),
+                      ),
                   ],
                 ),
               ),

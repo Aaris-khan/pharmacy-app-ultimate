@@ -1,4 +1,5 @@
 import 'attention.dart';
+import 'daily_demand.dart';
 import 'inventory.dart';
 import 'medicine.dart';
 import 'operations_plan.dart';
@@ -18,12 +19,14 @@ class StockGuidance {
     required this.group,
     required this.stockIds,
     this.step,
+    this.demand,
   });
 
   final String key, title, action, reason;
   final StockTaskGroup group;
   final List<String> stockIds;
   final OperationsPlanStep? step;
+  final DailyDemandProfile? demand;
 
   bool get blocked => step?.blocked ?? false;
   bool get critical => step?.item.severity == AttentionSeverity.critical;
@@ -34,6 +37,7 @@ class StockGuidance {
     required Map<String, ReorderSuggestion> orders,
     required DateTime today,
     int salesDays = 30,
+    Map<String, DailyDemandProfile> dailyDemand = const {},
   }) {
     final item = step.item;
     final stock = item.stockIds
@@ -61,7 +65,10 @@ class StockGuidance {
             : day == 0
             ? 'आज आखिरी दिन है'
             : '$day दिन में expiry',
-      AttentionKind.expiryWastePressure => 'Expiry से पहले स्टॉक बच सकता है',
+      AttentionKind.expiryWastePressure =>
+        item.expiryRisk == null
+            ? 'Expiry से पहले स्टॉक बच सकता है'
+            : '${item.expiryRisk!.daysUntilExpiry} दिन में expiry · लगभग ${item.expiryRisk!.atRiskUnits} यूनिट बच सकती हैं',
       AttentionKind.unknownExpiry => 'पैक पर लिखी तारीख दर्ज करें',
       AttentionKind.unknownQuantity => 'बचा हुआ स्टॉक दर्ज नहीं है',
       AttentionKind.zeroQuantityMismatch => 'स्टॉक 0 है · स्थिति जाँचें',
@@ -81,7 +88,7 @@ class StockGuidance {
             : reorderSummary(order, salesDays),
     };
     if (order != null && !step.blocked) {
-      action = order.reviewRequired
+      action = order.reviewRequired || order.suggestedQuantity == null
           ? 'मँगाने की मात्रा जाँचें'
           : '${order.suggestedQuantity} यूनिट मँगाएँ';
     }
@@ -107,6 +114,11 @@ class StockGuidance {
           : StockTaskGroup.details,
       stockIds: item.stockIds,
       step: step,
+      demand:
+          order?.demand ??
+          (item.kind == AttentionKind.expiryWastePressure
+              ? dailyDemand[item.productKey]
+              : null),
     );
   }
 }
@@ -114,7 +126,7 @@ class StockGuidance {
 String stockActionLabel(AttentionKind kind) => switch (kind) {
   AttentionKind.expiredStock => 'अलग रखें · न बेचें',
   AttentionKind.shortExpiry => 'पहले यह स्टॉक निकालें',
-  AttentionKind.expiryWastePressure => 'नया ऑर्डर करने से पहले जाँचें',
+  AttentionKind.expiryWastePressure => 'बचा स्टॉक / वापसी जाँचें',
   AttentionKind.unknownExpiry => 'Expiry जोड़ें',
   AttentionKind.unknownQuantity => 'स्टॉक गिनें',
   AttentionKind.zeroQuantityMismatch => 'बचा स्टॉक जाँचें',
@@ -130,18 +142,41 @@ String stockActionLabel(AttentionKind kind) => switch (kind) {
   AttentionKind.urgentReorder || AttentionKind.reorderReview => 'ऑर्डर जाँचें',
 };
 
-String reorderSummary(ReorderSuggestion order, int salesDays) => [
-  order.currentQuantity == null
+String reorderSummary(ReorderSuggestion order, int salesDays) {
+  final demand = order.demand;
+  final stock = order.currentQuantity == null
       ? 'स्टॉक गिनना बाकी है'
-      : '${order.currentQuantity} यूनिट बचीं',
-  if (order.unitsSold > 0)
-    '$salesDays दिन में ${order.unitsSold} बिक्री दर्ज'
-  else
-    'बिक्री का पर्याप्त रिकॉर्ड नहीं',
+      : '${order.currentQuantity} यूनिट बचीं';
+  if (demand == null)
+    return [
+      stock,
+      order.unitsSold > 0
+          ? '$salesDays दिन में ${order.unitsSold} बिक्री दर्ज'
+          : 'बिक्री का पर्याप्त रिकॉर्ड नहीं',
+    ].join(' · ');
+  return '$stock${order.coverageDays == null ? '' : ' · करीब ${order.coverageDays!.ceil()} दिन'}\n${dailyDemandSummary(demand)}';
+}
+
+String dailyDemandSummary(DailyDemandProfile demand) => [
+  if (demand.hasEstimate)
+    'रफ्तार ≈${demand.planningUnitsPerDay.toStringAsFixed(demand.planningUnitsPerDay < .1 ? 2 : 1)} यूनिट/दिन',
+  '30 दिन में ${demand.unitsLast30Days} बिक्री दर्ज',
 ].join(' · ');
 
-/// Quiet-stock reminders use recorded movement, never assume that an unlogged
-/// sale did not happen. A firm pause needs repeated sales and >=30 days of stock.
+String demandTrendLabel(DailyDemandProfile demand) {
+  if (!demand.usableHistory) return 'बिक्री की जानकारी जाँचें';
+  if (demand.recentWeekUnits == 0) return '7 दिन से बिक्री दर्ज नहीं';
+  if (demand.variableSales) return 'बिक्री में बड़ा उतार-चढ़ाव';
+  return switch (demand.trend) {
+    DemandTrend.rising => 'बिक्री बढ़ रही है',
+    DemandTrend.falling => 'बिक्री धीमी हुई है',
+    DemandTrend.steady => 'बिक्री की रफ्तार स्थिर है',
+    DemandTrend.insufficient => 'तुलना के लिए और रिकॉर्ड चाहिए',
+  };
+}
+
+/// Movement reminders use recorded daily evidence; an unlogged sale is unknown.
+/// A firm pause needs supported history and >=30 days of usable stock coverage.
 /// Products already needing an order or fact repair keep their existing task.
 List<StockGuidance> stockMovementGuidance({
   required TrackingStats tracking,
@@ -163,7 +198,7 @@ List<StockGuidance> stockMovementGuidance({
     }
   }
   final result = <StockGuidance>[];
-  for (final movement in tracking.slowMoving) {
+  for (final movement in tracking.movements.values) {
     if (excluded.contains(movement.key) || movement.identityConflict) continue;
     final stock = byProduct[movement.key] ?? const <Medicine>[];
     if (stock.isEmpty ||
@@ -177,21 +212,38 @@ List<StockGuidance> stockMovementGuidance({
     }
     final quantity = movement.currentQuantity;
     if (quantity == null || quantity <= 0) continue;
+    final demand = movement.demand;
+    if (demand == null || !demand.usableHistory) continue;
     final enoughStock =
-        movement.recordedSales >= 3 &&
-        movement.unitsPerDay > 0 &&
-        quantity / movement.unitsPerDay >= 30;
+        !demand.reviewRequired &&
+        (movement.coverageDays ?? 0) >= ReorderSuggestion.targetDays;
+    final action = enoughStock
+        ? 'अभी और न मँगाएँ'
+        : demand.reviewRequired
+        ? 'ऑर्डर से पहले बिक्री जाँचें'
+        : demand.trend == DemandTrend.rising
+        ? 'बिक्री बढ़ी है · स्टॉक देखें'
+        : demand.trend == DemandTrend.falling
+        ? 'बिक्री धीमी है · ऑर्डर जाँचें'
+        : 'फिलहाल स्टॉक पर्याप्त है';
     result.add(
       StockGuidance(
         key: 'movement:${movement.key}',
         title: movement.title,
-        action: enoughStock ? 'अभी और न मँगाएँ' : 'ऑर्डर से पहले बिक्री जाँचें',
+        action: action,
         reason:
-            '${tracking.range.days} दिन में ${movement.unitsSold} बिक्री दर्ज · $quantity यूनिट बचीं',
+            '$quantity यूनिट बचीं${movement.coverageDays == null ? '' : ' · करीब ${movement.coverageDays!.ceil()} दिन'}\n${dailyDemandSummary(demand)}',
         group: StockTaskGroup.movement,
         stockIds: List.unmodifiable(stock.map((record) => record.id)),
+        demand: demand,
       ),
     );
   }
+  result.sort((a, b) {
+    final velocity = b.demand!.planningUnitsPerDay.compareTo(
+      a.demand!.planningUnitsPerDay,
+    );
+    return velocity != 0 ? velocity : a.title.compareTo(b.title);
+  });
   return result;
 }

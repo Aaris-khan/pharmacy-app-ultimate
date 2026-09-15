@@ -122,16 +122,16 @@ void main() {
         stock('b', quantity: 40, expiry: '2026-09-25', batch: 'LATER'),
       ],
       sales: [
-        sale('s1', 2, DateTime(2026, 9, 5)),
-        sale('s2', 2, DateTime(2026, 9, 8)),
+        for (var age = 1; age <= 30; age++)
+          sale('s$age', 1, today.subtract(Duration(days: age))),
       ],
       today: today,
     );
 
     final byId = {for (final risk in report.expiryWaste) risk.stockId: risk};
     expect(byId.keys, containsAll(<String>['a', 'b']));
-    expect(byId['a']!.atRiskUnits, 11);
-    expect(byId['b']!.atRiskUnits, 34);
+    expect(byId['a']!.atRiskUnits, 9);
+    expect(byId['b']!.atRiskUnits, 30);
   });
 
   test('live identity edits never relabel historical sale evidence', () {

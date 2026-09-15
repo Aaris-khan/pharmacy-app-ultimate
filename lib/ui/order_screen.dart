@@ -10,6 +10,7 @@ import '../domain/tracking.dart';
 import '../services/purchase_order_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
+import 'demand_history_sheet.dart';
 import 'editor_screen.dart';
 
 class OrderScreen extends StatefulWidget {
@@ -34,6 +35,9 @@ class _OrderScreenState extends State<OrderScreen> {
   final Map<String, TextEditingController> _cost = {};
   final Set<String> _selected = {};
   final Set<String> _seenSuggestions = {};
+  final Set<String> _editedQuantity = {};
+  final Set<String> _editedCost = {};
+  final Set<String> _manualSelection = {};
   bool _sharing = false;
   bool _reviewing = false;
 
@@ -110,9 +114,14 @@ class _OrderScreenState extends State<OrderScreen> {
       // Deterministic reorder confidence is necessary but not sufficient. A
       // currently known physical-fact/integrity blocker for this product wins
       // over any previous selection, including a stale manual selection.
-      if (blockedProductKeys.contains(suggestion.productKey)) {
+      if (blockedProductKeys.contains(suggestion.productKey) ||
+          (suggestion.reviewRequired &&
+              !_manualSelection.contains(suggestion.productKey))) {
         _selected.remove(suggestion.productKey);
-      } else if (selectNew && isNew && !suggestion.reviewRequired) {
+      } else if (selectNew &&
+          isNew &&
+          !suggestion.reviewRequired &&
+          suggestion.suggestedQuantity != null) {
         _selected.add(suggestion.productKey);
       }
     }
@@ -121,19 +130,36 @@ class _OrderScreenState extends State<OrderScreen> {
   void _prepareFields(ReorderSuggestion suggestion) {
     // Only visible rows need editing controllers. Selected rows outside the
     // viewport use the same validated defaults when the PDF is prepared.
-    _quantity.putIfAbsent(
+    final field = _quantity.putIfAbsent(
       suggestion.productKey,
-      () => TextEditingController(
-        text: suggestion.reviewRequired
-            ? ''
-            : '${suggestion.suggestedQuantity}',
-      ),
+      () => TextEditingController(text: _defaultQuantity(suggestion)),
     );
-    _cost.putIfAbsent(
+    final latest = _defaultQuantity(suggestion);
+    if (!_editedQuantity.contains(suggestion.productKey) &&
+        field.text != latest) {
+      field.value = TextEditingValue(
+        text: latest,
+        selection: TextSelection.collapsed(offset: latest.length),
+      );
+    }
+    final cost = _cost.putIfAbsent(
       suggestion.productKey,
       () => TextEditingController(text: _defaultCost(suggestion)),
     );
+    final latestCost = _defaultCost(suggestion);
+    if (!_editedCost.contains(suggestion.productKey) &&
+        cost.text != latestCost) {
+      cost.value = TextEditingValue(
+        text: latestCost,
+        selection: TextSelection.collapsed(offset: latestCost.length),
+      );
+    }
   }
+
+  String _defaultQuantity(ReorderSuggestion suggestion) =>
+      suggestion.reviewRequired || suggestion.suggestedQuantity == null
+      ? ''
+      : '${suggestion.suggestedQuantity}';
 
   String _defaultCost(ReorderSuggestion suggestion) =>
       suggestion.unitPricePaise == null
@@ -160,7 +186,11 @@ class _OrderScreenState extends State<OrderScreen> {
     final previousSelection = Set<String>.of(_selected);
     final suggestions = _suggestions;
     final blocked = _blockedOrders(_operationsPlan(suggestions));
-    _syncSelection(suggestions, blockedProductKeys: blocked.keys.toSet(), selectNew: false);
+    _syncSelection(
+      suggestions,
+      blockedProductKeys: blocked.keys.toSet(),
+      selectNew: false,
+    );
     if (previousSelection.any((key) => !_selected.contains(key))) {
       throw const FormatException(
         'स्टॉक बदल गया है। चुनी हुई दवाएँ दोबारा जाँचें।',
@@ -170,10 +200,9 @@ class _OrderScreenState extends State<OrderScreen> {
     for (final suggestion in suggestions) {
       if (!_selected.contains(suggestion.productKey)) continue;
       final quantity = int.tryParse(
-        (_quantity[suggestion.productKey]?.text ??
-                (suggestion.reviewRequired
-                    ? ''
-                    : '${suggestion.suggestedQuantity}'))
+        (_editedQuantity.contains(suggestion.productKey)
+                ? (_quantity[suggestion.productKey]?.text ?? '')
+                : _defaultQuantity(suggestion))
             .trim(),
       );
       if (quantity == null || quantity < 1 || quantity > 100000000) {
@@ -190,12 +219,29 @@ class _OrderScreenState extends State<OrderScreen> {
           quantity: quantity,
           currentQuantity: suggestion.currentQuantity,
           unitCostPaise: parseMoney(
-            _cost[suggestion.productKey]?.text ?? _defaultCost(suggestion),
+            _editedCost.contains(suggestion.productKey)
+                ? (_cost[suggestion.productKey]?.text ?? '')
+                : _defaultCost(suggestion),
           ),
         ),
       );
     }
     return lines;
+  }
+
+  Future<void> _history(ReorderSuggestion suggestion) async {
+    if (_reviewing || _sharing) return;
+    _reviewing = true;
+    try {
+      await showDemandHistory(
+        context,
+        widget.controller,
+        productKey: suggestion.productKey,
+        title: suggestion.title,
+      );
+    } finally {
+      _reviewing = false;
+    }
   }
 
   Future<void> _share() async {
@@ -317,7 +363,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final enabled = !_sharing && blocker == null;
     final action = blocker != null
         ? 'पहले ${stockActionLabel(blocker.prerequisites.first.kind)}'
-        : suggestion.reviewRequired
+        : suggestion.reviewRequired || suggestion.suggestedQuantity == null
         ? 'मँगाने की मात्रा भरें'
         : '${suggestion.suggestedQuantity} यूनिट मँगाएँ';
     return Card(
@@ -356,13 +402,21 @@ class _OrderScreenState extends State<OrderScreen> {
               onChanged: enabled
                   ? (value) => setState(() {
                       if (value == true) {
+                        _manualSelection.add(suggestion.productKey);
                         _selected.add(suggestion.productKey);
                       } else {
+                        _manualSelection.remove(suggestion.productKey);
                         _selected.remove(suggestion.productKey);
                       }
                     })
                   : null,
             ),
+            if (suggestion.demand != null)
+              TextButton.icon(
+                onPressed: _sharing ? null : () => _history(suggestion),
+                icon: const Icon(Icons.bar_chart_rounded, size: 18),
+                label: const Text('दिनवार बिक्री'),
+              ),
             if (blocker != null)
               TextButton.icon(
                 onPressed: _sharing || _reviewing
@@ -388,6 +442,8 @@ class _OrderScreenState extends State<OrderScreen> {
                           enabled: enabled,
                           textInputAction: TextInputAction.next,
                           controller: _quantity[suggestion.productKey],
+                          onChanged: (_) =>
+                              _editedQuantity.add(suggestion.productKey),
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'मात्रा · यूनिट',
@@ -400,6 +456,8 @@ class _OrderScreenState extends State<OrderScreen> {
                           enabled: enabled,
                           textInputAction: TextInputAction.done,
                           controller: _cost[suggestion.productKey],
+                          onChanged: (_) =>
+                              _editedCost.add(suggestion.productKey),
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),

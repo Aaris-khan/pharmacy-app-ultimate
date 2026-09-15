@@ -45,11 +45,11 @@ void main() {
     final suggestion = stats.reorder.single;
     expect(suggestion.priority, ReorderPriority.urgent);
     expect(suggestion.reason, 'Out of stock');
-    expect(suggestion.suggestedQuantity, greaterThan(0));
+    expect(suggestion.suggestedQuantity, isNull);
     expect(suggestion.reviewRequired, isTrue);
   });
 
-  test('repeated recorded sales raise reorder quantity confidence', () {
+  test('distinct selling days over a week support reviewed daily evidence', () {
     final stats = TrackingStats(
       medicines: [_stock('p1', quantity: 2)],
       sales: [
@@ -63,7 +63,7 @@ void main() {
 
     final suggestion = stats.reorder.single;
     expect(suggestion.priority, ReorderPriority.soon);
-    expect(suggestion.confidence, greaterThanOrEqualTo(.9));
+    expect(suggestion.confidence, greaterThanOrEqualTo(.75));
     expect(suggestion.reviewRequired, isFalse);
     expect(suggestion.coverageDays, isNotNull);
   });
@@ -72,26 +72,23 @@ void main() {
     final stats = TrackingStats(
       medicines: [_stock('p1', quantity: 12, expiry: '2026-09-13')],
       sales: [
-        _sale('s1', 5, DateTime(2026, 9, 5)),
-        _sale('s2', 5, DateTime(2026, 9, 7)),
-        _sale('s3', 5, DateTime(2026, 9, 8)),
+        for (var age = 1; age <= 30; age++)
+          _sale('s$age', 1, today.subtract(Duration(days: age))),
       ],
       range: range,
       today: today,
     );
 
     final suggestion = stats.reorder.single;
-    expect(suggestion.reason, contains('expires within'));
+    expect(suggestion.reason, contains('expire within'));
     expect(suggestion.expiringWithinLeadUnits, 12);
-    expect(suggestion.suggestedQuantity, greaterThan(0));
+    expect(suggestion.suggestedQuantity, 25);
   });
 
   test('unknown quantity never becomes a fabricated reorder amount', () {
     final stats = TrackingStats(
       medicines: [_stock('p1', quantity: null)],
-      sales: [
-        _sale('s1', 20, DateTime(2026, 9, 8)),
-      ],
+      sales: [_sale('s1', 20, DateTime(2026, 9, 8))],
       range: range,
       today: today,
     );

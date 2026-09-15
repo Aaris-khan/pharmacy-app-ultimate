@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'medicine.dart';
 import 'tracking.dart';
+import 'stock_projection.dart';
 
 class ExpiryWasteRisk {
   const ExpiryWasteRisk({
@@ -89,128 +90,31 @@ class PharmacyStockRiskReport {
       groups.putIfAbsent(medicine.identity, () => <Medicine>[]).add(medicine);
     }
 
-    final evidence = <String, _VelocityEvidence>{};
-    final start30 = day.subtract(const Duration(days: 29));
-    final start7 = day.subtract(const Duration(days: 6));
-    for (final sale in sales) {
-      final saleDay = civilDay(sale.occurredAt);
-      if (saleDay.isBefore(start30) || saleDay.isAfter(day)) continue;
-
-      // SaleEvent stores an immutable product snapshot. Always attribute the
-      // historical movement to that snapshot identity, never to the current
-      // Medicine row behind stockId. A later pharmacist correction may change
-      // name/strength/form on the live row; retroactively relabelling old sales
-      // would otherwise manufacture false demand and unsafe expiry forecasts.
-      final item = evidence.putIfAbsent(sale.productKey, _VelocityEvidence.new);
-      item.units30 += sale.quantity;
-      item.events30++;
-      final salt = normalize(sale.salt);
-      if (salt.isNotEmpty) item.salts.add(salt);
-      if (item.firstDay == null || saleDay.isBefore(item.firstDay!)) {
-        item.firstDay = saleDay;
-      }
-      if (!saleDay.isBefore(start7)) {
-        item.units7 += sale.quantity;
-      }
-    }
-
+    final evidence = dailyDemandByProduct(
+      medicines: allRecords,
+      sales: sales,
+      today: day,
+    );
     final risks = <ExpiryWasteRisk>[];
     for (final entry in groups.entries) {
-      final rows = entry.value;
-
-      // Medicine identity intentionally excludes optional salt so ordinary
-      // search can still find incomplete records. Forecasting is stricter: two
-      // different known salts under the same name/strength/form make product
-      // aggregation unsafe, so Needs Attention must resolve those facts first.
-      final currentSalts = rows
-          .map((medicine) => normalize(medicine.salt))
-          .where((salt) => salt.isNotEmpty)
-          .toSet();
-      if (currentSalts.length > 1) continue;
-
-      // Quantity or expiry uncertainty makes a FEFO stock-consumption forecast
-      // unsafe. Existing attention checks surface those missing facts instead of
-      // this engine inventing a denominator or an expiry order.
-      if (rows.any((medicine) => medicine.quantity == null)) continue;
-      final positive = rows
-          .where((medicine) => medicine.quantity! > 0)
-          .toList();
-      if (positive.isEmpty ||
-          positive.any((medicine) => medicine.expiry == null)) {
+      final demand = evidence[entry.key];
+      // Two distinct completed selling days are the minimum for an indicative
+      // waste estimate. Many receipts on one day remain a single day's evidence.
+      if (demand == null || !demand.hasEstimate || demand.sellingDays < 2)
         continue;
-      }
-
-      final movement = evidence[entry.key];
-      if (movement == null ||
-          movement.events30 < 2 ||
-          movement.units30 <= 0 ||
-          movement.firstDay == null) {
-        continue;
-      }
-
-      // Historical sale snapshots are equally authoritative evidence. If their
-      // known salt facts conflict with each other or with the current product,
-      // do not merge movement across potentially different medicines. Missing
-      // salt remains unknown rather than being treated as a contradiction.
-      if (movement.salts.length > 1) continue;
-      if (currentSalts.isNotEmpty &&
-          movement.salts.isNotEmpty &&
-          currentSalts.single != movement.salts.single) {
-        continue;
-      }
-
-      // A newly recorded sales history must not be diluted over a full 30 days.
-      // Clamp the observed denominator to 7..30 days, then use the faster of
-      // recent-seven-day and observed-period demand. This deliberately biases
-      // against false expiry-waste alarms when recent demand is accelerating.
-      final observedDays = math.min(
-        30,
-        math.max(7, day.difference(movement.firstDay!).inDays + 1),
+      final projection = StockDemandProjection.build(
+        medicines: entry.value,
+        today: day,
+        demand: demand,
       );
-      final periodVelocity = movement.units30 / observedDays;
-      final recentVelocity = movement.units7 / 7.0;
-      final planningVelocity = math.max(periodVelocity, recentVelocity);
-      if (planningVelocity <= 0) continue;
-
-      positive.sort((a, b) {
-        final expiry = a.expiry!.compareTo(b.expiry!);
-        if (expiry != 0) return expiry;
-        final batch = normalize(a.batchNumber)
-            .compareTo(normalize(b.batchNumber));
-        return batch != 0 ? batch : a.id.compareTo(b.id);
-      });
-
-      // Track only demand actually allocated to earlier FEFO batches. A surplus
-      // in an early batch expires and must not incorrectly consume demand that
-      // occurs after that batch is gone. This keeps later-batch risk from being
-      // overstated when an earlier lot is itself projected to have leftovers.
-      var projectedConsumedEarlier = 0;
-      for (final medicine in positive) {
-        final days = medicine.daysLeft(day)!;
-        if (days > maxHorizonDays) break;
+      if (projection == null) continue;
+      for (final batch in projection.batches) {
+        if (batch.daysUntilExpiry > maxHorizonDays) break;
+        final medicine = batch.stock;
         final quantity = medicine.quantity!;
-
-        // Expiry is inclusive, so a batch expiring today still has one possible
-        // dispensing day. Project only recorded operational demand; never infer
-        // any clinical need or future prescription volume.
-        final horizonDays = math.max(1, days + 1);
-        final expectedDemandByExpiry = (planningVelocity * horizonDays).ceil();
-        final demandAvailableForBatch = math.max(
-          0,
-          expectedDemandByExpiry - projectedConsumedEarlier,
-        );
-        final projectedConsumed = math.min(quantity, demandAvailableForBatch);
-        final atRisk = quantity - projectedConsumed;
-        projectedConsumedEarlier += projectedConsumed;
-
+        final atRisk = batch.atRiskUnits;
         final minimumSignal = math.max(2, (quantity * .20).ceil());
         if (atRisk < minimumSignal) continue;
-
-        final confidence = movement.events30 >= 6 && observedDays >= 21
-            ? .92
-            : movement.events30 >= 3
-            ? .78
-            : .62;
         risks.add(
           ExpiryWasteRisk(
             stockId: medicine.id,
@@ -221,13 +125,13 @@ class PharmacyStockRiskReport {
             batchNumber: medicine.batchNumber,
             address: medicine.address,
             expiry: medicine.expiry!,
-            daysUntilExpiry: days,
+            daysUntilExpiry: batch.daysUntilExpiry,
             batchQuantity: quantity,
             atRiskUnits: atRisk,
-            planningUnitsPerDay: planningVelocity,
-            saleEvents: movement.events30,
-            observedDays: observedDays,
-            confidence: confidence,
+            planningUnitsPerDay: demand.planningUnitsPerDay,
+            saleEvents: demand.recordedSales,
+            observedDays: demand.observedDays,
+            confidence: demand.confidence,
           ),
         );
       }
@@ -245,12 +149,4 @@ class PharmacyStockRiskReport {
 
   final List<ExpiryWasteRisk> expiryWaste;
   bool get isEmpty => expiryWaste.isEmpty;
-}
-
-class _VelocityEvidence {
-  int units30 = 0;
-  int events30 = 0;
-  int units7 = 0;
-  final Set<String> salts = <String>{};
-  DateTime? firstDay;
 }

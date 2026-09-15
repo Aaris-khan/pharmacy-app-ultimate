@@ -180,7 +180,7 @@ void main() {
             form: m.form,
             salt: saleSalt,
             quantity: 1,
-            occurredAt: today.subtract(Duration(days: i + 1)),
+            occurredAt: today.subtract(Duration(days: i * 3 + 1)),
           ),
       ];
       final tracking = TrackingStats(
@@ -215,7 +215,7 @@ void main() {
     );
     check(
       movement(3).single.action == 'अभी और न मँगाएँ',
-      'Repeated slow sales and 30-day stock support pause',
+      'Sales on three distinct days across a week and 30-day stock support pause',
     );
     check(
       movement(

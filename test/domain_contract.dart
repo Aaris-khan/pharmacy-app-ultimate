@@ -513,9 +513,8 @@ Map<String, void Function()> domainContract() {
         ),
         'An oversized token entered the n-gram index.',
       );
-      final hits = MedicineSearch([
-        document.record,
-      ]).search(longQuery, SearchScope.all, contractSettings, contractToday);
+      final hits = MedicineSearch([document.record])
+          .search(longQuery, SearchScope.all, contractSettings, contractToday);
       check(hits.isEmpty, 'Hostile long query produced a false match.');
     },
     'identity normalizes punctuation and strength spacing': () {
@@ -746,8 +745,9 @@ Map<String, void Function()> domainContract() {
       );
       check(
         tracking.reorder.single.priority == ReorderPriority.urgent &&
-            tracking.reorder.single.suggestedQuantity > 0,
-        'Sold stock was not queued for reorder.',
+            tracking.reorder.single.suggestedQuantity == null &&
+            tracking.reorder.single.reviewRequired,
+        'Sold stock must request order review without inventing quantity.',
       );
     },
     'sales velocity raises the low-stock reorder target': () {
@@ -770,7 +770,7 @@ Map<String, void Function()> domainContract() {
       );
       check(
         tracking.reorder.single.priority == ReorderPriority.soon &&
-            tracking.reorder.single.suggestedQuantity >= 100,
+            (tracking.reorder.single.suggestedQuantity ?? 0) >= 100,
         'Demand velocity did not influence the order quantity.',
       );
     },

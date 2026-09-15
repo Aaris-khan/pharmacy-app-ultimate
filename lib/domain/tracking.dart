@@ -1,7 +1,7 @@
-import 'dart:math';
-
+import 'daily_demand.dart';
 import 'inventory.dart';
 import 'medicine.dart';
+import 'stock_projection.dart';
 
 class SaleEvent {
   SaleEvent({
@@ -171,7 +171,8 @@ class ProductMovement {
   int unknownRevenueSales = 0;
   int? currentQuantity;
   bool identityConflict = false;
-  final Set<String> _observedKnownSalts = <String>{};
+  DailyDemandProfile? demand;
+  double? coverageDays;
   double get unitsPerDay => _periodDays == 0 ? 0 : unitsSold / _periodDays;
   int _periodDays = 1;
   String get title => '$name${strength.isEmpty ? '' : ' · $strength'}';
@@ -198,6 +199,9 @@ class ReorderSuggestion {
     this.reviewRequired = true,
     this.coverageDays,
     this.expiringWithinLeadUnits = 0,
+    this.demand,
+    this.projectedExpiryWaste = 0,
+    this.safetyBufferUnits = 0,
   });
 
   final String productKey;
@@ -207,7 +211,9 @@ class ReorderSuggestion {
   final String form;
   final ReorderPriority priority;
   final String reason;
-  final int suggestedQuantity;
+
+  /// Null means no defensible numerical order can be derived from the records.
+  final int? suggestedQuantity;
   final int unitsSold;
   final double unitsPerDay;
   final List<String> stockIds;
@@ -229,6 +235,11 @@ class ReorderSuggestion {
 
   /// Known units whose recorded expiry is inside the reorder lead window.
   final int expiringWithinLeadUnits;
+  final DailyDemandProfile? demand;
+  final int projectedExpiryWaste;
+  final int safetyBufferUnits;
+  static const leadDays = 7;
+  static const targetDays = 30;
 
   String get title => '$name${strength.isEmpty ? '' : ' · $strength'}';
   String get confidenceLabel => confidence >= .9
@@ -246,13 +257,22 @@ class TrackingStats {
     DateTime? today,
   }) {
     final stockDate = civilDay(today ?? range.end);
+    final allRecords = medicines.toList(growable: false);
+    final allSales = sales.toList(growable: false);
+    final daily = dailyDemandByProduct(
+      medicines: allRecords,
+      sales: allSales,
+      today: stockDate,
+    );
     bool usable(Medicine m) => isDispensableOn(m, stockDate);
     final current = <String, List<Medicine>>{};
-    for (final medicine in medicines.where((m) => !m.archived)) {
+    for (final medicine in allRecords.where((m) => !m.archived)) {
       current.putIfAbsent(medicine.identity, () => []).add(medicine);
     }
 
-    for (final sale in sales.where((sale) => range.contains(sale.occurredAt))) {
+    for (final sale in allSales.where(
+      (sale) => range.contains(sale.occurredAt),
+    )) {
       recordedSales++;
       unitsSold += sale.quantity;
       if (sale.totalAmountPaise == null) {
@@ -276,10 +296,6 @@ class TrackingStats {
           form: sale.form,
         ).._periodDays = range.days,
       );
-      final normalizedSaleSalt = normalize(sale.salt);
-      if (normalizedSaleSalt.isNotEmpty) {
-        movement._observedKnownSalts.add(normalizedSaleSalt);
-      }
       movement.unitsSold += sale.quantity;
       movement.recordedSales++;
       if (sale.totalAmountPaise == null) {
@@ -316,23 +332,17 @@ class TrackingStats {
         ).._periodDays = range.days,
       );
 
-      final currentKnownSalts = records
-          .map((medicine) => normalize(medicine.salt))
-          .where((salt) => salt.isNotEmpty)
-          .toSet();
-      final historicalKnownSalts = movement._observedKnownSalts;
-      final movementIdentityConflict =
-          currentKnownSalts.length > 1 ||
-          historicalKnownSalts.length > 1 ||
-          (currentKnownSalts.isNotEmpty &&
-              historicalKnownSalts.isNotEmpty &&
-              currentKnownSalts.single != historicalKnownSalts.single);
+      final profile = daily[key] ?? DailyDemandAccumulator(stockDate).build();
+      final movementIdentityConflict = profile.identityConflict;
       movement.identityConflict = movementIdentityConflict;
+      movement.demand = profile;
 
       final active = records.where(usable).toList();
       final known = active.where((m) => m.quantity != null).toList();
       final hasUnknownQuantity = active.any((m) => m.quantity == null);
-      final hasUnknownExpiry = active.any((m) => m.expiry == null);
+      final hasUnknownExpiry = active.any(
+        (m) => m.quantity != 0 && m.expiry == null,
+      );
       final currentQuantity = hasUnknownQuantity
           ? null
           : known.fold<int>(0, (sum, m) => sum + m.quantity!);
@@ -342,93 +352,64 @@ class TrackingStats {
       movement.currentQuantity = currentQuantity;
       if (hasAvailable) stockedProductKeys.add(key);
 
-      final hasSoldEntry = records.any((m) => m.sold);
       final knownOutOfStock = !hasUnknownQuantity && currentQuantity == 0;
       final outOfStock = !hasAvailable || knownOutOfStock;
       final expiredOnly =
           active.isEmpty &&
           records.any((m) => !m.sold && (m.daysLeft(stockDate) ?? 0) < 0);
 
-      // Demand velocity can drive stock purchasing only when immutable sale
-      // snapshots remain compatible with current known identity evidence. Raw
-      // movement still stays visible in historical analytics, but an identity
-      // conflict turns purchasing automation into a review-only stock signal.
-      final velocity = movementIdentityConflict ? 0.0 : movement.unitsPerDay;
-      const leadDays = 7;
-      const targetDays = 30;
-      final reorderPoint = max(5, (velocity * leadDays).ceil());
-      final target = max(
-        10,
-        max(reorderPoint * 2, (velocity * targetDays).ceil()),
+      // Planning always uses current daily evidence, independently of the
+      // historical analytics range selected elsewhere in the app.
+      final velocity = movementIdentityConflict
+          ? 0.0
+          : profile.planningUnitsPerDay;
+      final projection = StockDemandProjection.build(
+        medicines: active,
+        today: stockDate,
+        demand: profile,
       );
-      final low = currentQuantity != null && currentQuantity <= reorderPoint;
-
-      var expiringWithinLeadUnits = 0;
-      var everyKnownPositiveUnitExpiresWithinLead = active.isNotEmpty;
-      for (final medicine in active) {
-        final quantity = medicine.quantity;
-        if (quantity == null) {
-          everyKnownPositiveUnitExpiresWithinLead = false;
-          continue;
-        }
-        if (quantity == 0) continue;
-        final days = medicine.daysLeft(stockDate);
-        if (days != null && days >= 0 && days <= leadDays) {
-          expiringWithinLeadUnits += quantity;
-        } else {
-          everyKnownPositiveUnitExpiresWithinLead = false;
-        }
-      }
-      if (currentQuantity == null || currentQuantity == 0) {
-        everyKnownPositiveUnitExpiresWithinLead = false;
-      }
-      final expiryPressure =
-          velocity > 0 && everyKnownPositiveUnitExpiresWithinLead;
+      const leadDays = ReorderSuggestion.leadDays;
+      const targetDays = ReorderSuggestion.targetDays;
+      final buffer = profile.bufferForDays(leadDays);
+      final reorderPoint = profile.demandForDays(leadDays) + buffer;
+      final target = profile.demandForDays(targetDays) + buffer;
+      final leadWaste = projection?.wasteWithinDays(leadDays) ?? 0.0;
+      final targetWaste = projection?.wasteWithinDays(targetDays) ?? 0.0;
+      final effectiveQuantity = currentQuantity == null
+          ? null
+          : currentQuantity - targetWaste;
+      final low =
+          velocity > 0 &&
+          currentQuantity != null &&
+          currentQuantity - leadWaste <= reorderPoint + 1e-9;
+      final expiryPressure = velocity > 0 && leadWaste > 0 && low;
       final needsReplacement = outOfStock || expiredOnly;
+      movement.coverageDays = movementIdentityConflict
+          ? null
+          : projection?.coverageDays;
 
-      // Unknown quantity means we cannot safely infer a shortage. Keep the
-      // uncertainty visible elsewhere rather than fabricating an order amount.
-      if (!needsReplacement && !low && !expiryPressure) continue;
-
-      // Historical SOLD quantity is useful evidence only when it belongs to a
-      // row that is actually SOLD. A corrupt/legacy active row can retain stale
-      // sold metadata; never let that stale field inflate a reorder quantity.
-      final previousStock = records
-          .where((m) => m.sold)
-          .map((m) => m.soldQuantity ?? 0)
-          .fold<int>(0, max);
-      final effectiveQuantity = expiryPressure
-          ? max(0, (currentQuantity ?? 0) - expiringWithinLeadUnits)
-          : (currentQuantity ?? 0);
-      final rawSuggested = needsReplacement
-          ? max(1, max(target, previousStock))
-          : max(1, target - effectiveQuantity);
-      final suggested = rawSuggested.clamp(1, 100000000);
-
-      final confidence = movementIdentityConflict
-          ? .35
-          : hasFutureManufacture
-          ? .35
-          : hasUnknownQuantity
-          ? .35
-          : hasUnknownExpiry
-          ? movement.recordedSales >= 3
-                ? .76
-                : .58
-          : movement.recordedSales >= 3
-          ? .95
-          : movement.recordedSales > 0
-          ? .82
-          : .62;
-      final reviewRequired =
-          movementIdentityConflict ||
-          hasFutureManufacture ||
-          confidence < .75 ||
-          movement.recordedSales == 0;
-      final coverageDays =
-          !movementIdentityConflict && velocity > 0 && currentQuantity != null
-          ? currentQuantity / velocity
+      // No fixed ten-unit floor and no reuse of an old SOLD batch as demand.
+      // Unknown demand/stock/expiry is a review task, not a fabricated quantity.
+      if (!needsReplacement && !low) continue;
+      final canCalculate =
+          profile.hasEstimate &&
+          !movementIdentityConflict &&
+          !hasFutureManufacture &&
+          !hasUnknownQuantity &&
+          !hasUnknownExpiry;
+      final rawSuggested = canCalculate && effectiveQuantity != null
+          ? ceilStockUnits(target - effectiveQuantity)
           : null;
+      final suggested = rawSuggested == null || rawSuggested == 0
+          ? null
+          : rawSuggested.clamp(1, 100000000);
+      final confidence = !canCalculate ? .35 : profile.confidence;
+      final reviewRequired =
+          !canCalculate ||
+          profile.reviewRequired ||
+          suggested == null ||
+          (rawSuggested ?? 0) > 100000000;
+      final coverageDays = movement.coverageDays;
 
       // Purchase-order cost is an accounting input, not a value Aaris may
       // guess from whichever batch happens to be first in an Iterable. Auto-fill
@@ -463,19 +444,21 @@ class TrackingStats {
               ? needsReplacement
                     ? 'Out of stock · recorded sales identity needs review'
                     : 'Recorded sales identity needs review before reorder'
+              : profile.historyNeedsReview
+              ? 'Recorded sale dates need review before reorder'
               : hasFutureManufacture && active.isEmpty
               ? 'Manufacturing date needs review before reorder'
               : expiredOnly
               ? 'Only expired stock remains'
-              : outOfStock || hasSoldEntry && !hasAvailable
+              : outOfStock
               ? 'Out of stock'
               : expiryPressure
-              ? 'Usable stock expires within $leadDays days'
+              ? 'Stock may run short as batches expire within $leadDays days'
               : velocity > 0
               ? 'Low stock · ${velocity.toStringAsFixed(1)} units/day'
               : 'Low stock',
           suggestedQuantity: suggested,
-          unitsSold: movementIdentityConflict ? 0 : movement.unitsSold,
+          unitsSold: movementIdentityConflict ? 0 : profile.unitsLast30Days,
           unitsPerDay: velocity,
           stockIds: records.map((m) => m.id).toList(growable: false),
           currentQuantity: currentQuantity,
@@ -483,7 +466,11 @@ class TrackingStats {
           confidence: confidence,
           reviewRequired: reviewRequired,
           coverageDays: coverageDays,
-          expiringWithinLeadUnits: expiringWithinLeadUnits,
+          expiringWithinLeadUnits:
+              projection?.expiringWithinDays(leadDays) ?? 0,
+          demand: profile,
+          projectedExpiryWaste: ceilStockUnits(targetWaste),
+          safetyBufferUnits: ceilStockUnits(buffer),
         ),
       );
     }
@@ -536,6 +523,53 @@ class TrackingStats {
     });
     return result;
   }
+}
+
+/// Shared evidence boundary for ordering and expiry. Immutable sale identities
+/// are never relabelled through a subsequently edited stock row. Raw totals stay
+/// visible; incompatible identity or impossible chronology disables forecasting.
+Map<String, DailyDemandProfile> dailyDemandByProduct({
+  required Iterable<Medicine> medicines,
+  required Iterable<SaleEvent> sales,
+  required DateTime today,
+}) {
+  final day = civilDay(today);
+  final records = {
+    for (final m in medicines)
+      if (!m.archived) m.id: m,
+  };
+  final salts = <String, Set<String>>{};
+  final accumulators = <String, DailyDemandAccumulator>{};
+  for (final m in records.values) {
+    accumulators.putIfAbsent(m.identity, () => DailyDemandAccumulator(day));
+    final salt = normalize(m.salt);
+    if (salt.isNotEmpty) salts.putIfAbsent(m.identity, () => {}).add(salt);
+  }
+  for (final sale in sales) {
+    final saleDay = civilDay(sale.occurredAt);
+    if (day.difference(saleDay).inDays > 30) continue;
+    final accumulator = accumulators.putIfAbsent(
+      sale.productKey,
+      () => DailyDemandAccumulator(day),
+    );
+    final salt = normalize(sale.salt);
+    if (!saleDay.isAfter(day) && salt.isNotEmpty) {
+      salts.putIfAbsent(sale.productKey, () => {}).add(salt);
+    }
+    final stock = records[sale.stockId];
+    final sameIdentity = stock != null && stock.identity == sale.productKey;
+    final invalidChronology =
+        sameIdentity &&
+        ((stock.mfg != null && saleDay.isBefore(civilDay(stock.mfg!))) ||
+            (stock.expiry != null && saleDay.isAfter(civilDay(stock.expiry!))));
+    accumulator.add(sale.occurredAt, sale.quantity, valid: !invalidChronology);
+  }
+  return Map.unmodifiable({
+    for (final entry in accumulators.entries)
+      entry.key: entry.value.build(
+        identityConflict: (salts[entry.key]?.length ?? 0) > 1,
+      ),
+  });
 }
 
 extension _FirstOrNull<T> on Iterable<T> {
