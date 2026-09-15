@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../domain/stock_guidance.dart';
 import '../state/autopilot_supervisor.dart';
 
 /// A compact global signal for urgent pharmacist work.
@@ -38,19 +39,17 @@ class AarisAutopilotBeacon extends StatelessWidget {
           ? scheme.onErrorContainer
           : scheme.onPrimaryContainer;
       final priorityText = degraded
-          ? 'local safety check unavailable'
+          ? 'दोबारा जाँचें'
           : critical
-          ? '${digest.criticalCount} critical${digest.highCount > 0 ? ' · ${digest.highCount} high' : ''}'
-          : '${digest.highCount} high priority';
-      final next = degraded
-          ? 'Tap to retry the deterministic pharmacist work queue'
-          : digest.hasNextTask
-          ? digest.nextTaskTitle
-          : 'Open the current pharmacist work queue';
+          ? '${digest.criticalCount} बहुत ज़रूरी'
+          : '${digest.highCount} ज़रूरी';
+      final next = !degraded && digest.nextKind != null
+          ? stockActionLabel(digest.nextKind!)
+          : 'काम देखने के लिए टैप करें';
 
       return Semantics(
         button: true,
-        label: digest.accessibilitySummary,
+        label: 'आज के काम · $priorityText · $next',
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
           child: Material(
@@ -81,7 +80,7 @@ class AarisAutopilotBeacon extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Aaris Autopilot · $priorityText',
+                            'आज के काम · $priorityText',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelLarge?.copyWith(
@@ -91,7 +90,7 @@ class AarisAutopilotBeacon extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            degraded ? next : 'Next: $next',
+                            next,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(

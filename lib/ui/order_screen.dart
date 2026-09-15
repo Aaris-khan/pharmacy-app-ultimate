@@ -5,16 +5,24 @@ import 'package:flutter/material.dart';
 import '../domain/attention.dart';
 import '../domain/medicine.dart';
 import '../domain/operations_plan.dart';
+import '../domain/stock_guidance.dart';
 import '../domain/tracking.dart';
 import '../services/purchase_order_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
+import 'editor_screen.dart';
 
 class OrderScreen extends StatefulWidget {
-  const OrderScreen({super.key, required this.controller, required this.range});
+  const OrderScreen({
+    super.key,
+    required this.controller,
+    required this.range,
+    this.focusProductKey,
+  });
 
   final PharmacyController controller;
   final TrackingRange range;
+  final String? focusProductKey;
 
   @override
   State<OrderScreen> createState() => _OrderScreenState();
@@ -25,14 +33,42 @@ class _OrderScreenState extends State<OrderScreen> {
   final Map<String, TextEditingController> _quantity = {};
   final Map<String, TextEditingController> _cost = {};
   final Set<String> _selected = {};
+  final Set<String> _seenSuggestions = {};
   bool _sharing = false;
+  bool _reviewing = false;
 
-  List<ReorderSuggestion> get _suggestions =>
-      widget.controller.tracking(widget.range).reorder;
+  Object? _readSnapshot;
+  DateTime? _readDay;
+  TrackingRange? _readRange;
+  String? _readFocus;
+  List<ReorderSuggestion>? _readSuggestions;
+  List<ReorderSuggestion>? _planSuggestions;
+  PharmacyOperationsPlan? _readPlan;
 
-  PharmacyOperationsPlan _operationsPlan(
-    List<ReorderSuggestion> suggestions,
-  ) {
+  List<ReorderSuggestion> get _suggestions {
+    final snapshot = widget.controller.snapshot;
+    final day = widget.controller.today;
+    if (identical(snapshot, _readSnapshot) &&
+        day == _readDay &&
+        widget.range.start == _readRange?.start &&
+        widget.range.end == _readRange?.end &&
+        _readFocus == widget.focusProductKey) {
+      return _readSuggestions!;
+    }
+    final source = widget.controller.tracking(widget.range).reorder;
+    _readSuggestions = [
+      ...source.where((item) => item.productKey == widget.focusProductKey),
+      ...source.where((item) => item.productKey != widget.focusProductKey),
+    ];
+    _readSnapshot = snapshot;
+    _readDay = day;
+    _readRange = widget.range;
+    _readFocus = widget.focusProductKey;
+    return _readSuggestions!;
+  }
+
+  PharmacyOperationsPlan _operationsPlan(List<ReorderSuggestion> suggestions) {
+    if (identical(suggestions, _planSuggestions)) return _readPlan!;
     final attention = PharmacyAttentionReport.build(
       medicines: widget.controller.records,
       settings: widget.controller.settings,
@@ -40,15 +76,15 @@ class _OrderScreenState extends State<OrderScreen> {
       reorder: suggestions,
       sales: widget.controller.sales,
     );
-    return PharmacyOperationsPlan.build(
+    final plan = PharmacyOperationsPlan.build(
       items: attention.items,
       medicines: widget.controller.records,
     );
+    _planSuggestions = suggestions;
+    return _readPlan = plan;
   }
 
-  Map<String, OperationsPlanStep> _blockedOrders(
-    PharmacyOperationsPlan plan,
-  ) {
+  Map<String, OperationsPlanStep> _blockedOrders(PharmacyOperationsPlan plan) {
     final blocked = <String, OperationsPlanStep>{};
     for (final step in plan.steps) {
       final productKey = step.item.productKey;
@@ -62,40 +98,54 @@ class _OrderScreenState extends State<OrderScreen> {
     return blocked;
   }
 
-  void _ensureControllers(
+  void _syncSelection(
     Iterable<ReorderSuggestion> suggestions, {
     Set<String> blockedProductKeys = const <String>{},
+    bool selectNew = true,
   }) {
+    _selected.retainAll(suggestions.map((item) => item.productKey).toSet());
     for (final suggestion in suggestions) {
-      final isNew = !_quantity.containsKey(suggestion.productKey);
-      if (isNew) {
-        _quantity[suggestion.productKey] = TextEditingController(
-          text: '${suggestion.suggestedQuantity}',
-        );
-        _cost[suggestion.productKey] = TextEditingController(
-          text: suggestion.unitPricePaise == null
-              ? ''
-              : (suggestion.unitPricePaise! / 100).toStringAsFixed(2),
-        );
-      }
+      final isNew = _seenSuggestions.add(suggestion.productKey);
 
       // Deterministic reorder confidence is necessary but not sufficient. A
       // currently known physical-fact/integrity blocker for this product wins
       // over any previous selection, including a stale manual selection.
       if (blockedProductKeys.contains(suggestion.productKey)) {
         _selected.remove(suggestion.productKey);
-      } else if (isNew && !suggestion.reviewRequired) {
+      } else if (selectNew && isNew && !suggestion.reviewRequired) {
         _selected.add(suggestion.productKey);
       }
     }
   }
+
+  void _prepareFields(ReorderSuggestion suggestion) {
+    // Only visible rows need editing controllers. Selected rows outside the
+    // viewport use the same validated defaults when the PDF is prepared.
+    _quantity.putIfAbsent(
+      suggestion.productKey,
+      () => TextEditingController(
+        text: suggestion.reviewRequired
+            ? ''
+            : '${suggestion.suggestedQuantity}',
+      ),
+    );
+    _cost.putIfAbsent(
+      suggestion.productKey,
+      () => TextEditingController(text: _defaultCost(suggestion)),
+    );
+  }
+
+  String _defaultCost(ReorderSuggestion suggestion) =>
+      suggestion.unitPricePaise == null
+      ? ''
+      : (suggestion.unitPricePaise! / 100).toStringAsFixed(2);
 
   @override
   void initState() {
     super.initState();
     final suggestions = _suggestions;
     final blocked = _blockedOrders(_operationsPlan(suggestions)).keys.toSet();
-    _ensureControllers(suggestions, blockedProductKeys: blocked);
+    _syncSelection(suggestions, blockedProductKeys: blocked);
   }
 
   @override
@@ -107,27 +157,28 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   List<PurchaseOrderLine> _lines() {
+    final previousSelection = Set<String>.of(_selected);
     final suggestions = _suggestions;
     final blocked = _blockedOrders(_operationsPlan(suggestions));
-    _ensureControllers(
-      suggestions,
-      blockedProductKeys: blocked.keys.toSet(),
-    );
+    _syncSelection(suggestions, blockedProductKeys: blocked.keys.toSet(), selectNew: false);
+    if (previousSelection.any((key) => !_selected.contains(key))) {
+      throw const FormatException(
+        'स्टॉक बदल गया है। चुनी हुई दवाएँ दोबारा जाँचें।',
+      );
+    }
     final lines = <PurchaseOrderLine>[];
     for (final suggestion in suggestions) {
       if (!_selected.contains(suggestion.productKey)) continue;
-      final blocker = blocked[suggestion.productKey];
-      if (blocker != null) {
-        throw FormatException(
-          '${suggestion.title} is waiting on ${blocker.prerequisites.length} verified stock ${blocker.prerequisites.length == 1 ? 'fact' : 'facts'}. Resolve Needs Attention before adding it to a purchase order.',
-        );
-      }
       final quantity = int.tryParse(
-        _quantity[suggestion.productKey]!.text.trim(),
+        (_quantity[suggestion.productKey]?.text ??
+                (suggestion.reviewRequired
+                    ? ''
+                    : '${suggestion.suggestedQuantity}'))
+            .trim(),
       );
       if (quantity == null || quantity < 1 || quantity > 100000000) {
         throw FormatException(
-          'Enter a positive whole-number quantity for ${suggestion.title}.',
+          '${suggestion.title}: मँगाने की मात्रा 1 या उससे अधिक लिखें।',
         );
       }
       lines.add(
@@ -138,7 +189,9 @@ class _OrderScreenState extends State<OrderScreen> {
           reason: suggestion.reason,
           quantity: quantity,
           currentQuantity: suggestion.currentQuantity,
-          unitCostPaise: parseMoney(_cost[suggestion.productKey]!.text),
+          unitCostPaise: parseMoney(
+            _cost[suggestion.productKey]?.text ?? _defaultCost(suggestion),
+          ),
         ),
       );
     }
@@ -157,205 +210,212 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
+  Future<void> _reviewBlocker(ReorderSuggestion suggestion) async {
+    if (_reviewing || _sharing) return;
+    setState(() => _reviewing = true);
+    try {
+      final liveStep = _blockedOrders(
+        _operationsPlan(_suggestions),
+      )[suggestion.productKey];
+      if (liveStep == null) return;
+      final fact = liveStep.prerequisites.first;
+      final records = fact.stockIds
+          .map((id) => widget.controller.snapshot.records[id])
+          .whereType<Medicine>()
+          .where((record) => !record.archived)
+          .toList(growable: false);
+      if (records.isEmpty) return;
+      var id = records.first.id;
+      if (records.length > 1) {
+        final selected = await showModalBottomSheet<String>(
+          context: context,
+          useSafeArea: true,
+          builder: (sheetContext) => ListView.builder(
+            itemCount: records.length,
+            itemBuilder: (_, index) {
+              final record = records[index];
+              return ListTile(
+                title: Text(record.title),
+                subtitle: Text(
+                  record.address.isEmpty ? 'स्टॉक चुनें' : record.address,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.pop(sheetContext, record.id),
+              );
+            },
+          ),
+        );
+        if (selected == null || !mounted) return;
+        id = selected;
+      }
+      final live = widget.controller.snapshot.records[id];
+      if (mounted && live != null && !live.archived) {
+        await openEditor(context, widget.controller, record: live);
+      }
+    } finally {
+      if (mounted) setState(() => _reviewing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Order Now')),
-    body: AnimatedBuilder(
-      animation: widget.controller,
-      builder: (context, _) {
-        final suggestions = _suggestions;
-        final operationsPlan = _operationsPlan(suggestions);
-        final blockedOrders = _blockedOrders(operationsPlan);
-        _ensureControllers(
-          suggestions,
-          blockedProductKeys: blockedOrders.keys.toSet(),
-        );
-        final needsReview = suggestions
-            .where((suggestion) => suggestion.reviewRequired)
-            .length;
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-          children: [
-            const ScreenIntro(
-              title: 'Prepare your order',
-              message:
-                  'Aaris uses recorded stock, expiry and sales movement to prepare reorder suggestions. Uncertain suggestions stay unselected, and known data-integrity blockers must be resolved before ordering.',
-              icon: Icons.shopping_bag_outlined,
-            ),
-            const FlowSteps(['Verify blockers', 'Check quantity', 'Share PDF']),
-            if (suggestions.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    StatusPill(
-                      '${_selected.length} medicines selected',
-                      color: amber,
-                    ),
-                    if (needsReview > 0)
-                      StatusPill(
-                        '$needsReview need review',
-                        color: primary,
-                      ),
-                    if (blockedOrders.isNotEmpty)
-                      StatusPill(
-                        '${blockedOrders.length} blocked by stock facts',
-                        color: red,
-                      ),
-                  ],
+    appBar: AppBar(title: const Text('दवाएँ मँगाएँ')),
+    body: SafeArea(
+      top: false,
+      child: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (context, _) {
+          final suggestions = _suggestions;
+          final blocked = _blockedOrders(_operationsPlan(suggestions));
+          _syncSelection(suggestions, blockedProductKeys: blocked.keys.toSet());
+          final indices = {
+            for (var i = 0; i < suggestions.length; i++)
+              suggestions[i].productKey: i + 1,
+          };
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            itemCount: suggestions.length + 2,
+            findChildIndexCallback: (key) =>
+                key is ValueKey<String> ? indices[key.value] : null,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    suggestions.isEmpty
+                        ? 'अभी कोई नया ऑर्डर सुझाया नहीं गया है।'
+                        : '${_selected.length} दवाएँ चुनीं · मात्रा जाँचकर PDF भेजें',
+                    style: const TextStyle(color: muted, fontSize: 13),
+                  ),
+                );
+              }
+              if (index <= suggestions.length) {
+                final suggestion = suggestions[index - 1];
+                return _orderCard(suggestion, blocked[suggestion.productKey]);
+              }
+              if (suggestions.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: FilledButton.icon(
+                  onPressed: _sharing || _selected.isEmpty
+                      ? null
+                      : () => unawaited(_share()),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: Text(_sharing ? 'PDF बन रही है…' : 'ऑर्डर PDF भेजें'),
                 ),
+              );
+            },
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget _orderCard(ReorderSuggestion suggestion, OperationsPlanStep? blocker) {
+    if (blocker == null) _prepareFields(suggestion);
+    final enabled = !_sharing && blocker == null;
+    final action = blocker != null
+        ? 'पहले ${stockActionLabel(blocker.prerequisites.first.kind)}'
+        : suggestion.reviewRequired
+        ? 'मँगाने की मात्रा भरें'
+        : '${suggestion.suggestedQuantity} यूनिट मँगाएँ';
+    return Card(
+      key: ValueKey(suggestion.productKey),
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: primary.withValues(alpha: .12)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              action,
+              style: TextStyle(
+                color: blocker == null ? primary : amber,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
               ),
-            if (suggestions.isEmpty)
-              const EmptyState(
-                title: 'No reorder suggestions',
-                message:
-                    'Sold-out, low-stock or expiring-before-lead-time medicines will appear here when recorded facts support a suggestion.',
+            ),
+            CheckboxListTile(
+              value: _selected.contains(suggestion.productKey),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.trailing,
+              title: Text(
+                suggestion.title,
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-            for (final suggestion in suggestions)
-              Builder(
-                builder: (context) {
-                  final blocked = blockedOrders[suggestion.productKey];
-                  final prerequisites = blocked?.prerequisites ?? const <AttentionItem>[];
-                  final enabled = !_sharing && blocked == null;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Surface(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CheckboxListTile(
-                            value: _selected.contains(suggestion.productKey),
-                            contentPadding: EdgeInsets.zero,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              suggestion.title,
-                              style: const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            subtitle: Text(
-                              [
-                                if (suggestion.salt.isNotEmpty) suggestion.salt,
-                                suggestion.reason,
-                                suggestion.confidenceLabel,
-                                if (suggestion.unitPricePaise == null)
-                                  'Unit cost needs review',
-                                if (suggestion.reviewRequired)
-                                  'Manual review required',
-                                if (blocked != null)
-                                  'Blocked by ${prerequisites.length} verified-stock prerequisite${prerequisites.length == 1 ? '' : 's'}',
-                              ].join(' · '),
-                            ),
-                            onChanged: enabled
-                                ? (value) => setState(() {
-                                    if (value == true) {
-                                      _selected.add(suggestion.productKey);
-                                    } else {
-                                      _selected.remove(suggestion.productKey);
-                                    }
-                                  })
-                                : null,
+              subtitle: Text(
+                reorderSummary(suggestion, widget.range.days),
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+              onChanged: enabled
+                  ? (value) => setState(() {
+                      if (value == true) {
+                        _selected.add(suggestion.productKey);
+                      } else {
+                        _selected.remove(suggestion.productKey);
+                      }
+                    })
+                  : null,
+            ),
+            if (blocker != null)
+              TextButton.icon(
+                onPressed: _sharing || _reviewing
+                    ? null
+                    : () => _reviewBlocker(suggestion),
+                icon: const Icon(Icons.edit_note_rounded),
+                label: const Text('जानकारी जाँचें'),
+              )
+            else ...[
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final fieldWidth = constraints.maxWidth < 290
+                      ? constraints.maxWidth
+                      : (constraints.maxWidth - 12) / 2;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      SizedBox(
+                        width: fieldWidth,
+                        child: TextField(
+                          enabled: enabled,
+                          textInputAction: TextInputAction.next,
+                          controller: _quantity[suggestion.productKey],
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'मात्रा · यूनिट',
                           ),
-                          if (blocked != null) ...[
-                            Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: red.withValues(alpha: .08),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Text(
-                                'Resolve first: ${prerequisites.first.title}. Aaris has removed this medicine from the current order selection until the authoritative stock facts are corrected.',
-                                style: const TextStyle(
-                                  color: red,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ],
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              SizedBox(
-                                width: 150,
-                                child: TextField(
-                                  enabled: enabled,
-                                  textInputAction: TextInputAction.next,
-                                  controller: _quantity[suggestion.productKey],
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Order quantity',
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 170,
-                                child: TextField(
-                                  enabled: enabled,
-                                  textInputAction: TextInputAction.next,
-                                  controller: _cost[suggestion.productKey],
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Unit cost · ₹',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            [
-                              suggestion.currentQuantity == null
-                                  ? 'Current stock unknown'
-                                  : 'Current stock: ${suggestion.currentQuantity}',
-                              if (suggestion.coverageDays != null)
-                                'Coverage ≈ ${suggestion.coverageDays!.toStringAsFixed(1)} days from recorded sales',
-                              if (suggestion.expiringWithinLeadUnits > 0)
-                                '${suggestion.expiringWithinLeadUnits} known units expire inside the lead window',
-                            ].join(' · '),
-                            style: const TextStyle(fontSize: 11, color: muted),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      SizedBox(
+                        width: fieldWidth,
+                        child: TextField(
+                          enabled: enabled,
+                          textInputAction: TextInputAction.done,
+                          controller: _cost[suggestion.productKey],
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'प्रति यूनिट · ₹',
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
-            if (suggestions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: _sharing || _selected.isEmpty
-                    ? null
-                    : () => unawaited(_share()),
-                icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: Text(
-                  _sharing
-                      ? 'Preparing purchase order…'
-                      : 'Share purchase-order PDF',
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.only(top: 10),
-                child: Text(
-                  'Suggested quantities are operational estimates from your recorded inventory and sales—not medical advice. Missing or conflicting facts cannot enter a purchase order silently.',
-                  style: TextStyle(fontSize: 11, color: muted),
-                  textAlign: TextAlign.center,
-                ),
-              ),
             ],
           ],
-        );
-      },
-    ),
-  );
+        ),
+      ),
+    );
+  }
 }

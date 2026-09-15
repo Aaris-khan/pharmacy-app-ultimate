@@ -170,6 +170,7 @@ class ProductMovement {
   int knownRevenuePaise = 0;
   int unknownRevenueSales = 0;
   int? currentQuantity;
+  bool identityConflict = false;
   final Set<String> _observedKnownSalts = <String>{};
   double get unitsPerDay => _periodDays == 0 ? 0 : unitsSold / _periodDays;
   int _periodDays = 1;
@@ -326,6 +327,7 @@ class TrackingStats {
           (currentKnownSalts.isNotEmpty &&
               historicalKnownSalts.isNotEmpty &&
               currentKnownSalts.single != historicalKnownSalts.single);
+      movement.identityConflict = movementIdentityConflict;
 
       final active = records.where(usable).toList();
       final known = active.where((m) => m.quantity != null).toList();
