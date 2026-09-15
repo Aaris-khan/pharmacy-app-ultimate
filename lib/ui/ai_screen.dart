@@ -10,6 +10,7 @@ import '../services/ai_service.dart';
 import '../services/local_ai_service.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
+import 'cloud_ai_connection_panel.dart';
 import 'local_models_panel.dart';
 import 'medicine_capture.dart';
 import 'medicine_intake_panel.dart';
@@ -1597,15 +1598,8 @@ class _AiConnectionsSheet extends StatefulWidget {
 }
 
 class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
-  late String provider;
-  late final TextEditingController model;
-  late final TextEditingController endpoint;
-  late final TextEditingController key;
   final local = LocalAiService.instance;
   late bool localBrainEnabled;
-  late bool streamingEnabled;
-  late bool jsonModeEnabled;
-  bool obscure = true;
   bool busy = false;
   bool apiExpanded = false;
   String error = '';
@@ -1613,56 +1607,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
   @override
   void initState() {
     super.initState();
-    provider = widget.initial.provider == 'OpenAI-compatible'
-        ? 'Compatible' : widget.initial.provider;
-    model = TextEditingController(text: widget.initial.model);
-    endpoint = TextEditingController(text: widget.initial.endpoint);
-    key = TextEditingController(text: widget.initial.key);
     localBrainEnabled = widget.initial.localBrainEnabled;
-    streamingEnabled = widget.initial.streamingEnabled;
-    jsonModeEnabled = widget.initial.useJsonMode;
-  }
-
-  @override
-  void dispose() {
-    model.dispose();
-    endpoint.dispose();
-    key.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (busy) return;
-    setState(() {
-      busy = true;
-      error = '';
-    });
-    try {
-      final config = AiConfiguration(
-        provider: provider,
-        model: model.text.trim(),
-        endpoint: endpoint.text.trim(),
-        key: key.text.trim(),
-        // Saving or changing a cloud credential must not mutate the independent
-        // Local Brain preference. The owner can keep a private on-device route
-        // active while also keeping a cloud provider ready for explicit use.
-        localBrainEnabled: localBrainEnabled,
-        streamingEnabled: streamingEnabled,
-        jsonModeEnabled: jsonModeEnabled,
-        responseTimeoutSeconds: widget.initial.responseTimeoutSeconds,
-      );
-      config.uri;
-      await widget.service.saveConfiguration(config);
-      if (mounted) Navigator.pop(context, config);
-    } catch (e) {
-      if (mounted) {
-        setState(
-          () => error = e.toString().replaceFirst('FormatException: ', ''),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
   }
 
   Future<void> _setLocalBrain(bool value) async {
@@ -1682,9 +1627,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
       } else {
         await local.suspend();
       }
-      await widget.service.saveConfiguration(
-        widget.initial.copyWith(localBrainEnabled: value),
-      );
+      await widget.service.setLocalBrainEnabled(value);
       if (mounted) setState(() => localBrainEnabled = value);
     } catch (e) {
       if (mounted) {
@@ -1745,130 +1688,19 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
     ),
   );
 
-  Future<void> _remove() async {
-    if (busy) return;
-    setState(() => busy = true);
-    try {
-      await widget.service.forgetKey();
-      final saved = await widget.service.loadConfiguration();
-      if (mounted) Navigator.pop(context, saved);
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
+  String get _providerLabel => widget.initial.providerLabel;
 
-  String get _providerLabel =>
-      AiConfiguration(provider: provider).providerLabel;
-
-  Widget _apiFields(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-    child: Column(
-      children: [
-        DropdownButtonFormField<String>(
-          initialValue: provider,
-          decoration: const InputDecoration(labelText: 'Provider'),
-          items: const [
-            DropdownMenuItem(value: 'Gemini', child: Text('Google Gemini')),
-            DropdownMenuItem(value: 'OpenAI', child: Text('OpenAI')),
-            DropdownMenuItem(value: 'Anthropic', child: Text('Anthropic')),
-            DropdownMenuItem(
-              value: 'Compatible',
-              child: Text('OpenAI-compatible'),
-            ),
-          ],
-          onChanged: busy
-              ? null
-              : (value) => setState(() {
-                  provider = value ?? 'Gemini';
-                  jsonModeEnabled = provider == 'Gemini';
-                  // Keys/models are tied to the selected provider. Never send a
-                  // credential to another host merely because the picker changed.
-                  key.clear();
-                  model.clear();
-                  endpoint.clear();
-                }),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: model,
-          enabled: !busy,
-          decoration: const InputDecoration(labelText: 'Model name'),
-        ),
-        if (provider == 'Compatible') ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: endpoint,
-            enabled: !busy,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'HTTPS base URL or full endpoint',
-              helperText: 'Use an API that supports chat/completions.',
-            ),
-          ),
-        ],
-        const SizedBox(height: 10),
-        TextField(
-          controller: key,
-          enabled: !busy,
-          obscureText: obscure,
-          enableSuggestions: false,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: 'API key',
-            helperText: 'Saved securely on this device.',
-            suffixIcon: IconButton(
-              tooltip: obscure ? 'Show API key' : 'Hide API key',
-              onPressed: busy ? null : () => setState(() => obscure = !obscure),
-              icon: Icon(
-                obscure
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-              ),
-            ),
-          ),
-        ),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Stream replies'),
-          value: streamingEnabled,
-          onChanged: busy ? null : (value) =>
-              setState(() => streamingEnabled = value),
-        ),
-        if (provider != 'Anthropic')
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Provider supports JSON mode'),
-            subtitle: const Text('Turn off if this model rejects JSON mode.'),
-            value: jsonModeEnabled,
-            onChanged: busy ? null : (value) =>
-                setState(() => jsonModeEnabled = value),
-          ),
-        if (error.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Text(
-              error,
-              style: const TextStyle(color: red, fontSize: 12),
-            ),
-          ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: busy ? null : _save,
-            icon: const Icon(Icons.lock_rounded),
-            label: Text(busy ? 'Saving…' : 'Save connection'),
-          ),
-        ),
-        if (widget.initial.key.isNotEmpty)
-          TextButton(
-            onPressed: busy ? null : _remove,
-            child: const Text('Remove saved key'),
-          ),
-      ],
-    ),
+  Widget _apiFields(BuildContext context) => CloudAiConnectionPanel(
+    initial: widget.initial,
+    service: widget.service,
+    localBrainEnabled: localBrainEnabled,
+    blocked: busy,
+    onSavingChanged: (value) {
+      if (mounted) setState(() => busy = value);
+    },
+    onSaved: (config) {
+      if (mounted) Navigator.pop(context, config);
+    },
   );
 
   @override
@@ -1920,6 +1752,14 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
               const LocalModelsPanel(),
               const SizedBox(height: 10),
               _brainRouteCard(context),
+              if (error.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    error,
+                    style: const TextStyle(color: red, fontSize: 12),
+                  ),
+                ),
               const SizedBox(height: 14),
               Material(
                 color: Colors.transparent,
@@ -2025,7 +1865,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
                                   const SizedBox(height: 2),
                                   Text(
                                     configured
-                                        ? '$_providerLabel · Connected'
+                                        ? '$_providerLabel · Saved'
                                         : 'API key · Not configured',
                                     style: const TextStyle(
                                       color: muted,

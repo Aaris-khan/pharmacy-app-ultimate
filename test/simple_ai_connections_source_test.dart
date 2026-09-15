@@ -11,6 +11,7 @@ void main() {
           .readAsStringSync();
       final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
       final routing = File('lib/services/ai_service.dart').readAsStringSync();
+      final cloud = File('lib/ui/cloud_ai_connection_panel.dart').readAsStringSync();
 
       expect(panel, contains('Download / Change model'));
       expect(panel, contains('Local AI · Ready'));
@@ -35,7 +36,7 @@ void main() {
       expect(service, contains('memoryWarning'));
 
       expect(routing, contains('if (config.localBrainEnabled)'));
-      expect(routing, contains("await saveConfiguration(config.copyWith(key: ''));"));
+      expect(routing, contains('_connections.forgetActiveKey()'));
       expect(routing, isNot(contains("forgetKey() => _storage.delete")));
 
       expect(ai, contains('Choose how Aaris uses AI.'));
@@ -49,14 +50,11 @@ void main() {
       // Cloud credentials and the local Brain switch are independent
       // capabilities. Saving an API connection must not silently turn off or
       // suspend an already-selected on-device route.
-      final saveStart = ai.indexOf('Future<void> _save() async');
-      final saveEnd = ai.indexOf('Future<void> _setLocalBrain', saveStart);
-      expect(saveStart, greaterThanOrEqualTo(0));
-      expect(saveEnd, greaterThan(saveStart));
-      final cloudSave = ai.substring(saveStart, saveEnd);
-      expect(cloudSave, contains('localBrainEnabled: localBrainEnabled'));
-      expect(cloudSave, isNot(contains('localBrainEnabled: false')));
-      expect(cloudSave, isNot(contains('await local.suspend();')));
+      expect(cloud, contains('localBrainEnabled: widget.localBrainEnabled'));
+      expect(cloud, isNot(contains('localBrainEnabled: false')));
+      expect(cloud, isNot(contains('await local.suspend();')));
+      expect(cloud, contains('await widget.service.saveConfiguration(config)'));
+      expect(ai, contains('await widget.service.setLocalBrainEnabled(value)'));
       expect(ai, contains('Cloud connection saved'));
     },
   );

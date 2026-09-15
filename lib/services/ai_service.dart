@@ -13,6 +13,7 @@ import '../domain/local_ai_protocol.dart';
 import 'aaris_default_ai_service.dart';
 import 'local_ai_service.dart';
 import 'ai_provider_adapter.dart';
+import 'ai_connection_store.dart';
 import 'bounded_ai_response.dart';
 
 export '../domain/ai_configuration.dart';
@@ -22,6 +23,10 @@ class AiService {
     : _clientFactory = clientFactory ?? http.Client.new;
   final http.Client Function() _clientFactory;
   static const _storage = FlutterSecureStorage();
+  static final _connections = AiConnectionStore(
+    read: (key) => _storage.read(key: key).timeout(const Duration(seconds: 4)),
+    write: (key, value) => _storage.write(key: key, value: value),
+  );
   static const _maxResponseBytes = 1500000;
   static const _maxConversationCharacters = 6000;
   static const _localLeaseContentionBudget = Duration(seconds: 30);
@@ -47,24 +52,21 @@ class AiService {
 
   /// Reading a cloud credential must not initialize a local model. A missing
   /// or corrupt optional model cannot prevent cloud settings from being read.
-  Future<AiConfiguration> loadConfiguration() async =>
-      AiConfiguration.fromStored(await _storage
-          .read(key: 'pharmacy.ai.configuration')
-          .timeout(const Duration(seconds: 4)));
+  Future<AiConfiguration> loadConfiguration() =>
+      _connections.load().timeout(const Duration(seconds: 4));
 
-  Future<void> saveConfiguration(AiConfiguration config) async {
-    await _storage.write(
-      key: 'pharmacy.ai.configuration',
-      value: jsonEncode(config.toJson()),
-    );
-  }
+  Future<AiConfiguration?> loadProviderConfiguration(String provider) =>
+      _connections.forProvider(provider).timeout(const Duration(seconds: 8));
 
-  /// Removes only the cloud credential. Local Brain routing and the selected
-  /// on-device model are independent preferences and must survive this action.
-  Future<void> forgetKey() async {
-    final config = await loadConfiguration();
-    await saveConfiguration(config.copyWith(key: ''));
-  }
+  Future<void> saveConfiguration(AiConfiguration config) =>
+      _connections.save(config);
+
+  Future<void> setLocalBrainEnabled(bool enabled) =>
+      _connections.setLocalBrainEnabled(enabled);
+
+  /// Removes both copies of the active cloud key and preserves the independent
+  /// Local Brain preference and other providers' saved connections.
+  Future<void> forgetKey() => _connections.forgetActiveKey();
 
   /// Cancels this AiService turn and reports whether that exact turn owned the
   /// shared native Local AI lease. The caller can therefore distinguish native

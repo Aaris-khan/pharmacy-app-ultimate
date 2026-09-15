@@ -1,20 +1,23 @@
 import 'dart:convert';
 
-enum AiProviderProtocol { gemini, chatCompletions, anthropicMessages }
+import 'ai_provider_catalog.dart';
+export 'ai_provider_catalog.dart';
 
 class AiConfiguration {
   const AiConfiguration({
     this.provider = 'Gemini',
     this.model = '',
     this.endpoint = '',
+    this.modelsEndpoint = '',
     this.key = '',
     this.localBrainEnabled = false,
+    this.autoSelectModel = false,
     this.streamingEnabled = true,
     this.jsonModeEnabled,
     this.responseTimeoutSeconds = 90,
   });
-  final String provider, model, endpoint, key;
-  final bool localBrainEnabled, streamingEnabled;
+  final String provider, model, endpoint, modelsEndpoint, key;
+  final bool localBrainEnabled, streamingEnabled, autoSelectModel;
 
   /// null preserves the legacy default: JSON mode for Gemini, prompt-only for
   /// compatible servers. This is configured capability, never inferred from a
@@ -22,27 +25,18 @@ class AiConfiguration {
   final bool? jsonModeEnabled;
   final int responseTimeoutSeconds;
 
-  AiProviderProtocol get protocol => switch (provider) {
-    'Gemini' => AiProviderProtocol.gemini,
-    'OpenAI' || 'Compatible' || 'OpenAI-compatible' =>
-      AiProviderProtocol.chatCompletions,
-    'Anthropic' => AiProviderProtocol.anthropicMessages,
-    _ => throw const FormatException('Choose a supported API protocol.'),
-  };
-
-  String get providerLabel => switch (protocol) {
-    AiProviderProtocol.gemini => 'Google Gemini',
-    AiProviderProtocol.chatCompletions =>
-      provider == 'OpenAI' ? 'OpenAI' : 'OpenAI-compatible',
-    AiProviderProtocol.anthropicMessages => 'Anthropic',
-  };
+  AiProviderDefinition get definition => AiProviderDefinition.forId(provider);
+  AiProviderProtocol get protocol => definition.protocol;
+  String get providerLabel => definition.label;
 
   bool get useJsonMode =>
       jsonModeEnabled ?? protocol == AiProviderProtocol.gemini;
 
   Duration get responseTimeout {
     if (responseTimeoutSeconds < 10 || responseTimeoutSeconds > 180) {
-      throw const FormatException('AI response timeout must be 10–180 seconds.');
+      throw const FormatException(
+        'AI response timeout must be 10–180 seconds.',
+      );
     }
     return Duration(seconds: responseTimeoutSeconds);
   }
@@ -51,8 +45,10 @@ class AiConfiguration {
     String? provider,
     String? model,
     String? endpoint,
+    String? modelsEndpoint,
     String? key,
     bool? localBrainEnabled,
+    bool? autoSelectModel,
     bool? streamingEnabled,
     bool? jsonModeEnabled,
     int? responseTimeoutSeconds,
@@ -60,8 +56,10 @@ class AiConfiguration {
     provider: provider ?? this.provider,
     model: model ?? this.model,
     endpoint: endpoint ?? this.endpoint,
+    modelsEndpoint: modelsEndpoint ?? this.modelsEndpoint,
     key: key ?? this.key,
     localBrainEnabled: localBrainEnabled ?? this.localBrainEnabled,
+    autoSelectModel: autoSelectModel ?? this.autoSelectModel,
     streamingEnabled: streamingEnabled ?? this.streamingEnabled,
     jsonModeEnabled: jsonModeEnabled ?? this.jsonModeEnabled,
     responseTimeoutSeconds:
@@ -72,11 +70,13 @@ class AiConfiguration {
   // never be included in inventory export, backup or diagnostics.
   Map<String, dynamic> toJson() => {
     'version': 2,
-    'provider': provider,
+    'provider': definition.id,
     'model': model,
     'endpoint': endpoint,
+    'modelsEndpoint': modelsEndpoint,
     'key': key,
     'localBrainEnabled': localBrainEnabled,
+    'autoSelectModel': autoSelectModel,
     'streamingEnabled': streamingEnabled,
     'jsonModeEnabled': jsonModeEnabled,
     'responseTimeoutSeconds': responseTimeoutSeconds,
@@ -96,7 +96,9 @@ class AiConfiguration {
       }
       return AiConfiguration.fromJson(value);
     } on FormatException {
-      throw const FormatException('Saved AI configuration is invalid. Reconnect the API in settings.');
+      throw const FormatException(
+        'Saved AI configuration is invalid. Reconnect the API in settings.',
+      );
     }
   }
 
@@ -109,6 +111,7 @@ class AiConfiguration {
       }
       return value;
     }
+
     bool boolean(String name, bool fallback) {
       final value = data[name];
       if (value == null) return fallback;
@@ -117,22 +120,29 @@ class AiConfiguration {
       }
       return value;
     }
+
     final version = data['version'];
     if (version != null && version != 1 && version != 2) {
-      throw const FormatException('Saved AI configuration version is unsupported.');
+      throw const FormatException(
+        'Saved AI configuration version is unsupported.',
+      );
     }
     final jsonMode = data['jsonModeEnabled'];
     final timeout = data['responseTimeoutSeconds'] ?? 90;
     if ((jsonMode != null && jsonMode is! bool) ||
-        timeout is! int || timeout < 10 || timeout > 180) {
+        timeout is! int ||
+        timeout < 10 ||
+        timeout > 180) {
       throw const FormatException('Saved AI capabilities are invalid.');
     }
     final config = AiConfiguration(
-      provider: text('provider', 'Gemini', 80),
+      provider: AiProviderDefinition.forId(text('provider', 'Gemini', 80)).id,
       model: text('model', '', 200),
       endpoint: text('endpoint', '', 2048),
+      modelsEndpoint: text('modelsEndpoint', '', 2048),
       key: text('key', '', 8192),
       localBrainEnabled: boolean('localBrainEnabled', false),
+      autoSelectModel: boolean('autoSelectModel', false),
       streamingEnabled: boolean('streamingEnabled', true),
       jsonModeEnabled: jsonMode as bool?,
       responseTimeoutSeconds: timeout,
@@ -141,47 +151,104 @@ class AiConfiguration {
     return config;
   }
 
+  void validateCredential() {
+    if (key.trim().isEmpty) throw const FormatException('Enter your API key.');
+    if (key.length > 8192 || RegExp(r'[\x00-\x20\x7f]').hasMatch(key)) {
+      throw const FormatException('API key contains invalid characters.');
+    }
+  }
+
+  static bool validModelId(String id) =>
+      id.isNotEmpty &&
+      id.length <= 200 &&
+      !RegExp(r'[\x00-\x20\x7f]').hasMatch(id);
+
+  static Uri _https(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (raw.length > 2048 ||
+        uri == null ||
+        uri.scheme != 'https' ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw const FormatException(
+        'Enter an HTTPS URL without credentials or query parameters.',
+      );
+    }
+    return uri;
+  }
+
+  Uri get _customChatUri {
+    final value = _https(endpoint);
+    final path = value.path.replaceFirst(RegExp(r'/+$'), '');
+    if (path.isEmpty) return value.replace(path: '/v1/chat/completions');
+    if (path.endsWith('/v1'))
+      return value.replace(path: '$path/chat/completions');
+    // Preserve existing full proxy endpoints exactly.
+    return value;
+  }
+
+  /// No model ID is needed. Custom discovery stays on the inference origin;
+  /// an API key is never probed against other companies.
+  Uri get modelsUri {
+    validateCredential();
+    if (!definition.isCustom) {
+      return Uri.parse('${definition.baseUrl}${definition.modelsPath}');
+    }
+    final chat = _customChatUri;
+    if (modelsEndpoint.trim().isNotEmpty) {
+      final models = _https(modelsEndpoint);
+      if (models.origin != chat.origin) {
+        throw const FormatException(
+          'Models URL must use the same host and port as the chat URL.',
+        );
+      }
+      return models;
+    }
+    final path = chat.path.replaceFirst(RegExp(r'/+$'), '');
+    if (!path.endsWith('/chat/completions')) {
+      throw const FormatException(
+        'Add this provider’s Models URL under Advanced.',
+      );
+    }
+    return chat.replace(
+      path:
+          path.substring(0, path.length - '/chat/completions'.length) +
+          '/models',
+    );
+  }
+
+  Map<String, String> get authenticationHeaders {
+    validateCredential();
+    return switch (protocol) {
+      AiProviderProtocol.gemini => {'x-goog-api-key': key},
+      AiProviderProtocol.anthropicMessages => {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+      },
+      AiProviderProtocol.chatCompletions => {'Authorization': 'Bearer $key'},
+    };
+  }
+
   Uri get uri {
-    if (model.trim().isEmpty || key.trim().isEmpty) {
-      throw const FormatException('Enter your model name and API key.');
-    }
-    if (model.length > 200 || key.length > 8192 ||
-        RegExp(r'[\x00-\x20\x7f]').hasMatch(model) ||
-        RegExp(r'[\r\n\x00]').hasMatch(key)) {
-      throw const FormatException('Model name or API credential is invalid.');
-    }
     responseTimeout;
+    validateCredential();
+    if (!validModelId(model)) {
+      throw const FormatException('Choose an available model first.');
+    }
     switch (protocol) {
       case AiProviderProtocol.gemini:
         if (!RegExp(r'^[a-zA-Z0-9._-]+$').hasMatch(model)) {
-          throw const FormatException('Enter a model name, not a URL.');
+          throw const FormatException('Choose a valid Gemini model.');
         }
-        return Uri.https(
-          'generativelanguage.googleapis.com',
-          '/v1beta/models/$model:generateContent',
-        );
+        return Uri.parse('${definition.baseUrl}/models/$model:generateContent');
       case AiProviderProtocol.anthropicMessages:
-        return Uri.https('api.anthropic.com', '/v1/messages');
+        return Uri.parse('${definition.baseUrl}/messages');
       case AiProviderProtocol.chatCompletions:
-        if (provider == 'OpenAI') {
-          return Uri.https('api.openai.com', '/v1/chat/completions');
-        }
-        final value = Uri.tryParse(endpoint.trim());
-        if (endpoint.length > 2048 || value == null ||
-            value.scheme != 'https' || value.host.isEmpty ||
-            value.userInfo.isNotEmpty || value.hasQuery || value.hasFragment) {
-          throw const FormatException(
-            'Enter an HTTPS base URL or chat/completions endpoint without credentials or query parameters.',
-          );
-        }
-        // Existing custom full endpoints remain exact. Only conventional base
-        // paths are expanded, so proxy deployment prefixes are never discarded.
-        final path = value.path.replaceFirst(RegExp(r'/+$'), '');
-        if (path.isEmpty) return value.replace(path: '/v1/chat/completions');
-        if (path.endsWith('/v1')) {
-          return value.replace(path: '$path/chat/completions');
-        }
-        return value;
+        return definition.isCustom
+            ? _customChatUri
+            : Uri.parse('${definition.baseUrl}/chat/completions');
     }
   }
 }
