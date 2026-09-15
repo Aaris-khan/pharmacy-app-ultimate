@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../domain/ai_conversation.dart';
 import '../domain/ai_protocol.dart';
+import '../domain/local_ai_failure.dart';
 import '../domain/local_ai_protocol.dart';
 import '../domain/medicine.dart';
 import '../services/ai_service.dart';
@@ -146,6 +147,7 @@ class _AiScreenState extends State<AiScreen> {
   }
 
   String _friendlyAiError(Object error) {
+    if (error is LocalAiGenerationTimeout) return error.message!;
     if (error is TimeoutException) {
       return 'The AI took too long to answer. No inventory changes were made. You can safely try again.';
     }

@@ -90,6 +90,9 @@ Future<void> main() async {
   final engine = NoisyEngine();
   final runtime = LocalAiRuntime(
     engine: engine,
+    // A generation deadline may expire before a failed command finishes its
+    // drain window. It must preserve the native error, not relabel it timeout.
+    generationWallClockLimit: const Duration(milliseconds: 25),
     terminalErrorDrainBudget: const Duration(milliseconds: 60),
   );
   await runtime.load('/test/model.gguf');

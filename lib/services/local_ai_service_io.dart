@@ -808,37 +808,6 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
     _status = 'Model removed from this device; inventory unchanged';
   });
 
-  int _chatOutputBudget(String instruction) {
-    final planned = _executionPlan!.outputTokens;
-    final normalized = instruction
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[.!?।]+$'), '')
-        .trim();
-    const quickGreetings = <String>{
-      'hi',
-      'hii',
-      'hello',
-      'hey',
-      'hi bhai',
-      'hello bhai',
-      'good morning',
-      'good evening',
-      'namaste',
-      'नमस्ते',
-      'नमस्कार',
-      'हैलो',
-      'हेलो',
-      'हाय',
-      'हैलो भाई',
-      'हेलो भाई',
-      'हाय भाई',
-    };
-    // Only exact harmless greetings get the tiny budget. A request such as
-    // "hi add paracetamol" does not match and retains the full pharmacy budget.
-    return quickGreetings.contains(normalized) && planned > 160 ? 160 : planned;
-  }
-
   Future<String> ask(
     LocalInventoryContext context,
     String instruction, {
@@ -858,7 +827,7 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
       instruction: instruction,
       conversation: conversation,
       conversationLimit: _executionPlan!.conversationCharacters,
-      outputTokens: _chatOutputBudget(instruction),
+      outputTokens: _executionPlan!.outputTokens,
       inventoryRows: _executionPlan!.inventoryRows,
       checkCurrent: () => _checkRequest(generation),
       onContextReset: onContextReset,
@@ -870,7 +839,7 @@ class LocalAiService extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
       },
       generate: (input, budget) => _runtime!.generate(
-        context.instructions,
+        localChatSystemPrompt(context, instruction),
         input,
         maxTokens: budget,
         onToken: onToken,

@@ -4,6 +4,53 @@ import 'dart:math';
 import '../domain/local_ai_protocol.dart';
 import '../domain/local_context_budget.dart';
 
+/// Only standalone social messages use the lightweight, read-only lane. A
+/// greeting followed by a medicine, question or command keeps the full contract.
+bool isLocalSocialMessage(String instruction) {
+  final normalized = instruction
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[.!?।؟]+$'), '')
+      .trim();
+  return const <String>{
+    'hi',
+    'hii',
+    'hello',
+    'hey',
+    'hi bhai',
+    'hello bhai',
+    'good morning',
+    'good evening',
+    'namaste',
+    'how are you',
+    'how are you doing',
+    'hi how are you',
+    'hello how are you',
+    'kaise ho',
+    'kaise ho bhai',
+    'kya haal hai',
+    'नमस्ते',
+    'नमस्कार',
+    'हैलो',
+    'हेलो',
+    'हाय',
+    'हैलो भाई',
+    'हेलो भाई',
+    'हाय भाई',
+    'कैसे हो',
+    'कैसे हो भाई',
+    'आप कैसे हैं',
+    'क्या हाल है',
+  }.contains(normalized);
+}
+
+String localChatSystemPrompt(
+  LocalInventoryContext context,
+  String instruction,
+) => isLocalSocialMessage(instruction)
+    ? "You are Aaris. Answer this greeting or small talk in one short sentence in the user's language. Plain text only. Do not claim inventory work."
+    : context.instructions;
+
 /// One bounded read-only chat turn. The native runtime owns the inference lease
 /// and clears KV memory for every full prompt; this layer owns which conversation
 /// facts are sent back to it. No model/transport restart or inventory write here.
@@ -20,7 +67,10 @@ Future<String> runLocalChatTurn({
   void Function()? onStreamReset,
   void Function(int round)? onRound,
 }) async {
-  var history = conversation;
+  final socialOnly = isLocalSocialMessage(instruction);
+  // Do not send past inventory instructions/data merely to answer "Hi". This
+  // omits history for this one turn; it does not erase the owner's conversation.
+  var history = socialOnly ? '' : conversation;
   final results = <Map<String, Object?>>[];
   var generationCount = 0;
 
@@ -39,7 +89,7 @@ Future<String> runLocalChatTurn({
   if (history.length > conversationLimit) forgetHistory();
 
   for (var round = 0; round <= 4; round++) {
-    var budget = outputTokens;
+    var budget = socialOnly ? min(outputTokens, 96) : outputTokens;
     var adjustedOutput = false;
     var responseRepairUsed = false;
     late Map<String, dynamic> answer;
@@ -47,16 +97,17 @@ Future<String> runLocalChatTurn({
     while (true) {
       checkCurrent();
       onRound?.call(round);
-      final input = jsonEncode({
-        'ownerRequest': instruction,
-        'recentConversation': history,
-        if (results.isNotEmpty) ...{
-          'toolResults': results,
-          'remainingReadCalls': 4 - round,
-          'next':
-              'Answer or request one more page. Never invent omitted facts.',
-        },
-      });
+      final input = socialOnly
+          ? instruction.trim()
+          : jsonEncode({
+              'ownerRequest': instruction,
+              'recentConversation': history,
+              if (results.isNotEmpty) ...{
+                'toolResults': results,
+                'remainingReadCalls': 4 - round,
+                'next': 'Answer or request one more page. Never invent omitted facts.',
+              },
+            });
       if (input.length > 15000) {
         if (history.isNotEmpty) {
           forgetHistory();
@@ -134,6 +185,16 @@ Future<String> runLocalChatTurn({
       }
     }
 
+    // A small prompt is never a new authority to read or change inventory. Even
+    // an unexpected well-formed model tool/action response is rejected here.
+    if (socialOnly &&
+        (answer.containsKey('tool') ||
+            answer['actions'] is! List ||
+            (answer['actions'] as List).isNotEmpty)) {
+      throw const FormatException(
+        'A greeting cannot read or change stock. No inventory changes were made.',
+      );
+    }
     if (!answer.containsKey('tool')) return context.finish(answer);
     if (round == 4) {
       throw StateError(

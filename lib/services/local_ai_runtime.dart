@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:lib_llama_cpp/lib_llama_cpp.dart';
 
+import '../domain/local_ai_failure.dart';
 import '../domain/local_context_budget.dart';
 
 /// One long-lived local-AI lease with a restartable llama.cpp transport.
@@ -60,6 +61,7 @@ class LocalAiRuntime {
   int? _contextTokens;
   int _transportEpoch = 0;
   int _rawResponseCharacters = 0;
+  bool _hasTokenProgress = false;
   String? modelPath;
 
   bool get busy => _pending != null;
@@ -100,6 +102,7 @@ class LocalAiRuntime {
               // failed command. Never flash them in the UI or retain them in the
               // response buffer while waiting for Done to close the lease.
               if (_commandError != null) return;
+              _hasTokenProgress = true;
               _rawResponseCharacters += response.text.length;
               if (_rawResponseCharacters > _maxRawResponseCharacters) {
                 _commandError ??= StateError(
@@ -221,10 +224,14 @@ class LocalAiRuntime {
         epoch,
         commands,
         subscription,
-        TimeoutException(
-          'Local AI kept generating without finishing. The model was stopped safely; try a shorter request or a faster local model.',
-          _generationWallClockLimit,
-        ),
+        // A native error can arrive shortly before the generation deadline.
+        // Preserve it even when the error-drain timer has not expired yet.
+        _commandError ??
+            LocalAiGenerationTimeout(
+              limit: _generationWallClockLimit,
+              hasTokenProgress: _hasTokenProgress,
+              hasVisibleText: _text.isNotEmpty,
+            ),
         StackTrace.current,
       );
     });
@@ -379,6 +386,7 @@ class LocalAiRuntime {
     _commandError = null;
     _onToken = null;
     _rawResponseCharacters = 0;
+    _hasTokenProgress = false;
     _reasoningFilter.reset();
     if (pending == null || pending.isCompleted) return;
     if (stack == null) {
@@ -435,6 +443,7 @@ class LocalAiRuntime {
     _text.clear();
     _reasoningFilter.reset();
     _rawResponseCharacters = 0;
+    _hasTokenProgress = false;
     _commandError = null;
     _onToken = onToken;
     _loading = command is LlamaLoadModelCommand;
@@ -614,6 +623,7 @@ class LocalAiRuntime {
       _contextTokens = null;
       _onToken = null;
       _rawResponseCharacters = 0;
+      _hasTokenProgress = false;
       _reasoningFilter.reset();
       _closed = true;
       ++_transportEpoch;
