@@ -1,0 +1,94 @@
+name: One-shot static gate cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-static-gate-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - name: Apply exact analyzer cleanup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text()
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f'{path}: expected {count} occurrences, found {found}: {old!r}')
+              p.write_text(text.replace(old, new, count))
+
+          replace(
+              'lib/services/local_ai_runtime.dart',
+              '      if (!identical(_pending, pending)) return pending.future;\n',
+              '      if (!identical(_pending, pending)) return await pending.future;\n',
+          )
+          replace(
+              'lib/ui/scanner_screen.dart',
+              "    } catch (_) {\n      if (_current(generation)) showError(context, 'Torch is unavailable.');\n    }\n",
+              "    } catch (_) {\n      if (!mounted || !_current(generation)) return;\n      showError(context, 'Torch is unavailable.');\n    }\n",
+          )
+          replace('lib/services/ai_service.dart', "import 'dart:typed_data';\n", '')
+          replace(
+              'test/medicine_date_layout_order_test.dart',
+              "import '../lib/domain/medicine_date_parser.dart';\n",
+              '',
+          )
+          replace(
+              'tool/check_stock_guidance.dart',
+              "import '../lib/domain/inventory.dart';\n",
+              '',
+          )
+
+          for path in [
+              'tool/check_ai_connections.dart',
+              'tool/check_ai_model_discovery.dart',
+              'tool/check_scan_review_deadline.dart',
+          ]:
+              replace(path, "import 'dart:convert';\n", "import 'dart:convert';\nimport 'dart:io';\n")
+
+          replace(
+              'tool/check_ai_connections.dart',
+              "  print('PASS: $checks connection persistence and selection checks.');\n",
+              "  stdout.writeln('PASS: $checks connection persistence and selection checks.');\n",
+          )
+          replace(
+              'tool/check_ai_model_discovery.dart',
+              "  print('PASS: $checks offline model-discovery and adapter checks.');\n",
+              "  stdout.writeln('PASS: $checks offline model-discovery and adapter checks.');\n",
+          )
+          replace(
+              'tool/check_scan_review_deadline.dart',
+              "  print('$passed focused scan review deadline checks passed.');\n",
+              "  stdout.writeln('$passed focused scan review deadline checks passed.');\n",
+          )
+          replace(
+              'tool/check_ai_conversation.dart',
+              "  print('AI conversation contract: $checks passed.');\n",
+              "  stdout.writeln('AI conversation contract: $checks passed.');\n",
+          )
+          PY
+          git diff --check
+      - name: Commit cleanup and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-static-gate-fix.yml
+          git add lib test tool
+          git diff --cached --check
+          git commit -m "Clear local AI and scanner static gate warnings"
+          git push origin HEAD:main
