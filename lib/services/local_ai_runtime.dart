@@ -450,7 +450,7 @@ class LocalAiRuntime {
 
     try {
       await _transportCleanup;
-      if (!identical(_pending, pending)) return pending.future;
+      if (!identical(_pending, pending)) return await pending.future;
       if (_closed || (_closing && !disposing)) {
         throw StateError('Local runtime is unavailable or still processing.');
       }

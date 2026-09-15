@@ -304,5 +304,5 @@ void main() {
       );
     }
   }
-  print('AI conversation contract: $checks passed.');
+  stdout.writeln('AI conversation contract: $checks passed.');
 }

@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/domain/medicine_date_intelligence.dart';
-import '../lib/domain/medicine_date_parser.dart';
 import '../lib/domain/medicine_ocr_text.dart';
 import '../lib/domain/medicine_understanding.dart';
 

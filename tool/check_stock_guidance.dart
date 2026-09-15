@@ -3,7 +3,6 @@ import 'dart:io';
 
 import '../lib/domain/attention.dart';
 import '../lib/domain/medicine.dart';
-import '../lib/domain/inventory.dart';
 import '../lib/domain/operations_plan.dart';
 import '../lib/domain/stock_guidance.dart';
 import '../lib/domain/tracking.dart';

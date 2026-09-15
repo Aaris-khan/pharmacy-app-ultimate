@@ -1,6 +1,7 @@
 // Focused lifecycle checks; no device, GGUF inference or accuracy benchmark.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import '../lib/domain/local_scan_request.dart';
 import '../lib/domain/medicine_intake.dart';
@@ -244,5 +245,5 @@ Future<void> main() async {
   );
   unfinished.close();
 
-  print('$passed focused scan review deadline checks passed.');
+  stdout.writeln('$passed focused scan review deadline checks passed.');
 }

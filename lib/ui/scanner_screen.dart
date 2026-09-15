@@ -441,7 +441,8 @@ class _ScannerScreenState extends State<ScannerScreen>
       );
       if (_current(generation)) setState(() {});
     } catch (_) {
-      if (_current(generation)) showError(context, 'Torch is unavailable.');
+      if (!mounted || !_current(generation)) return;
+      showError(context, 'Torch is unavailable.');
     }
   }
 

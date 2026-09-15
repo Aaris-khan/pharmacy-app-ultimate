@@ -1,6 +1,7 @@
 // Offline executable contract checks. No Flutter runner, APK, network or keys.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -453,5 +454,5 @@ Future<void> main() async {
     clientFactory: () => MockClient((_) => Completer<http.Response>().future),
   );
   await fails(() => timeout.discover(openai), 'Total timeout releases request');
-  print('PASS: $checks offline model-discovery and adapter checks.');
+  stdout.writeln('PASS: $checks offline model-discovery and adapter checks.');
 }

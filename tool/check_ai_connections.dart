@@ -1,6 +1,7 @@
 // Dependency-free checks for credential persistence and model selection.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import '../lib/domain/ai_configuration.dart';
 import '../lib/domain/ai_discovered_model.dart';
@@ -169,5 +170,5 @@ Future<void> main() async {
     'Unknown capabilities not invented',
   );
   check(writes > 0, 'Secure persistence exercised');
-  print('PASS: $checks connection persistence and selection checks.');
+  stdout.writeln('PASS: $checks connection persistence and selection checks.');
 }
