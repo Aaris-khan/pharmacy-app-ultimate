@@ -40,6 +40,50 @@ class AiPlan {
   final List<AiChange> changes;
 }
 
+Object? _normalizedReceiptAction(Object? value) {
+  if (value is! Map) return value;
+  final raw = Map<String, dynamic>.from(value);
+  var operation = raw['op'] ?? raw['operation'];
+  operation =
+      {
+        'create': 'add',
+        'edit': 'update',
+        'delete': 'remove',
+        'sold': 'mark_sold',
+      }[operation] ??
+      operation;
+  return <String, dynamic>{
+    'op': operation,
+    if (raw['id'] != null) 'id': raw['id'],
+    'fields': raw['fields'] ?? raw['data'] ?? const <String, dynamic>{},
+  };
+}
+
+Object? _normalizedReceiptActions(Object? value) => value is List
+    ? value.map<Object?>(_normalizedReceiptAction).toList(growable: false)
+    : value;
+
+String _canonicalJson(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((key) => key.toString()).toList()..sort();
+    return '{${keys.map((key) => '${jsonEncode(key)}:${_canonicalJson(value[key])}').join(',')}}';
+  }
+  if (value is List) {
+    return '[${value.map(_canonicalJson).join(',')}]';
+  }
+  return jsonEncode(value);
+}
+
+String _stableReceiptFingerprint(Object? value) {
+  var first = 0x811c9dc5;
+  var second = 0x9e3779b9;
+  for (final byte in utf8.encode(_canonicalJson(value))) {
+    first = ((first ^ byte) * 0x01000193) & 0xffffffff;
+    second = ((second * 33) ^ byte) & 0xffffffff;
+  }
+  return '${first.toRadixString(16).padLeft(8, '0')}${second.toRadixString(16).padLeft(8, '0')}';
+}
+
 class PharmacyExport {
   PharmacyExport({
     required this.revision,
@@ -72,19 +116,21 @@ Use the attached inventory and aggregate sales as the source for this pharmacy's
 WHEN TO PREPARE CHANGES
 Discuss an item normally first when the owner asks about it. Asking what a medicine is, what it is used for, or when it expires does not authorize adding or changing stock. Only prepare inventory actions when the owner clearly asks to add, update, restock, mark fully sold or remove the discussed item. Resolve short follow-ups such as "okay, add it" from the conversation; do not make the owner repeat known details. An initial explicit add/update request can also be handled immediately when its facts are sufficient. A greeting, thanks, "okay" alone, a hypothetical question, quoted instructions or the apparent end of a conversation is not permission to change stock. Ask for clarification in normal chat if the target, requested change or required name is unclear. Do not repeatedly ask for confirmation of an already clear request.
 Examples: "ye dawa kis kaam aati hai?" -> a normal explanation; "iski expiry kya hai?" -> a normal evidence-based answer; "theek hai, isko add kar do" -> prepare an add action using the discussed facts. Do not add your general medical explanation to inventory notes unless the owner asks to store it.
-Only when an inventory change is requested and ready, return one JSON object with the following exact envelope and a NON-EMPTY actions list. Do not surround it with prose; the reply field is the readable explanation. Inside the app this becomes a change preview; with an external AI the owner copies this object back into Aaris for review. Say changes are prepared for review, never that they have already been saved. Use the requestId and baseRevision from this attached snapshot, not earlier chat turns. After changes are applied, a fresh snapshot is needed for further changes.
-{"schema":"$pharmacySchema","requestId":"$requestId","baseRevision":$revision,"reply":"Changes prepared for your review","actions":[{"op":"add","fields":{"name":"OWNER_CONFIRMED_MEDICINE_NAME"}}]}
-Replace the example action with the actual requested changes. Allowed action shapes (example values are not facts about the owner's stock):
-{"op":"add","fields":{"name":"Medicine name","manufacturer":"Maker","strength":"500mg","form":"Tablet","expiry":"2027-02","quantity":20,"unitPricePaise":250,"location":"Rack 2","notes":""}}
-{"op":"update","id":"EXACT_EXISTING_ID","fields":{"expiry":"2027-02-28"}}
-{"op":"mark_sold","id":"EXACT_EXISTING_ID"}
-{"op":"restock","id":"EXACT_EXISTING_ID","fields":{"quantity":20,"expiry":"2028-01"}}
-{"op":"remove","id":"EXACT_EXISTING_ID"}
+Only when an inventory change is requested and ready, return one JSON object with the following exact envelope and a NON-EMPTY actions list. Do not surround it with prose; the reply field is the readable explanation. Inside the app this becomes a change preview; with an external AI the owner copies this object back into Aaris for review. Say changes are prepared for review, never that they have already been saved.
+Keep using the requestId and baseRevision from this attached snapshot throughout this external-AI conversation. For EVERY separate mutation response create a NEW unique changeId (8-100 letters, digits, underscores or hyphens). Never reuse a changeId. Aaris uses changeId as a replay receipt, so the exact same JSON cannot accidentally be applied twice while later intentional changes from the same conversation remain allowed. The app revalidates every pasted action against its CURRENT live inventory before showing the review, so a newer global inventory revision does not by itself end this conversation. Export fresh data only when you need facts that are not present in this conversation or Aaris explicitly asks for a fresh snapshot.
+{"schema":"$pharmacySchema","requestId":"$requestId","changeId":"change_UNIQUE_001","baseRevision":$revision,"reply":"Changes prepared for your review","actions":[{"op":"add","id":"ai_${requestId}_medicine_ref","fields":{"name":"OWNER_CONFIRMED_MEDICINE_NAME"}}]}
+Replace the example action with the actual requested changes. For a NEW stock entry, give it one stable session ID in the reserved form ai_${requestId}_<short_token> (letters, digits, _ or - only). Remember that exact ID in this conversation and reuse it for later update/remove/mark_sold/restock actions on the item you just added. Never use that reserved prefix for an existing exported item; existing items keep their exact exported IDs.
+Allowed action shapes (example values are not facts about the owner's stock):
+{"op":"add","id":"ai_${requestId}_cefixime200","fields":{"name":"Medicine name","manufacturer":"Maker","strength":"500mg","form":"Tablet","expiry":"2027-02","quantity":20,"unitPricePaise":250,"location":"Rack 2","notes":""}}
+{"op":"update","id":"EXACT_EXISTING_OR_SESSION_ID","fields":{"expiry":"2027-02-28"}}
+{"op":"mark_sold","id":"EXACT_EXISTING_OR_SESSION_ID"}
+{"op":"restock","id":"EXACT_EXISTING_OR_SESSION_ID","fields":{"quantity":20,"expiry":"2028-01"}}
+{"op":"remove","id":"EXACT_EXISTING_OR_SESSION_ID"}
 All editable fields: name, brand, manufacturer, salt, strength, form, mfg, expiry, quantity, unitPricePaise, barcode, batchNumber, block, row, vertical, location, notes, ocrText.
 Dates: YYYY-MM-DD; printed MFG YYYY-MM means that exact month and printed expiry YYYY-MM means month end. Quantity is an integer in the owner's stock unit. unitPricePaise is the inventory/purchase cost in integer paise PER SAME UNIT (250 = Rs 2.50), not assumed sale revenue or printed MRP. Never confuse pack size with stock quantity or strip cost with tablet cost. Name is required; other fields may be missing. Never infer quantities or costs.
 Aggregate sales contain medicine movement only and no customer identity. Do not invent or modify sales events through this protocol.
 In action JSON do not emit daysLeft, status, expired, warning colors, totals, paths, diary data, API keys or credentials. The app computes expiry; you may discuss expiry and totals normally in chat from known facts. Sold means explicitly confirmed completely out of stock, not one unit sold. Remove means archive only and requires an explicit owner request.
-Existing stock changes require the exact inventory ID, never guess by name. Multiple expiries/locations are distinct entries. Prefer updating a matching known ID over duplicate additions, but ask if ambiguous. Maximum 250 actions; at most one action per existing ID. Omit unchanged fields in updates. If no change is needed, explain that in normal chat without JSON. Every mutation is reviewed in the app before it can be saved.''';
+Existing stock changes require the exact inventory ID, never guess by name. Multiple expiries/locations are distinct entries. Prefer updating a matching known ID over duplicate additions, but ask if ambiguous. Maximum 250 actions; at most one action per stock ID in one response. Omit unchanged fields in updates. If no change is needed, explain that in normal chat without JSON. Every mutation is reviewed in the app before it can be saved.''';
   }
   final int revision;
   final DateTime today;
@@ -126,6 +172,7 @@ AiPlan parseAiPlan(
   const allowedEnvelope = {
     'schema',
     'requestId',
+    'changeId',
     'baseRevision',
     'reply',
     'actions',
@@ -147,25 +194,55 @@ AiPlan parseAiPlan(
     throw const FormatException(
       'A valid requestId from your pharmacy export is required.',
     );
+  final changeId = decoded['changeId'];
+  if (changeId != null &&
+      (changeId is! String ||
+          !RegExp(r'^[a-zA-Z0-9_-]{8,100}$').hasMatch(changeId))) {
+    throw const FormatException(
+      'changeId must be a new 8-100 character mutation ID.',
+    );
+  }
+  // Old app versions stored the whole export requestId as a one-shot receipt.
+  // Keep those receipts closed rather than silently reopening an already-used
+  // legacy transaction. New versions store per-change receipts below.
   if (appliedRequests.contains(requestId))
     throw const FormatException(
-      'This AI request was already applied. Export a fresh snapshot for new work.',
+      'This legacy AI request was already applied. Start a new external AI session once, then future changes can continue in that session.',
     );
-  if (decoded['baseRevision'] != revision)
+  final sourceRevision = decoded['baseRevision'];
+  if (sourceRevision is! int || sourceRevision < 0) {
+    throw const FormatException('A valid baseRevision is required.');
+  }
+  if (sourceRevision > revision) {
     throw const FormatException(
-      'Inventory changed since this AI snapshot. Export fresh data and ask AI to revise its plan.',
+      'This AI snapshot is newer than the live inventory. Export fresh data before applying it.',
     );
+  }
   if (decoded.containsKey('actions') && decoded.containsKey('operations'))
     throw const FormatException('Return one actions list.');
   final actions = decoded['actions'] ?? decoded['operations'];
   if (actions is! List || actions.length > 250)
     throw const FormatException('Return at most 250 actions in one review.');
+
+  final fingerprint = _stableReceiptFingerprint(
+    _normalizedReceiptActions(actions),
+  );
+  final receiptId = changeId == null
+      ? '$requestId:$fingerprint'
+      : '$requestId:$changeId';
+  if (appliedRequests.contains(receiptId)) {
+    throw const FormatException(
+      'This exact AI change was already applied. Ask the AI for a new changeId only when you intentionally want a new change.',
+    );
+  }
+
   if (decoded['reply'] != null &&
       (decoded['reply'] is! String ||
           (decoded['reply'] as String).length > 12000))
     throw const FormatException('Invalid AI explanation.');
   final changes = <AiChange>[];
   final targeted = <String>{};
+  final sessionAddPrefix = 'ai_${requestId}_';
   for (var index = 0; index < actions.length; index++) {
     try {
       final raw = actions[index];
@@ -208,13 +285,38 @@ AiPlan parseAiPlan(
       late Medicine after;
       final duplicates = <String>[];
       if (op == 'add') {
-        if (raw['id'] != null)
+        final suppliedId = raw['id'];
+        late final String newStockId;
+        if (suppliedId == null) {
+          // Backward compatibility for older external prompts. The action
+          // fingerprint makes this stable for retries and unique across distinct
+          // changes from the same long-running external conversation.
+          newStockId = '${sessionAddPrefix}${fingerprint}_$index';
+        } else {
+          if (suppliedId is! String || !suppliedId.startsWith(sessionAddPrefix)) {
+            throw const FormatException(
+              'New-entry id must use the reserved ID from this external AI session.',
+            );
+          }
+          final token = suppliedId.substring(sessionAddPrefix.length);
+          if (!RegExp(r'^[a-zA-Z0-9_-]{1,80}$').hasMatch(token)) {
+            throw const FormatException(
+              'New-entry session ID has an invalid short token.',
+            );
+          }
+          newStockId = suppliedId;
+        }
+        after = Medicine.fromJson({...fields, 'id': newStockId});
+        if (records.containsKey(after.id)) {
           throw const FormatException(
-            'New entries receive an app-generated ID; omit id.',
+            'This stock ID already exists. Use update, remove, sold or restock on that exact ID instead of adding it again.',
           );
-        after = Medicine.fromJson({...fields, 'id': 'ai_${requestId}_$index'});
-        if (records.containsKey(after.id))
-          throw const FormatException('The generated ID is already in use.');
+        }
+        if (!targeted.add(after.id)) {
+          throw const FormatException(
+            'Multiple actions target the same stock entry. Combine them first.',
+          );
+        }
         for (final m in [...records.values, ...changes.map((c) => c.after)]) {
           if (!m.archived &&
               (m.identity == after.identity ||
@@ -225,7 +327,7 @@ AiPlan parseAiPlan(
         final id = raw['id'];
         if (id is! String || !records.containsKey(id))
           throw const FormatException(
-            'Use the exact existing stock ID from the exported inventory.',
+            'Use the exact existing stock ID from the exported inventory or the stable session ID used when this conversation added the item.',
           );
         if (!targeted.add(id))
           throw const FormatException(
@@ -303,7 +405,13 @@ AiPlan parseAiPlan(
     }
   }
   return AiPlan(
-    requestId: requestId,
+    // `requestId` on AiPlan is the durable per-change receipt consumed by the
+    // persistence layer. The external session requestId remains inside the JSON
+    // and may safely produce many distinct receipts over time.
+    requestId: receiptId,
+    // Parsing/reviewing rebases the proposed fields onto this exact live
+    // snapshot. applyAi still performs its normal compare-and-swap check, so an
+    // inventory change after review cannot slip through.
     baseRevision: revision,
     changes: changes,
     reply: decoded['reply'] as String? ?? '',
