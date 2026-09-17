@@ -8,6 +8,8 @@ import 'design.dart';
 
 bool _voiceOpen = false;
 
+enum _OfflineVoiceDecision { usePhoneSpeech }
+
 Future<String?> voiceSearch(
   BuildContext context, {
   bool offlineOnly = false,
@@ -16,26 +18,29 @@ Future<String?> voiceSearch(
 }) async {
   if (_voiceOpen) return null;
   _voiceOpen = true;
-  if (offlineOnly) {
-    try {
-      return await showModalBottomSheet<String>(
+  VoiceSearchController? controller;
+  try {
+    if (offlineOnly) {
+      final result = await showModalBottomSheet<Object?>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
         builder: (_) =>
             _OfflineVoiceSheet(title: title, actionLabel: actionLabel),
       );
-    } finally {
-      _voiceOpen = false;
+      if (result is String) return result;
+      if (result != _OfflineVoiceDecision.usePhoneSpeech || !context.mounted) {
+        return null;
+      }
     }
-  }
-  final controller = VoiceSearchController();
-  try {
+
+    final systemController = VoiceSearchController();
+    controller = systemController;
     FocusManager.instance.primaryFocus?.unfocus();
     final navigator = Navigator.of(context);
     final route = ModalBottomSheetRoute<String>(
       builder: (_) => _VoiceSheet(
-        controller: controller,
+        controller: systemController,
         title: title,
         actionLabel: actionLabel,
       ),
@@ -48,12 +53,14 @@ Future<String?> voiceSearch(
       showDragHandle: true,
     );
     final result = await navigator.push(route);
-    await controller.close();
+    await systemController.close();
     await route.completed;
     return result;
   } finally {
-    await controller.close();
-    controller.dispose();
+    if (controller != null) {
+      await controller.close();
+      controller.dispose();
+    }
     _voiceOpen = false;
   }
 }
@@ -300,11 +307,12 @@ class _OfflineVoiceSheetState extends State<_OfflineVoiceSheet> {
       });
       if (mounted && result != null) setState(() => words.text = result);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => error =
-              'On-device speech is unavailable. Android 12+ and an installed Hindi/English speech model are required. Use the keyboard; no online recognizer was used.',
+              'This phone does not currently provide the strict on-device speech recognizer Aaris requested. Install a Hindi/English offline speech pack, type the message, or use Phone speech below. Phone speech may use internet.',
         );
+      }
     } finally {
       if (mounted) setState(() => listening = false);
     }
@@ -342,11 +350,24 @@ class _OfflineVoiceSheetState extends State<_OfflineVoiceSheet> {
           decoration: const InputDecoration(labelText: 'Message'),
         ),
         if (listening) const LinearProgressIndicator(),
-        if (error.isNotEmpty)
+        if (error.isNotEmpty) ...[
+          const SizedBox(height: 8),
           Text(
             error,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: listening
+                ? null
+                : () => Navigator.pop(
+                    context,
+                    _OfflineVoiceDecision.usePhoneSpeech,
+                  ),
+            icon: const Icon(Icons.mic_rounded),
+            label: const Text('Use phone speech'),
+          ),
+        ],
         Row(
           children: [
             TextButton(
