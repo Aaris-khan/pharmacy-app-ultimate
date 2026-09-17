@@ -55,6 +55,7 @@ Object? _normalizedReceiptAction(Object? value) {
   return <String, dynamic>{
     'op': operation,
     if (raw['id'] != null) 'id': raw['id'],
+    if (raw['match'] != null) 'match': raw['match'],
     'fields': raw['fields'] ?? raw['data'] ?? const <String, dynamic>{},
   };
 }
@@ -82,6 +83,102 @@ String _stableReceiptFingerprint(Object? value) {
     second = ((second * 33) ^ byte) & 0xffffffff;
   }
   return '${first.toRadixString(16).padLeft(8, '0')}${second.toRadixString(16).padLeft(8, '0')}';
+}
+
+const _targetMatchFields = <String>{
+  'name',
+  'strength',
+  'form',
+  'barcode',
+  'batchNumber',
+  'location',
+};
+
+String _strengthKey(String value) => normalize(
+  value,
+).replaceAll(RegExp(r'[^a-z0-9.\u0900-\u097f]+'), '');
+
+bool _recordMatchesTarget(Medicine record, Map<String, dynamic> match) {
+  final rawName = match['name'];
+  if (rawName is! String || identityPart(rawName).isEmpty) return false;
+  if (identityPart(record.name) != identityPart(rawName)) return false;
+
+  final strength = match['strength'];
+  if (strength != null) {
+    if (strength is! String ||
+        _strengthKey(record.strength) != _strengthKey(strength)) {
+      return false;
+    }
+  }
+  final form = match['form'];
+  if (form != null) {
+    if (form is! String || normalizeForm(record.form) != normalizeForm(form)) {
+      return false;
+    }
+  }
+  for (final entry in <String, String>{
+    'barcode': record.barcode,
+    'batchNumber': record.batchNumber,
+    'location': record.location,
+  }.entries) {
+    final expected = match[entry.key];
+    if (expected != null &&
+        (expected is! String || normalize(entry.value) != normalize(expected))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Map<String, dynamic> _validatedTargetMatch(Object? value) {
+  if (value is! Map) {
+    throw const FormatException('match must be an object.');
+  }
+  final match = Map<String, dynamic>.from(value);
+  if (match.isEmpty || match.keys.any((key) => !_targetMatchFields.contains(key))) {
+    throw const FormatException(
+      'match may contain only name, strength, form, barcode, batchNumber or location.',
+    );
+  }
+  if (match['name'] is! String || identityPart(match['name'] as String).isEmpty) {
+    throw const FormatException('match needs the medicine name.');
+  }
+  for (final value in match.values) {
+    if (value is! String || value.length > 1000) {
+      throw const FormatException('Invalid match value.');
+    }
+  }
+  return match;
+}
+
+Medicine _resolveUniqueTarget({
+  required Map<String, Medicine> records,
+  required Map<String, dynamic> match,
+  required String sessionPrefix,
+  required bool includeArchived,
+}) {
+  final all = records.values
+      .where(
+        (record) =>
+            (includeArchived || !record.archived) &&
+            _recordMatchesTarget(record, match),
+      )
+      .toList(growable: false);
+  final sameSession = all
+      .where((record) => record.id.startsWith(sessionPrefix))
+      .toList(growable: false);
+  final candidates = sameSession.isNotEmpty ? sameSession : all;
+  if (candidates.isEmpty) {
+    throw const FormatException(
+      'No live stock entry matches this target. Use its exact inventory ID or export fresh data.',
+    );
+  }
+  if (candidates.length != 1) {
+    throw const FormatException(
+      'More than one stock entry matches this target. Use the exact inventory ID so Aaris never edits the wrong batch.',
+    );
+  }
+  return candidates.single;
 }
 
 class PharmacyExport {
@@ -120,9 +217,11 @@ Only when an inventory change is requested and ready, return one JSON object wit
 Keep using the requestId and baseRevision from this attached snapshot throughout this external-AI conversation. For EVERY separate mutation response create a NEW unique changeId (8-100 letters, digits, underscores or hyphens). Never reuse a changeId. Aaris uses changeId as a replay receipt, so the exact same JSON cannot accidentally be applied twice while later intentional changes from the same conversation remain allowed. The app revalidates every pasted action against its CURRENT live inventory before showing the review, so a newer global inventory revision does not by itself end this conversation. Export fresh data only when you need facts that are not present in this conversation or Aaris explicitly asks for a fresh snapshot.
 {"schema":"$pharmacySchema","requestId":"$requestId","changeId":"change_UNIQUE_001","baseRevision":$revision,"reply":"Changes prepared for your review","actions":[{"op":"add","id":"ai_${requestId}_medicine_ref","fields":{"name":"OWNER_CONFIRMED_MEDICINE_NAME"}}]}
 Replace the example action with the actual requested changes. For a NEW stock entry, give it one stable session ID in the reserved form ai_${requestId}_<short_token> (letters, digits, _ or - only). Remember that exact ID in this conversation and reuse it for later update/remove/mark_sold/restock actions on the item you just added. Never use that reserved prefix for an existing exported item; existing items keep their exact exported IDs.
+If you later need to modify/remove/sell/restock an item but genuinely no longer remember its exact ID, you may use a match object instead of id. match MUST include name and may add strength, form, barcode, batchNumber or location. Use enough known facts to identify exactly one physical stock entry. Aaris rejects an ambiguous match rather than guessing. Never use match to choose between multiple batches. If you accidentally emit add again for one uniquely identifiable item that this same external session already added, Aaris may safely reinterpret that mistaken add as an update; still prefer the correct update operation.
 Allowed action shapes (example values are not facts about the owner's stock):
 {"op":"add","id":"ai_${requestId}_cefixime200","fields":{"name":"Medicine name","manufacturer":"Maker","strength":"500mg","form":"Tablet","expiry":"2027-02","quantity":20,"unitPricePaise":250,"location":"Rack 2","notes":""}}
 {"op":"update","id":"EXACT_EXISTING_OR_SESSION_ID","fields":{"expiry":"2027-02-28"}}
+{"op":"update","match":{"name":"Medicine name","strength":"500mg","form":"Tablet"},"fields":{"expiry":"2027-02-28"}}
 {"op":"mark_sold","id":"EXACT_EXISTING_OR_SESSION_ID"}
 {"op":"restock","id":"EXACT_EXISTING_OR_SESSION_ID","fields":{"quantity":20,"expiry":"2028-01"}}
 {"op":"remove","id":"EXACT_EXISTING_OR_SESSION_ID"}
@@ -130,7 +229,7 @@ All editable fields: name, brand, manufacturer, salt, strength, form, mfg, expir
 Dates: YYYY-MM-DD; printed MFG YYYY-MM means that exact month and printed expiry YYYY-MM means month end. Quantity is an integer in the owner's stock unit. unitPricePaise is the inventory/purchase cost in integer paise PER SAME UNIT (250 = Rs 2.50), not assumed sale revenue or printed MRP. Never confuse pack size with stock quantity or strip cost with tablet cost. Name is required; other fields may be missing. Never infer quantities or costs.
 Aggregate sales contain medicine movement only and no customer identity. Do not invent or modify sales events through this protocol.
 In action JSON do not emit daysLeft, status, expired, warning colors, totals, paths, diary data, API keys or credentials. The app computes expiry; you may discuss expiry and totals normally in chat from known facts. Sold means explicitly confirmed completely out of stock, not one unit sold. Remove means archive only and requires an explicit owner request.
-Existing stock changes require the exact inventory ID, never guess by name. Multiple expiries/locations are distinct entries. Prefer updating a matching known ID over duplicate additions, but ask if ambiguous. Maximum 250 actions; at most one action per stock ID in one response. Omit unchanged fields in updates. If no change is needed, explain that in normal chat without JSON. Every mutation is reviewed in the app before it can be saved.''';
+Existing stock changes require the exact inventory ID whenever it is known; never guess an ID by name. Multiple expiries/locations are distinct entries. Prefer updating a matching known ID over duplicate additions, but ask if ambiguous. Maximum 250 actions; at most one action per stock ID in one response. Omit unchanged fields in updates. If no change is needed, explain that in normal chat without JSON. Every mutation is reviewed in the app before it can be saved.''';
   }
   final int revision;
   final DateTime today;
@@ -202,9 +301,6 @@ AiPlan parseAiPlan(
       'changeId must be a new 8-100 character mutation ID.',
     );
   }
-  // Old app versions stored the whole export requestId as a one-shot receipt.
-  // Keep those receipts closed rather than silently reopening an already-used
-  // legacy transaction. New versions store per-change receipts below.
   if (appliedRequests.contains(requestId))
     throw const FormatException(
       'This legacy AI request was already applied. Start a new external AI session once, then future changes can continue in that session.',
@@ -249,13 +345,15 @@ AiPlan parseAiPlan(
       if (raw is! Map<String, dynamic>)
         throw const FormatException('Action must be an object.');
       if (raw.keys.any(
-        (k) => !{'op', 'operation', 'id', 'fields', 'data'}.contains(k),
+        (k) => !{'op', 'operation', 'id', 'match', 'fields', 'data'}.contains(k),
       ))
         throw const FormatException('Unsupported action field or path.');
       if (raw.containsKey('op') && raw.containsKey('operation'))
         throw const FormatException('Use only op.');
       if (raw.containsKey('fields') && raw.containsKey('data'))
         throw const FormatException('Use only fields.');
+      if (raw['id'] != null && raw['match'] != null)
+        throw const FormatException('Use either id or match, not both.');
       var op = raw['op'] ?? raw['operation'];
       op =
           {
@@ -281,53 +379,103 @@ AiPlan parseAiPlan(
           'Only stored pharmacy fields may be changed.',
         );
       final fields = Map<String, dynamic>.from(fieldValue);
+      final match = raw['match'] == null
+          ? null
+          : _validatedTargetMatch(raw['match']);
       Medicine? before;
       late Medicine after;
       final duplicates = <String>[];
+
       if (op == 'add') {
         final suppliedId = raw['id'];
-        late final String newStockId;
-        if (suppliedId == null) {
-          // Backward compatibility for older external prompts. The action
-          // fingerprint makes this stable for retries and unique across distinct
-          // changes from the same long-running external conversation.
-          newStockId = '${sessionAddPrefix}${fingerprint}_$index';
+        Medicine? mistakenExisting;
+        if (suppliedId is String &&
+            suppliedId.startsWith(sessionAddPrefix) &&
+            records.containsKey(suppliedId)) {
+          final candidate = records[suppliedId]!;
+          if (!candidate.archived && !candidate.sold) mistakenExisting = candidate;
+        } else if (suppliedId == null && match == null && fields['name'] is String) {
+          final inferredMatch = <String, dynamic>{
+            'name': fields['name'],
+            for (final key in ['strength', 'form', 'barcode', 'batchNumber', 'location'])
+              if (fields[key] is String && (fields[key] as String).trim().isNotEmpty)
+                key: fields[key],
+          };
+          final sameSession = records.values
+              .where(
+                (record) =>
+                    !record.archived &&
+                    !record.sold &&
+                    record.id.startsWith(sessionAddPrefix) &&
+                    _recordMatchesTarget(record, inferredMatch),
+              )
+              .toList(growable: false);
+          if (sameSession.length == 1) {
+            mistakenExisting = sameSession.single;
+          } else if (sameSession.length > 1) {
+            throw const FormatException(
+              'This looks like a follow-up edit, but several items added in this session match. Use the exact ID or a more specific match so Aaris never changes the wrong batch.',
+            );
+          }
+        }
+
+        if (mistakenExisting != null) {
+          if (!targeted.add(mistakenExisting.id))
+            throw const FormatException(
+              'Multiple actions target the same stock entry. Combine them first.',
+            );
+          before = mistakenExisting;
+          after = mistakenExisting.patch(fields);
+          op = 'update';
         } else {
-          if (suppliedId is! String || !suppliedId.startsWith(sessionAddPrefix)) {
+          late final String newStockId;
+          if (suppliedId == null) {
+            newStockId = '${sessionAddPrefix}${fingerprint}_$index';
+          } else {
+            if (suppliedId is! String || !suppliedId.startsWith(sessionAddPrefix)) {
+              throw const FormatException(
+                'New-entry id must use the reserved ID from this external AI session.',
+              );
+            }
+            final token = suppliedId.substring(sessionAddPrefix.length);
+            if (!RegExp(r'^[a-zA-Z0-9_-]{1,80}$').hasMatch(token)) {
+              throw const FormatException(
+                'New-entry session ID has an invalid short token.',
+              );
+            }
+            newStockId = suppliedId;
+          }
+          after = Medicine.fromJson({...fields, 'id': newStockId});
+          if (records.containsKey(after.id)) {
             throw const FormatException(
-              'New-entry id must use the reserved ID from this external AI session.',
+              'This stock ID already exists. Use update, remove, sold or restock on that exact ID instead of adding it again.',
             );
           }
-          final token = suppliedId.substring(sessionAddPrefix.length);
-          if (!RegExp(r'^[a-zA-Z0-9_-]{1,80}$').hasMatch(token)) {
+          if (!targeted.add(after.id))
             throw const FormatException(
-              'New-entry session ID has an invalid short token.',
+              'Multiple actions target the same stock entry. Combine them first.',
             );
+          for (final m in [...records.values, ...changes.map((c) => c.after)]) {
+            if (!m.archived &&
+                (m.identity == after.identity ||
+                    (after.barcode.isNotEmpty && m.barcode == after.barcode))) {
+              duplicates.add(m.id);
+            }
           }
-          newStockId = suppliedId;
-        }
-        after = Medicine.fromJson({...fields, 'id': newStockId});
-        if (records.containsKey(after.id)) {
-          throw const FormatException(
-            'This stock ID already exists. Use update, remove, sold or restock on that exact ID instead of adding it again.',
-          );
-        }
-        if (!targeted.add(after.id)) {
-          throw const FormatException(
-            'Multiple actions target the same stock entry. Combine them first.',
-          );
-        }
-        for (final m in [...records.values, ...changes.map((c) => c.after)]) {
-          if (!m.archived &&
-              (m.identity == after.identity ||
-                  (after.barcode.isNotEmpty && m.barcode == after.barcode)))
-            duplicates.add(m.id);
         }
       } else {
-        final id = raw['id'];
-        if (id is! String || !records.containsKey(id))
+        String? id = raw['id'] as String?;
+        if (id == null && match != null) {
+          id = _resolveUniqueTarget(
+            records: records,
+            match: match,
+            sessionPrefix: sessionAddPrefix,
+            includeArchived: op == 'restore',
+          ).id;
+        }
+        if (id == null || !records.containsKey(id))
           throw const FormatException(
-            'Use the exact existing stock ID from the exported inventory or the stable session ID used when this conversation added the item.',
+            'Use the exact existing stock ID, the stable session ID, or a unique match object.',
           );
         if (!targeted.add(id))
           throw const FormatException(
@@ -405,13 +553,7 @@ AiPlan parseAiPlan(
     }
   }
   return AiPlan(
-    // `requestId` on AiPlan is the durable per-change receipt consumed by the
-    // persistence layer. The external session requestId remains inside the JSON
-    // and may safely produce many distinct receipts over time.
     requestId: receiptId,
-    // Parsing/reviewing rebases the proposed fields onto this exact live
-    // snapshot. applyAi still performs its normal compare-and-swap check, so an
-    // inventory change after review cannot slip through.
     baseRevision: revision,
     changes: changes,
     reply: decoded['reply'] as String? ?? '',
