@@ -69,7 +69,14 @@ void main() {
         contains("? _local.hasSelection\n      : _configuration.key.isNotEmpty"),
       );
       expect(routing, contains('if (config.localBrainEnabled)'));
-      expect(routing, contains('final endpoint = config.uri;'));
+      // The cloud route explicitly validates the configured endpoint before it
+      // derives the conversation-specific provider configuration. Do not bind
+      // this source contract to a throwaway local variable name.
+      expect(routing, contains('config.uri;'));
+      expect(
+        routing,
+        contains('final conversationConfig = config.forConversation;'),
+      );
     },
   );
 }
