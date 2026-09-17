@@ -195,4 +195,60 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('match remains ambiguous when one candidate belongs to this AI session', () {
+    const session = 'session_followup5';
+    const sessionId = 'ai_session_followup5_para500';
+    final sessionAdded = stock(sessionId, location: 'Rack A');
+    final existing = stock('existing_para500', location: 'Rack B');
+
+    expect(
+      () => parseAiPlan(
+        envelope(
+          requestId: session,
+          changeId: 'change_ambiguous5',
+          baseRevision: 1,
+          actions: [
+            {
+              'op': 'update',
+              'match': {'name': 'Paracetamol', 'strength': '500mg'},
+              'fields': {'expiry': '2027-02'},
+            },
+          ],
+        ),
+        {sessionId: sessionAdded, existing.id: existing},
+        2,
+        const {},
+        now,
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('non-string action id fails closed as a format error', () {
+    const session = 'session_followup6';
+    final current = stock('existing');
+
+    expect(
+      () => parseAiPlan(
+        envelope(
+          requestId: session,
+          changeId: 'change_bad_id6',
+          baseRevision: 1,
+          actions: [
+            {
+              'op': 'update',
+              'id': 42,
+              'fields': {'location': 'Rack Z'},
+            },
+          ],
+        ),
+        {current.id: current},
+        1,
+        const {},
+        now,
+      ),
+      throwsFormatException,
+    );
+  });
 }
