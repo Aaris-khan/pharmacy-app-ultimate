@@ -67,6 +67,7 @@ class AiConversationResponse {
     const envelopeKeys = {
       'schema',
       'requestId',
+      'changeId',
       'baseRevision',
       'scope',
       'reply',
