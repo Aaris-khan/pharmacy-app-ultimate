@@ -53,10 +53,11 @@ void main() {
       final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
       final routing = File('lib/services/ai_service.dart').readAsStringSync();
 
-      expect(
-        panel,
-        contains('onPressed: () => widget.onAsk!(draft.rawText)'),
-      );
+      // Ask may first advance a durable intake job before handing the evidence
+      // to the unified composer. The routing contract is the callback itself,
+      // not the exact shape of the surrounding onPressed closure.
+      expect(panel, contains('await queue.continueWithDraft(job);'));
+      expect(panel, contains('widget.onAsk?.call(draft.rawText)'));
       expect(
         panel,
         isNot(contains('!LocalAiService.instance.hasSelection ||')),

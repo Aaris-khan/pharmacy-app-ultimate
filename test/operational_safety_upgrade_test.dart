@@ -78,7 +78,7 @@ void main() {
   );
 
   test(
-    'future-MFG-only stock cannot suppress reorder and remains review-gated',
+    'future-MFG stock stays review-gated when sale chronology is impossible',
     () {
       final future = item(
         id: 'future',
@@ -109,7 +109,13 @@ void main() {
       final suggestion = stats.reorder.single;
       expect(suggestion.reviewRequired, isTrue);
       expect(suggestion.confidence, lessThan(.75));
-      expect(suggestion.reason, contains('Manufacturing date needs review'));
+      // This sale predates the recorded manufacturing date, so the chronology
+      // blocker is more specific than the future-MFG stock warning. Either way,
+      // no order quantity may be auto-trusted from these impossible records.
+      expect(
+        suggestion.reason,
+        contains('Recorded sale dates need review before reorder'),
+      );
       expect(suggestion.currentQuantity, 0);
     },
   );
