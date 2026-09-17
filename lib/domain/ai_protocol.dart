@@ -154,20 +154,15 @@ Map<String, dynamic> _validatedTargetMatch(Object? value) {
 Medicine _resolveUniqueTarget({
   required Map<String, Medicine> records,
   required Map<String, dynamic> match,
-  required String sessionPrefix,
   required bool includeArchived,
 }) {
-  final all = records.values
+  final candidates = records.values
       .where(
         (record) =>
             (includeArchived || !record.archived) &&
             _recordMatchesTarget(record, match),
       )
       .toList(growable: false);
-  final sameSession = all
-      .where((record) => record.id.startsWith(sessionPrefix))
-      .toList(growable: false);
-  final candidates = sameSession.isNotEmpty ? sameSession : all;
   if (candidates.isEmpty) {
     throw const FormatException(
       'No live stock entry matches this target. Use its exact inventory ID or export fresh data.',
@@ -354,6 +349,9 @@ AiPlan parseAiPlan(
         throw const FormatException('Use only fields.');
       if (raw['id'] != null && raw['match'] != null)
         throw const FormatException('Use either id or match, not both.');
+      final rawId = raw['id'];
+      if (rawId != null && rawId is! String)
+        throw const FormatException('id must be a string.');
       var op = raw['op'] ?? raw['operation'];
       op =
           {
@@ -387,7 +385,7 @@ AiPlan parseAiPlan(
       final duplicates = <String>[];
 
       if (op == 'add') {
-        final suppliedId = raw['id'];
+        final suppliedId = rawId;
         Medicine? mistakenExisting;
         if (suppliedId is String &&
             suppliedId.startsWith(sessionAddPrefix) &&
@@ -432,7 +430,7 @@ AiPlan parseAiPlan(
           if (suppliedId == null) {
             newStockId = '${sessionAddPrefix}${fingerprint}_$index';
           } else {
-            if (suppliedId is! String || !suppliedId.startsWith(sessionAddPrefix)) {
+            if (!suppliedId.startsWith(sessionAddPrefix)) {
               throw const FormatException(
                 'New-entry id must use the reserved ID from this external AI session.',
               );
@@ -464,12 +462,11 @@ AiPlan parseAiPlan(
           }
         }
       } else {
-        String? id = raw['id'] as String?;
+        String? id = rawId as String?;
         if (id == null && match != null) {
           id = _resolveUniqueTarget(
             records: records,
             match: match,
-            sessionPrefix: sessionAddPrefix,
             includeArchived: op == 'restore',
           ).id;
         }
