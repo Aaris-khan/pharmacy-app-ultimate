@@ -15,6 +15,28 @@ import '../services/scan_service.dart';
 import 'design.dart';
 import 'scanner_view.dart';
 
+const _liveFrameDrainTimeout = Duration(seconds: 6);
+const _stillRecognitionTimeout = Duration(seconds: 12);
+
+/// Bounds only how long the UI waits for an already-owned scanner operation.
+///
+/// A timeout deliberately does NOT cancel or replace the underlying OCR work.
+/// MedicineVisionService keeps the recognizer lease until that operation really
+/// drains, so a slow native callback can never cause overlapping ML Kit calls.
+@visibleForTesting
+Future<bool> scannerWorkCompletedWithin<T>(
+  Future<T>? work, {
+  Duration timeout = _liveFrameDrainTimeout,
+}) async {
+  if (work == null) return true;
+  try {
+    await work.timeout(timeout);
+    return true;
+  } on TimeoutException {
+    return false;
+  }
+}
+
 class ScanResult {
   const ScanResult({
     this.barcode = '',
@@ -349,13 +371,41 @@ class _ScannerScreenState extends State<ScannerScreen>
     return _captureWork = _captureStill(camera, generation);
   }
 
+  void _deferCaptureCleanup(String path, Future<bool> recognition) {
+    unawaited(
+      recognition
+          .then<void>((_) => _media.cleanupCameraCapture(path))
+          .catchError((Object _) {}),
+    );
+  }
+
   Future<void> _captureStill(CameraController camera, int generation) async {
     bool current() => _current(generation) && identical(camera, _camera);
     String? capturePath;
     try {
       if (camera.value.isStreamingImages) await camera.stopImageStream();
-      await _frameWork;
+
+      // Capture used to wait forever for whichever live frame happened to own
+      // ML Kit when the button was pressed. Bound only the UI wait; the old OCR
+      // keeps its exclusive recognizer lease until it really completes.
+      final liveFrameDrained = await scannerWorkCompletedWithin(
+        _frameWork,
+        timeout: _liveFrameDrainTimeout,
+      );
+      if (!liveFrameDrained) {
+        if (current()) {
+          setState(() {
+            _error = _text.isNotEmpty || _barcode.isNotEmpty
+                ? 'Live reading is taking longer than expected. Use the scan already shown or retry capture shortly.'
+                : 'Live reading is taking longer than expected. Retry capture shortly; Aaris will not overlap OCR jobs.';
+            _qualityHint =
+                'Capture paused until the current on-device reader finishes.';
+          });
+        }
+        return;
+      }
       if (!current()) return;
+
       final photo = await camera.takePicture();
       capturePath = photo.path;
       if (!current()) return;
@@ -375,11 +425,35 @@ class _ScannerScreenState extends State<ScannerScreen>
         // before automatic handoff. The first still may request one targeted
         // follow-up view; the second still falls back to fail-closed review.
         _captureAttempts++;
-        final recognized = await (_frameWork = _recognize(
+        final stillRecognition = _recognize(
           InputImage.fromFilePath(photo.path),
           source: 'Captured still photo',
           qualityPath: photo.path,
-        ));
+        );
+        _frameWork = stillRecognition;
+        final stillFinished = await scannerWorkCompletedWithin(
+          stillRecognition,
+          timeout: _stillRecognitionTimeout,
+        );
+        if (!stillFinished) {
+          // InputImage.fromFilePath may still be reading this file on the native
+          // side. Keep the private capture until that exact OCR future drains;
+          // deleting it at the UI deadline would turn a latency guard into data
+          // loss and could make the late recognizer callback fail spuriously.
+          _deferCaptureCleanup(photo.path, stillRecognition);
+          capturePath = null;
+          if (current()) {
+            setState(() {
+              _error = _text.isNotEmpty || _barcode.isNotEmpty
+                  ? 'This photo is taking longer than expected to read. Use the captured result already shown or retry after the reader recovers.'
+                  : 'This photo is taking longer than expected to read. The current OCR job is finishing safely; retry after it recovers.';
+              _qualityHint =
+                  'Aaris stopped the loading state without starting a second OCR job.';
+            });
+          }
+          return;
+        }
+        final recognized = await stillRecognition;
         if (current() &&
             widget.autoSubmit &&
             recognized &&
