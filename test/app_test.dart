@@ -228,6 +228,10 @@ void main() {
     await screenshot(tester, key, 'aaris-brain');
     await tester.pumpWidget(const SizedBox.shrink());
     c.dispose();
+    // The AI tab starts a bounded secure-storage load. Advance Flutter's fake
+    // clock after unmount so its safety deadline settles before the framework
+    // checks for leaked timers.
+    await tester.pump(const Duration(seconds: 5));
   });
   testWidgets(
     'Stock, Profile, import and backup share the same visual system',
