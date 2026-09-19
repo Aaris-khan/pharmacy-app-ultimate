@@ -53,6 +53,12 @@ Future<bool> scannerWorkGroupCompletedWithin(
   );
 }
 
+@visibleForTesting
+bool scannerCaptureBlockedByDetachedReader({
+  required bool readerBusy,
+  required bool hasTrackedFrame,
+}) => readerBusy && !hasTrackedFrame;
+
 class ScanResult {
   const ScanResult({
     this.barcode = '',
@@ -390,6 +396,17 @@ class _ScannerScreenState extends State<ScannerScreen>
         _starting ||
         _capturing ||
         !_current(generation)) {
+      return Future.value();
+    }
+    if (scannerCaptureBlockedByDetachedReader(
+      readerBusy: _busy,
+      hasTrackedFrame: _frameWork != null,
+    )) {
+      setState(() {
+        _error =
+            'The previous camera reader is still finishing safely. Retry capture shortly; Aaris will not overlap OCR jobs.';
+        _qualityHint = 'Waiting for the on-device reader to become available.';
+      });
       return Future.value();
     }
     setState(() => _capturing = true);
