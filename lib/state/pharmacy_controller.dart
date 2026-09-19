@@ -780,6 +780,7 @@ class PharmacyController extends ChangeNotifier {
     String id, {
     required StockAdjustmentKind kind,
     required int quantity,
+    DateTime? operationTime,
   }) {
     final medicine = snapshot.records[id];
     if (medicine == null || medicine.archived) {
@@ -807,7 +808,7 @@ class PharmacyController extends ChangeNotifier {
             'Received stock must be a positive whole-number quantity.',
           );
         }
-        if (isExpiredOn(medicine, today)) {
+        if (isExpiredOn(medicine, operationTime ?? clock())) {
           throw const FormatException(
             'This physical stock entry is expired. Add a new stock entry with its own batch and expiry instead of receiving stock into the expired entry.',
           );
@@ -851,10 +852,15 @@ class PharmacyController extends ChangeNotifier {
       );
     }
 
+    // Revalidation and persistence are one pharmacist action. Capture one
+    // business instant so a confirmation landing across midnight cannot validate
+    // against one civil day and be audited/guarded against the next.
+    final operationTime = clock();
     final fresh = reviewStockAdjustment(
       live.id,
       kind: review.kind,
       quantity: review.requestedQuantity,
+      operationTime: operationTime,
     );
     if (fresh.beforeQuantity != review.beforeQuantity ||
         fresh.afterQuantity != review.afterQuantity ||
@@ -886,6 +892,7 @@ class PharmacyController extends ChangeNotifier {
         label: label,
         upserts: [live.patch(changes)],
       ),
+      operationTime: operationTime,
     );
   }
 
