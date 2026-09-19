@@ -40,7 +40,13 @@ class SupplierScreen extends StatelessWidget {
       top: false,
       child: ActiveListenableBuilder(
         listenable: controller,
-        rebuildToken: () => (controller.snapshot, controller.today),
+        // Directory rows and return windows depend only on linked medicine
+        // facts, supplier metadata and the civil day.
+        rebuildToken: () => (
+          controller.snapshot.records,
+          controller.snapshot.suppliers,
+          controller.today,
+        ),
         builder: (context, _) {
           final suppliers = controller.suppliers.toList(growable: false)
             ..sort(
@@ -231,7 +237,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       child: ActiveListenableBuilder(
         listenable: widget.controller,
         rebuildToken: () => (
-          widget.controller.snapshot,
+          widget.controller.snapshot.records,
+          widget.controller.snapshot.suppliers,
           widget.controller.today,
         ),
         builder: (context, _) {
