@@ -32,7 +32,6 @@ class _SearchScreenState extends State<SearchScreen> {
   static const _browsePageSize = 120;
 
   final _query = TextEditingController();
-  final _scroll = ScrollController();
   final _catalog = MedicineCatalogService();
   Timer? _debounce, _onlineDebounce;
   List<SearchHit> _hits = [];
@@ -57,7 +56,6 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _observedSnapshot = widget.controller.snapshot;
     _observedDay = widget.controller.today;
-    _scroll.addListener(_maybeLoadMore);
     unawaited(_search());
   }
 
@@ -149,11 +147,6 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     unawaited(_search(preserveResults: true));
-  }
-
-  void _maybeLoadMore() {
-    if (!_scroll.hasClients || _loading || _browseExhausted) return;
-    if (_query.text.trim().isNotEmpty || _hits.isEmpty) return;
   }
 
   Future<void> _search({bool preserveResults = false}) {
