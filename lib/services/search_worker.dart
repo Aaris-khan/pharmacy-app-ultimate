@@ -18,34 +18,29 @@ List<Medicine> _orderedActiveRecords(
   return visible;
 }
 
-List<SearchHit> _browseArchivedWindow(
-  List<Medicine> records,
-  int limit,
-) {
+List<Medicine> _orderedArchivedRecords(List<Medicine> records) {
   final visible = records
       .where((medicine) => medicine.archived)
       .toList(growable: false)
     ..sort(archivedOrder);
+  return visible;
+}
+
+List<SearchHit> _browseWindow(
+  List<Medicine> records,
+  int limit,
+  String reason,
+) {
   final boundedLimit = limit < 1
       ? 1
       : limit > 100000
       ? 100000
       : limit;
-  return visible
+  return records
       .take(boundedLimit)
-      .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
+      .map((medicine) => SearchHit(medicine.id, 1, reason, ''))
       .toList(growable: false);
 }
-
-List<SearchHit> _browseArchivedRecords(
-  List<Medicine> records,
-  int limit,
-) => _browseArchivedWindow(
-  records,
-  limit < MedicineSearch.maxArchivedResults
-      ? limit
-      : MedicineSearch.maxArchivedResults,
-);
 
 void _searchEntry(SendPort main) {
   final receive = ReceivePort();
@@ -53,8 +48,9 @@ void _searchEntry(SendPort main) {
   MedicineSearch? engine;
   MedicineSearch? archivedEngine;
   List<Medicine>? indexedRecords;
-  List<Medicine>? browsedRecords;
-  String browseKey = '';
+  List<Medicine>? activeBrowseRecords;
+  String activeBrowseKey = '';
+  List<Medicine>? archivedBrowseRecords;
   var revision = -1;
   receive.listen((dynamic raw) {
     final message = raw as Map;
@@ -68,8 +64,9 @@ void _searchEntry(SendPort main) {
         // expensive token/trigram/delete indexes until a real query arrives.
         engine = null;
         archivedEngine = null;
-        browsedRecords = null;
-        browseKey = '';
+        activeBrowseRecords = null;
+        activeBrowseKey = '';
+        archivedBrowseRecords = null;
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
       } else if (kind == 'reuseIndex') {
@@ -92,79 +89,77 @@ void _searchEntry(SendPort main) {
         if (indexedRecords == null || revision != message['revision']) {
           throw StateError('Search dataset changed. Retry this search.');
         }
-        if (kind == 'browseArchived') {
+        if (kind == 'browseActive') {
+          final scope = message['scope'] as SearchScope;
+          final settings = message['settings'] as WarningSettings;
+          final today = message['today'] as DateTime;
+          final nextBrowseKey =
+              '${scope.index}:${settings.shortDays}:${settings.months}:${dateText(today)}';
+          if (activeBrowseRecords == null ||
+              activeBrowseKey != nextBrowseKey) {
+            activeBrowseRecords = _orderedActiveRecords(
+              indexedRecords!,
+              scope,
+              settings,
+              today,
+            );
+            activeBrowseKey = nextBrowseKey;
+          }
           main.send({
             'id': id,
-            'result': _browseArchivedWindow(
-              indexedRecords!,
+            'result': _browseWindow(
+              activeBrowseRecords!,
               message['limit'] as int,
+              'Inventory',
+            ),
+          });
+        } else if (kind == 'browseArchived') {
+          archivedBrowseRecords ??= _orderedArchivedRecords(indexedRecords!);
+          main.send({
+            'id': id,
+            'result': _browseWindow(
+              archivedBrowseRecords!,
+              message['limit'] as int,
+              'Removed stock',
             ),
           });
         } else if (kind == 'searchArchived') {
           final query = message['query'] as String;
-          final limit = message['limit'] as int;
           if (query.trim().isEmpty) {
-            main.send({
-              'id': id,
-              'result': _browseArchivedRecords(indexedRecords!, limit),
-            });
-          } else {
-            archivedEngine ??= MedicineSearch(
-              indexedRecords!.where((medicine) => medicine.archived),
-              includeArchived: true,
+            throw StateError(
+              'Removed-stock browse must use the browse operation.',
             );
-            main.send({
-              'id': id,
-              'result': archivedEngine!.searchArchived(
-                query,
-                message['today'] as DateTime,
-                limit: limit,
-              ),
-            });
           }
+          archivedEngine ??= MedicineSearch(
+            indexedRecords!.where((medicine) => medicine.archived),
+            includeArchived: true,
+          );
+          main.send({
+            'id': id,
+            'result': archivedEngine!.searchArchived(
+              query,
+              message['today'] as DateTime,
+              limit: message['limit'] as int,
+            ),
+          });
         } else if (kind == 'search') {
           final query = message['query'] as String;
-          final scope = message['scope'] as SearchScope;
-          final settings = message['settings'] as WarningSettings;
-          final today = message['today'] as DateTime;
-          final limit = message['limit'] as int;
           if (query.trim().isEmpty) {
-            final nextBrowseKey =
-                '${scope.index}:${settings.shortDays}:${settings.months}:${dateText(today)}';
-            if (browsedRecords == null || browseKey != nextBrowseKey) {
-              browsedRecords = _orderedActiveRecords(
-                indexedRecords!,
-                scope,
-                settings,
-                today,
-              );
-              browseKey = nextBrowseKey;
-            }
-            main.send({
-              'id': id,
-              'result': browsedRecords!
-                  .take(limit)
-                  .map(
-                    (medicine) =>
-                        SearchHit(medicine.id, 1, 'Inventory', ''),
-                  )
-                  .toList(growable: false),
-            });
-          } else {
-            if (engine == null) {
-              throw StateError('Search index is not ready. Retry this search.');
-            }
-            main.send({
-              'id': id,
-              'result': engine!.search(
-                query,
-                scope,
-                settings,
-                today,
-                limit: limit,
-              ),
-            });
+            throw StateError('Inventory browse must use the browse operation.');
           }
+          if (engine == null) {
+            throw StateError('Search index is not ready. Retry this search.');
+          }
+          main.send({
+            'id': id,
+            'result': engine!.search(
+              query,
+              message['scope'] as SearchScope,
+              message['settings'] as WarningSettings,
+              message['today'] as DateTime,
+              limit: message['limit'] as int,
+            ),
+          });
         } else {
           throw StateError('Unknown search operation.');
         }
@@ -484,21 +479,53 @@ class SearchWorker {
     throw StateError('Background search recovery failed.');
   }
 
+  Future<List<SearchHit>> browseActive(
+    List<Medicine> records,
+    int revision,
+    SearchScope scope,
+    WarningSettings settings,
+    DateTime today, {
+    required int limit,
+  }) {
+    final result = _queue.then(
+      (_) => _withTransportRecovery(() async {
+        final session = await _ensureIndex(records, revision);
+        final response = await session.request({
+          'kind': 'browseActive',
+          'revision': revision,
+          'scope': scope,
+          'settings': settings,
+          'today': today,
+          'limit': limit,
+        });
+        return (response as List).cast<SearchHit>();
+      }),
+    );
+    _queue = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
+  }
+
   Future<List<SearchHit>> search(
     List<Medicine> records,
     int revision,
     String query,
     SearchScope scope,
     WarningSettings settings,
-    DateTime today, {
-    int? resultLimit,
-  }) {
+    DateTime today,
+  ) {
+    if (query.trim().isEmpty) {
+      return Future.error(
+        ArgumentError.value(
+          query,
+          'query',
+          'Use browseActive for an empty inventory query.',
+        ),
+      );
+    }
     final result = _queue.then(
       (_) => _withTransportRecovery(() async {
         final session = await _ensureIndex(records, revision);
-        if (query.trim().isNotEmpty) {
-          await _ensureSearchIndex(session, revision);
-        }
+        await _ensureSearchIndex(session, revision);
         final response = await session.request({
           'kind': 'search',
           'revision': revision,
@@ -506,7 +533,7 @@ class SearchWorker {
           'scope': scope,
           'settings': settings,
           'today': today,
-          'limit': resultLimit ?? (query.trim().isEmpty ? 100000 : 150),
+          'limit': 150,
         });
         return (response as List).cast<SearchHit>();
       }),
@@ -541,6 +568,15 @@ class SearchWorker {
     String query,
     DateTime today,
   ) {
+    if (query.trim().isEmpty) {
+      return Future.error(
+        ArgumentError.value(
+          query,
+          'query',
+          'Use browseArchived for an empty removed-stock query.',
+        ),
+      );
+    }
     final result = _queue.then(
       (_) => _withTransportRecovery(() async {
         final session = await _ensureIndex(records, revision);
@@ -549,7 +585,7 @@ class SearchWorker {
           'revision': revision,
           'query': query,
           'today': today,
-          'limit': query.trim().isEmpty ? 100000 : 150,
+          'limit': 150,
         });
         return (response as List).cast<SearchHit>();
       }),
