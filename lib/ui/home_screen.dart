@@ -502,10 +502,10 @@ class _WarningSelector extends StatelessWidget {
           ),
           const SizedBox(width: 5),
           if (busy)
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.8),
+            const Icon(
+              Icons.sync_rounded,
+              size: 14,
+              color: primary,
             )
           else
             const Icon(Icons.expand_more_rounded, size: 16, color: ink),
