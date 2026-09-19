@@ -111,22 +111,20 @@ void main() {
       'archiveReason': 'Removed for return',
     });
 
-    final first = await worker.searchArchived(
+    final first = await worker.browseArchived(
       [older, newer],
       20,
-      '',
-      contractToday,
+      limit: 100000,
     );
     expect(first.map((hit) => hit.id), [newer.id, older.id]);
 
     final reArchivedLater = older.patch({
       'archivedAt': DateTime.utc(2026, 9, 3).toIso8601String(),
     });
-    final refreshed = await worker.searchArchived(
+    final refreshed = await worker.browseArchived(
       [reArchivedLater, newer],
       21,
-      '',
-      contractToday,
+      limit: 100000,
     );
 
     expect(refreshed.map((hit) => hit.id), [reArchivedLater.id, newer.id]);
