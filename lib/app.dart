@@ -40,8 +40,7 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _autopilot = AarisAutopilotSupervisor(widget.controller);
-    _autopilot.setLifecycleActive(_isForeground);
+    _installAutopilot(widget.controller);
   }
 
   bool get _isForeground {
@@ -49,13 +48,37 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
     return state == null || state == AppLifecycleState.resumed;
   }
 
+  void _installAutopilot(PharmacyController controller) {
+    final supervisor = AarisAutopilotSupervisor(
+      controller,
+      startImmediately: false,
+    );
+    _autopilot = supervisor;
+    if (!_isForeground) {
+      supervisor.setLifecycleActive(false);
+      return;
+    }
+
+    // First paint owns startup priority. Autopilot walks the complete
+    // operational inventory before handing work to an isolate, so starting it
+    // from initState's microtask queue can delay the first usable frame on large
+    // pharmacies. Begin that read-only work immediately after the first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !identical(_autopilot, supervisor) ||
+          !_isForeground) {
+        return;
+      }
+      supervisor.refreshNow();
+    });
+  }
+
   @override
   void didUpdateWidget(covariant PharmacyApp oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       _autopilot.dispose();
-      _autopilot = AarisAutopilotSupervisor(widget.controller);
-      _autopilot.setLifecycleActive(_isForeground);
+      _installAutopilot(widget.controller);
     }
   }
 

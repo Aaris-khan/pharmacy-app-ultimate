@@ -359,6 +359,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   AarisAutopilotSupervisor(
     this.controller, {
     this.debounce = const Duration(milliseconds: 120),
+    bool startImmediately = true,
   }) : _digest = AarisAutopilotDigest.waiting(
          inventoryRevision: controller.snapshot.revision,
        ) {
@@ -366,7 +367,9 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
     _observedDay = dateText(controller.today);
     _observedReady = controller.ready;
     controller.addListener(_onControllerChanged);
-    refreshNow();
+    // Product hosts can defer the first full-dataset projection until after
+    // their initial frame. Standalone/domain callers retain eager startup.
+    if (startImmediately) refreshNow();
   }
 
   final PharmacyController controller;
