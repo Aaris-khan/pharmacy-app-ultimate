@@ -54,9 +54,9 @@ class HomeScreen extends StatelessWidget {
     listenable: controller,
     rebuildToken: () => (controller.snapshot, controller.today),
     builder: (context, _) {
-      // The controller memoizes this bounded projection by exact inventory
-      // snapshot + civil day. AI progress and other non-inventory notifications
-      // can repaint Home without rescanning the full Medicine Database.
+      // Rebuild only for a new inventory snapshot or civil day. The controller
+      // also memoizes this bounded projection, so parent-driven rebuilds do not
+      // rescan the full Medicine Database.
       final projection = controller.homeProjection;
       final attention = projection.attention;
       return ListView(
