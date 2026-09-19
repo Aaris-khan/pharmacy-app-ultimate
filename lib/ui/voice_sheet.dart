@@ -32,6 +32,7 @@ Future<String?> voiceSearch(
       if (result != _OfflineVoiceDecision.usePhoneSpeech) return null;
       if (!context.mounted) return null;
     }
+    if (!context.mounted) return null;
 
     final systemController = VoiceSearchController();
     controller = systemController;
