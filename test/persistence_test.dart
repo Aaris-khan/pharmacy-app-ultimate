@@ -190,6 +190,32 @@ void main() {
       expect(() => controller.review(jsonEncode(retry)), throwsFormatException);
     },
   );
+  test(
+    'AI preparation work scales with selected changes, not full proposal',
+    () async {
+      final export = controller.export();
+      final plan = controller.review(
+        jsonEncode({
+          'schema': pharmacySchema,
+          'requestId': export.requestId,
+          'baseRevision': 0,
+          'actions': List.generate(
+            80,
+            (i) => {
+              'op': 'add',
+              'fields': {'name': 'Medicine $i'},
+            },
+          ),
+        }),
+      );
+
+      await controller.applyAi(plan, {79});
+
+      expect(controller.preparedActions, 1);
+      expect(controller.records.single.name, 'Medicine 79');
+      expect(controller.snapshot.revision, 1);
+    },
+  );
   test('cancel a multi-batch AI preparation before any write', () async {
     final export = controller.export();
     final plan = controller.review(
