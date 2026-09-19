@@ -34,7 +34,8 @@ class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
   final _catalog = MedicineCatalogService();
   Timer? _debounce, _onlineDebounce;
-  List<SearchHit> _hits = [];
+  SearchHitPublication _publishedHits = SearchHitPublication.empty;
+  List<SearchHit> get _hits => _publishedHits.hits;
   List<MedicineCatalogCandidate> _catalogHits = [];
   bool _loading = true,
       _catalogLoading = false,
@@ -92,12 +93,15 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_refreshWhenActive ||
         !identical(currentSnapshot, _observedSnapshot) ||
         currentDay != _observedDay) {
+      final preserveResults = _publishedHits.canPreserveAgainst(
+        currentSnapshot.records,
+      );
       _observedSnapshot = currentSnapshot;
       _observedDay = currentDay;
       _refreshWhenActive = false;
       _debounce?.cancel();
       _onlineDebounce?.cancel();
-      unawaited(_search(preserveResults: true));
+      unawaited(_search(preserveResults: preserveResults));
     }
   }
 
@@ -121,7 +125,7 @@ class _SearchScreenState extends State<SearchScreen> {
     ++_catalogGeneration;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
-    _hits = [];
+    _publishedHits = SearchHitPublication.empty;
     _scan = null;
     _resetBrowseWindow();
     _catalogHits = [];
@@ -143,11 +147,14 @@ class _SearchScreenState extends State<SearchScreen> {
         currentDay == _observedDay) {
       return;
     }
+    final preserveResults = _publishedHits.canPreserveAgainst(
+      currentSnapshot.records,
+    );
     _observedSnapshot = currentSnapshot;
     _observedDay = currentDay;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
-    unawaited(_search(preserveResults: true));
+    unawaited(_search(preserveResults: preserveResults));
   }
 
   Future<void> _search({bool preserveResults = false}) {
@@ -159,7 +166,7 @@ class _SearchScreenState extends State<SearchScreen> {
       // same query is recomputed. A new query clears them immediately so stale
       // results can never remain tappable under different search text.
       _loading = true;
-      if (!preserveResults) _hits = [];
+      if (!preserveResults) _publishedHits = SearchHitPublication.empty;
       _error = '';
     });
 
@@ -203,7 +210,10 @@ class _SearchScreenState extends State<SearchScreen> {
           ? hits.take(requestedBrowseLimit).toList(growable: false)
           : hits;
       setState(() {
-        _hits = visibleHits;
+        _publishedHits = SearchHitPublication.capture(
+          visibleHits,
+          widget.controller.snapshot.records,
+        );
         _browseExhausted = browsing && !hasMoreBrowseRows;
         _error = '';
         _loading = false;
@@ -268,7 +278,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       // Query meaning changed. Remove old cards immediately rather than leaving
       // a stale medicine tappable during the short debounce.
-      _hits = [];
+      _publishedHits = SearchHitPublication.empty;
       _loading = true;
       _error = '';
       _scan = null;

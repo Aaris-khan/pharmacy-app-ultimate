@@ -315,31 +315,6 @@ class _SearchWorkerSession {
   );
 }
 
-bool _sameSearchProjection(Medicine before, Medicine after) =>
-    before.id == after.id &&
-    before.name == after.name &&
-    before.brand == after.brand &&
-    before.manufacturer == after.manufacturer &&
-    before.salt == after.salt &&
-    before.strength == after.strength &&
-    before.form == after.form &&
-    before.mfg == after.mfg &&
-    before.expiry == after.expiry &&
-    before.barcode == after.barcode &&
-    before.batchNumber == after.batchNumber &&
-    before.block == after.block &&
-    before.row == after.row &&
-    before.vertical == after.vertical &&
-    before.location == after.location &&
-    before.notes == after.notes &&
-    before.ocrText == after.ocrText &&
-    before.sold == after.sold &&
-    before.archived == after.archived &&
-    // Removed-stock results are ordered by removal time inside the worker.
-    // Reusing worker objects across an archivedAt-only revision would otherwise
-    // keep stale ordering even though the main isolate holds the new record.
-    before.archivedAt == after.archivedAt;
-
 class SearchWorker {
   _SearchWorkerSession? _session;
   Future<_SearchWorkerSession>? _starting;
@@ -401,7 +376,7 @@ class SearchWorker {
       final indexed = _indexedRecordRefs[record.id];
       if (indexed == null) return false;
       if (identical(indexed, record)) continue;
-      if (!_sameSearchProjection(indexed, record)) return false;
+      if (!sameSearchProjection(indexed, record)) return false;
       replacements.add(record);
     }
     // Quantity, cost, row revision and other non-search facts may change very

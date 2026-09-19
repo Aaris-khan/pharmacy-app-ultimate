@@ -34,7 +34,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   late final TextEditingController _query;
   String? _initialContextRestoreId;
   Timer? _debounce;
-  List<SearchHit> _hits = const [];
+  SearchHitPublication _publishedHits = SearchHitPublication.empty;
+  List<SearchHit> get _hits => _publishedHits.hits;
   bool _loading = true;
   String _error = '';
   int _generation = 0;
@@ -101,10 +102,13 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     final currentSnapshot = widget.controller.snapshot;
     if (_refreshWhenActive ||
         !identical(currentSnapshot, _observedSnapshot)) {
+      final preserveResults = _publishedHits.canPreserveAgainst(
+        currentSnapshot.records,
+      );
       _observedSnapshot = currentSnapshot;
       _refreshWhenActive = false;
       _debounce?.cancel();
-      unawaited(_search());
+      unawaited(_search(preserveResults: preserveResults));
     }
   }
 
@@ -119,6 +123,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     }
     _observedSnapshot = widget.controller.snapshot;
     _resetBrowseWindow();
+    _publishedHits = SearchHitPublication.empty;
     ++_generation;
     _debounce?.cancel();
     if (_controllerListening) {
@@ -153,9 +158,14 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   void _inventoryChanged() {
     final currentSnapshot = widget.controller.snapshot;
     if (identical(currentSnapshot, _observedSnapshot)) return;
+    final preserveResults = _publishedHits.canPreserveAgainst(
+      currentSnapshot.records,
+    );
     _observedSnapshot = currentSnapshot;
     _debounce?.cancel();
-    if (mounted) unawaited(_search());
+    if (mounted) {
+      unawaited(_search(preserveResults: preserveResults));
+    }
   }
 
   void _typed(String _) {
@@ -166,7 +176,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       setState(() {
         // Query meaning changed. Never leave a removed-stock row from the
         // previous query tappable while the debounce/new search is pending.
-        _hits = const [];
+        _publishedHits = SearchHitPublication.empty;
         _loading = true;
         _error = '';
       });
@@ -177,12 +187,13 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     );
   }
 
-  Future<void> _search() {
+  Future<void> _search({bool preserveResults = false}) {
     final generation = ++_generation;
     final query = _query.text;
     if (!mounted) return Future<void>.value();
     setState(() {
       _loading = true;
+      if (!preserveResults) _publishedHits = SearchHitPublication.empty;
       _error = '';
     });
 
@@ -223,14 +234,17 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
           ? hits.take(requestedBrowseLimit).toList(growable: false)
           : hits;
       setState(() {
-        _hits = visibleHits;
+        _publishedHits = SearchHitPublication.capture(
+          visibleHits,
+          widget.controller.snapshot.records,
+        );
         _browseExhausted = browsing && !hasMoreBrowseRows;
         _loading = false;
       });
     } catch (_) {
       if (!mounted || generation != _generation) return;
       setState(() {
-        _hits = const [];
+        _publishedHits = SearchHitPublication.empty;
         _loading = false;
         _error = 'Removed-stock search could not finish. Please try again.';
       });
@@ -245,7 +259,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   void _expandBrowse() {
     if (_loading || _browseExhausted) return;
     _browseLimit += _browsePageSize;
-    unawaited(_search());
+    unawaited(_search(preserveResults: true));
   }
 
   Future<void> _reviewRestore(Medicine record) async {

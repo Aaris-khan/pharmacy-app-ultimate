@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/domain/inventory.dart';
+import '../lib/domain/search.dart';
 import '../lib/services/search_worker.dart';
 import 'domain_contract.dart';
 
@@ -128,6 +129,31 @@ void main() {
     );
 
     expect(refreshed.map((hit) => hit.id), [reArchivedLater.id, newer.id]);
+  });
+
+  test('shared search projection ignores stock-only facts but catches search edits', () {
+    final original = stock(
+      'projection',
+      name: 'Drotaverine',
+      strength: '80mg',
+      quantity: 10,
+      price: 200,
+    );
+
+    expect(
+      sameSearchProjection(
+        original,
+        original.patch({'quantity': 7, 'unitPricePaise': 350}),
+      ),
+      isTrue,
+    );
+    expect(
+      sameSearchProjection(
+        original,
+        original.patch({'location': 'Shelf B'}),
+      ),
+      isFalse,
+    );
   });
 
 }

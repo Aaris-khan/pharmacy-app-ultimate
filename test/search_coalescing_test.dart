@@ -38,6 +38,36 @@ class _GatedPharmacyController extends PharmacyController {
   }
 }
 
+class _RefreshGatedController extends PharmacyController {
+  _RefreshGatedController(InventoryStorage storage)
+    : super(
+        storage,
+        clock: () => contractToday,
+        backgroundSearch: false,
+      );
+
+  Completer<void>? _nextSearchGate;
+
+  Completer<void> gateNextSearch() {
+    if (_nextSearchGate != null) {
+      throw StateError('A search refresh is already gated.');
+    }
+    final gate = Completer<void>();
+    _nextSearchGate = gate;
+    return gate;
+  }
+
+  @override
+  Future<List<SearchHit>> search(String raw, SearchScope scope) async {
+    final gate = _nextSearchGate;
+    if (raw.trim().isNotEmpty && gate != null) {
+      _nextSearchGate = null;
+      await gate.future;
+    }
+    return super.search(raw, scope);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -120,4 +150,86 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets(
+    'same-query refresh keeps stock-only hits but retires stale searchable hits',
+    (tester) async {
+      final record = stock(
+        'refresh-target',
+        name: 'Drotaverine',
+        strength: '80mg',
+        expiry: '2027-01-01',
+        quantity: 10,
+      );
+      final controller = _RefreshGatedController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {record.id: record}),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: SearchScreen(
+            controller: controller,
+            scope: SearchScope.all,
+            database: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pumpAndSettle();
+
+      Finder targetCard() => find.byWidgetPredicate(
+        (widget) =>
+            widget is MedicineCard && widget.record.id == record.id,
+      );
+      expect(targetCard(), findsOneWidget);
+
+      final quantityRefresh = controller.gateNextSearch();
+      var live = controller.snapshot.records[record.id]!;
+      await controller.save(
+        live.patch({'quantity': 9}),
+        expectedRevision: controller.snapshot.revision,
+      );
+      await tester.pump();
+      expect(
+        targetCard(),
+        findsOneWidget,
+        reason:
+            'Quantity-only edits do not change search membership, so the valid '
+            'card should stay visible while the same query refreshes.',
+      );
+      quantityRefresh.complete();
+      await tester.pumpAndSettle();
+
+      final searchableRefresh = controller.gateNextSearch();
+      live = controller.snapshot.records[record.id]!;
+      await controller.save(
+        live.patch({'name': 'Cefixime'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+      await tester.pump();
+      expect(
+        targetCard(),
+        findsNothing,
+        reason:
+            'A row that no longer matches the published search projection must '
+            'not remain tappable under the old query while refresh is pending.',
+      );
+      searchableRefresh.complete();
+      await tester.pumpAndSettle();
+      expect(targetCard(), findsNothing);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
 }

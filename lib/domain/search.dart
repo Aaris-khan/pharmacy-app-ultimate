@@ -405,6 +405,81 @@ String _barcodeIdentity(String value) {
   return candidate;
 }
 
+/// Whether two immutable medicine rows are equivalent for every local search,
+/// browse, scope and result-ordering decision.
+///
+/// Quantity, price, supplier and sale-accounting facts are deliberately absent:
+/// they never participate in the local search document or browse ordering. Keep
+/// this rule at the domain boundary so worker index reuse and UI stale-result
+/// protection cannot drift into different definitions of "same search row".
+bool sameSearchProjection(Medicine before, Medicine after) =>
+    before.id == after.id &&
+    before.name == after.name &&
+    before.brand == after.brand &&
+    before.manufacturer == after.manufacturer &&
+    before.salt == after.salt &&
+    before.strength == after.strength &&
+    before.form == after.form &&
+    before.mfg == after.mfg &&
+    before.expiry == after.expiry &&
+    before.barcode == after.barcode &&
+    before.batchNumber == after.batchNumber &&
+    before.block == after.block &&
+    before.row == after.row &&
+    before.vertical == after.vertical &&
+    before.location == after.location &&
+    before.notes == after.notes &&
+    before.ocrText == after.ocrText &&
+    before.sold == after.sold &&
+    before.archived == after.archived &&
+    before.archivedAt == after.archivedAt;
+
+/// Search result IDs together with the search-relevant rows that justified
+/// publishing them. Screens may keep this publication visible across stock-only
+/// updates, but must retire it as soon as one published row changes search or
+/// ordering meaning.
+class SearchHitPublication {
+  const SearchHitPublication._(this.hits, this._records);
+
+  static const empty = SearchHitPublication._(
+    <SearchHit>[],
+    <String, Medicine>{},
+  );
+
+  factory SearchHitPublication.capture(
+    List<SearchHit> hits,
+    Map<String, Medicine> records,
+  ) {
+    final stableHits = List<SearchHit>.unmodifiable(hits);
+    final witnesses = <String, Medicine>{};
+    for (final hit in stableHits) {
+      final record = records[hit.id];
+      if (record != null) witnesses[hit.id] = record;
+    }
+    return SearchHitPublication._(
+      stableHits,
+      Map<String, Medicine>.unmodifiable(witnesses),
+    );
+  }
+
+  final List<SearchHit> hits;
+  final Map<String, Medicine> _records;
+
+  bool canPreserveAgainst(Map<String, Medicine> records) {
+    if (hits.isEmpty) return true;
+    for (final hit in hits) {
+      final before = _records[hit.id];
+      final after = records[hit.id];
+      if (before == null ||
+          after == null ||
+          !sameSearchProjection(before, after)) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
 class MedicineSearch {
   MedicineSearch(
     Iterable<Medicine> records, {
