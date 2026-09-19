@@ -204,8 +204,27 @@ class PharmacyController extends ChangeNotifier {
 
   void _syncReadSnapshot() {
     if (identical(_readSnapshot, snapshot)) return;
+    final previous = _readSnapshot;
+    final recordsChanged =
+        previous == null || !identical(previous.records, snapshot.records);
     _readSnapshot = snapshot;
-    _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
+
+    // InventorySnapshot uses copy-on-write collections. Preference, supplier
+    // and sale-history commits can therefore publish a new authoritative
+    // snapshot while the medicine map itself is still the exact same immutable
+    // object. Keep the stable record list and search dataset epoch in that case:
+    // otherwise the next Stock search performs an unnecessary O(N) projection
+    // comparison / worker rebind even though not one searchable medicine fact
+    // changed. Scope settings and the civil day are passed to each search
+    // request separately, so reusing the medicine dataset is still correct.
+    if (recordsChanged || _readRecords == null) {
+      _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
+      _searchDatasetEpoch++;
+    }
+
+    // These read models intentionally keep the existing conservative
+    // invalidation boundary. Some depend on settings, suppliers, sale history
+    // or audit events in addition to medicine rows.
     _statsCache = null;
     _statsDayKey = '';
     _homeProjectionCache = null;
@@ -215,7 +234,12 @@ class PharmacyController extends ChangeNotifier {
     _trackingDayKey = '';
     _supplierReturnsCache = null;
     _supplierReturnsDayKey = '';
-    _searchDatasetEpoch++;
+  }
+
+  @visibleForTesting
+  int get debugSearchDatasetEpoch {
+    _syncReadSnapshot();
+    return _searchDatasetEpoch;
   }
 
   List<Medicine> get _stableRecords {
