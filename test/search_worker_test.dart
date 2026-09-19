@@ -5,6 +5,27 @@ import '../lib/domain/inventory.dart';
 import 'domain_contract.dart';
 
 void main() {
+  test('removed-stock search does not depend on active fuzzy indexing', () async {
+    final worker = SearchWorker();
+    addTearDown(worker.close);
+    final removed = stock(
+      'removed',
+      name: 'Drotaverine',
+      strength: '80mg',
+      archived: true,
+    );
+
+    final hits = await worker.searchArchived(
+      [removed],
+      1,
+      'Drotaverine',
+      contractToday,
+    );
+
+    expect(hits.single.id, removed.id);
+    expect(worker.debugIndexBuilds, 0);
+  });
+
   test(
     'persistent worker scopes results and replaces its index after edits',
     () async {
