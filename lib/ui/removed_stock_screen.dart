@@ -29,6 +29,8 @@ class RemovedStockScreen extends StatefulWidget {
 }
 
 class _RemovedStockScreenState extends State<RemovedStockScreen> {
+  static const _browsePageSize = 120;
+
   late final TextEditingController _query;
   String? _initialContextRestoreId;
   Timer? _debounce;
@@ -39,6 +41,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   late Object _observedSnapshot;
   bool _controllerListening = false;
   bool _refreshWhenActive = false;
+  bool _browseExhausted = false;
+  int _browseLimit = _browsePageSize;
   Future<void> _searchTail = Future<void>.value();
 
   @override
@@ -114,6 +118,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       widget.controller.addListener(_inventoryChanged);
     }
     _observedSnapshot = widget.controller.snapshot;
+    _browseLimit = _browsePageSize;
+    _browseExhausted = false;
     ++_generation;
     _debounce?.cancel();
     if (_controllerListening) {
