@@ -189,6 +189,7 @@ class PharmacyController extends ChangeNotifier {
   List<SupplierReturnCandidate>? _supplierReturnsCache;
   String _supplierReturnsDayKey = '';
   int _searchDatasetEpoch = 0;
+  String _publishedDayKey = '';
 
   DateTime get today => civilDay(clock());
   WarningSettings get settings => snapshot.settings;
@@ -282,11 +283,14 @@ class PharmacyController extends ChangeNotifier {
   }
 
   void _emit() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _publishedDayKey = dateText(today);
+    notifyListeners();
   }
 
   void refreshDay() {
     _scheduleMidnight();
+    if (_publishedDayKey == dateText(today)) return;
     _emit();
   }
 
@@ -302,9 +306,15 @@ class PharmacyController extends ChangeNotifier {
     _midnight = Timer(next.difference(now), refreshDay);
   }
 
-  List<Medicine> list(SearchScope scope) =>
-      records.where((m) => inScope(m, scope, settings, today)).toList()
-        ..sort((a, b) => expiryOrder(a, b, today));
+  List<Medicine> list(SearchScope scope) {
+    final selectedSettings = settings;
+    final date = today;
+    final result = records
+        .where((medicine) => inScope(medicine, scope, selectedSettings, date))
+        .toList();
+    result.sort((a, b) => expiryOrder(a, b, date));
+    return result;
+  }
 
   List<Medicine> dispensingChoices(String id, {DateTime? on}) {
     final requested = snapshot.records[id];
