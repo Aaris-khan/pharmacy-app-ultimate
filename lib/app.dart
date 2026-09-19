@@ -232,8 +232,17 @@ class _ShellState extends State<_Shell> {
           tint: Colors.white,
           radius: 24,
           elevation: .65,
-          child: AnimatedBuilder(
-            animation: widget.autopilot,
+          child: ActiveListenableBuilder(
+            listenable: widget.autopilot,
+            // The navigation bar renders only the bounded badge count. Autopilot
+            // can publish a different priority mix or next task while that count
+            // stays unchanged; those richer updates belong to the beacon/queue,
+            // not a full bottom-navigation rebuild on every tab.
+            rebuildToken: () {
+              final digest = widget.autopilot.digest;
+              final issues = digest.isReady ? digest.navigationBadgeCount : 0;
+              return issues > 99 ? 99 : issues;
+            },
             builder: (context, _) {
               final digest = widget.autopilot.digest;
               final issues = digest.isReady ? digest.navigationBadgeCount : 0;
