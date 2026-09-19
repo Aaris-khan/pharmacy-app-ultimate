@@ -873,7 +873,10 @@ class PharmacyController extends ChangeNotifier {
             record.soldUnitPricePaise ?? live.unitPricePaise;
         committedRecord = Medicine.fromJson(<String, dynamic>{
           ...record.toJson(),
-          'soldAt': record.soldAt ?? operationTime.toIso8601String(),
+          // A caller may carry preview/editor metadata captured earlier.
+          // The durable SOLD transition owns one authoritative commit instant
+          // for the medicine row, sale ledger and audit event.
+          'soldAt': operationTime.toIso8601String(),
           'soldQuantity': soldQuantity,
           'soldUnitPricePaise': soldUnitPrice,
         });

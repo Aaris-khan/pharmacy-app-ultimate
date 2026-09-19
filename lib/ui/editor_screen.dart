@@ -503,7 +503,8 @@ class _EditorScreenState extends State<EditorScreen> {
           ...draft.toJson(),
           'sold': true,
           'quantity': 0,
-          'soldAt': widget.controller.clock().toIso8601String(),
+          // SOLD lifecycle time is system-owned and stamped by the
+          // controller at the serialized commit boundary.
           'soldQuantity': draft.quantity,
           'soldUnitPricePaise': draft.unitPricePaise,
           'revision': (widget.record?.revision ?? 0) + 1,
