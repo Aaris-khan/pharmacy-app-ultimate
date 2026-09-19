@@ -870,7 +870,7 @@ class PharmacyController extends ChangeNotifier {
       if (record.sold && live != null && !live.sold) {
         final soldQuantity = record.soldQuantity ?? live.quantity;
         final soldUnitPrice =
-            record.soldUnitPricePaise ?? live?.unitPricePaise;
+            record.soldUnitPricePaise ?? live.unitPricePaise;
         committedRecord = Medicine.fromJson(<String, dynamic>{
           ...record.toJson(),
           'soldAt': record.soldAt ?? operationTime.toIso8601String(),
