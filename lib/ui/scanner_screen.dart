@@ -266,6 +266,7 @@ class _ScannerScreenState extends State<ScannerScreen>
       final sequence = _scanSequence++;
       final result = await _vision.analyze(
         input,
+        priority: MedicineVisionWorkPriority.interactive,
         source: source ?? 'Live camera frame ${sequence + 1}',
         sequence: sequence,
         quality: quality?.score,
