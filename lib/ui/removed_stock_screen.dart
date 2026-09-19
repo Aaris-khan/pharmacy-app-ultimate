@@ -36,6 +36,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   bool _loading = true;
   String _error = '';
   int _generation = 0;
+  late Object _observedSnapshot;
   Future<void> _searchTail = Future<void>.value();
 
   @override
@@ -58,6 +59,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
           : _contextSearchText(contextual),
     );
 
+    _observedSnapshot = widget.controller.snapshot;
     widget.controller.addListener(_inventoryChanged);
     unawaited(_search());
     if (_initialContextRestoreId != null) {
@@ -89,6 +91,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   }
 
   void _inventoryChanged() {
+    final currentSnapshot = widget.controller.snapshot;
+    if (identical(currentSnapshot, _observedSnapshot)) return;
+    _observedSnapshot = currentSnapshot;
     _debounce?.cancel();
     if (mounted) unawaited(_search());
   }
