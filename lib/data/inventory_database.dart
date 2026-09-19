@@ -890,10 +890,12 @@ class SqliteInventoryStorage implements InventoryStorage {
       }
 
       for (final m in mutation.upserts) {
-        // Validate every row before it is queued. Chunked batches keep a
-        // full-phone restore inside one SQLite transaction without either one
-        // platform round-trip per row or one unbounded in-memory Batch.
-        final valid = Medicine.fromJson(m.toJson());
+        // nextSnapshot is the authoritative validation/freezing boundary for
+        // this transaction. Persist that already-normalized immutable row
+        // instead of repeating a second toJson -> fromJson pass for every item.
+        // This matters most for large imports/restores, while the transaction
+        // and chunked SQLite batches still preserve atomicity and bounded memory.
+        final valid = after.records[m.id]!;
         batch.insert(
           'medicines',
           {'id': valid.id, 'facts': jsonEncode(valid.toJson())},
@@ -908,7 +910,7 @@ class SqliteInventoryStorage implements InventoryStorage {
         if (queued >= 500) await flushBatch();
       }
       for (final supplier in mutation.upsertSuppliers) {
-        final valid = Supplier.fromJson(supplier.toJson());
+        final valid = after.suppliers[supplier.id]!;
         batch.insert(
           'suppliers',
           {'id': valid.id, 'facts': jsonEncode(valid.toJson())},
@@ -923,7 +925,7 @@ class SqliteInventoryStorage implements InventoryStorage {
         if (queued >= 500) await flushBatch();
       }
       for (final sale in mutation.upsertSales) {
-        final valid = SaleEvent.fromJson(sale.toJson());
+        final valid = after.sales[sale.id]!;
         batch.insert(
           'sales',
           {'id': valid.id, 'facts': jsonEncode(valid.toJson())},
