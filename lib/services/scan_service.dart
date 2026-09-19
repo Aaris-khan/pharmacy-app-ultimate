@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -24,6 +25,67 @@ const String _ambiguousMedicineCodesMarker =
 /// can exact-lock an arbitrary product from a multi-pack image.
 bool scanEvidenceHasAmbiguousMedicineCodes(MedicineFrameEvidence evidence) =>
     evidence.source.contains(_ambiguousMedicineCodesMarker);
+
+/// Process-wide arbitration for the native OCR/barcode engines.
+///
+/// Durable intake can keep processing while the user opens the live scanner.
+/// Without one owner, separate [MedicineVisionService] instances can drive ML
+/// Kit concurrently and compete for CPU, memory and native recognizer state.
+/// Interactive camera work gets the next lease; background photo/video intake
+/// yields after every frame, so it remains resumable without making taps wait
+/// behind an entire queued video.
+enum MedicineVisionWorkPriority { interactive, background }
+
+class _MedicineVisionWorkScheduler {
+  bool _active = false;
+  final Queue<Completer<void>> _interactive = Queue<Completer<void>>();
+  final Queue<Completer<void>> _background = Queue<Completer<void>>();
+
+  Future<T> run<T>(
+    MedicineVisionWorkPriority priority,
+    Future<T> Function() operation,
+  ) async {
+    final turn = Completer<void>();
+    if (_active) {
+      final queue = priority == MedicineVisionWorkPriority.interactive
+          ? _interactive
+          : _background;
+      queue.addLast(turn);
+    } else {
+      _active = true;
+      turn.complete();
+    }
+
+    await turn.future;
+    try {
+      return await operation();
+    } finally {
+      _release();
+    }
+  }
+
+  void _release() {
+    Completer<void>? next;
+    if (_interactive.isNotEmpty) {
+      next = _interactive.removeFirst();
+    } else if (_background.isNotEmpty) {
+      next = _background.removeFirst();
+    }
+    if (next == null) {
+      _active = false;
+      return;
+    }
+    next.complete();
+  }
+}
+
+final _medicineVisionWorkScheduler = _MedicineVisionWorkScheduler();
+
+@visibleForTesting
+Future<T> runMedicineVisionWorkForTesting<T>(
+  MedicineVisionWorkPriority priority,
+  Future<T> Function() operation,
+) => _medicineVisionWorkScheduler.run(priority, operation);
 
 class MedicineVisionService {
   static const _channel = MethodChannel('com.aaris.pharmacy/documents');
@@ -52,6 +114,7 @@ class MedicineVisionService {
     int sequence = 0,
     int? timestampMs,
     double? quality,
+    MedicineVisionWorkPriority priority = MedicineVisionWorkPriority.background,
   }) => analyze(
     InputImage.fromFilePath(path),
     source: source,
@@ -59,6 +122,7 @@ class MedicineVisionService {
     timestampMs: timestampMs,
     quality: quality,
     qualityPath: path,
+    priority: priority,
   );
 
   Future<ScanEvidence> analyze(
@@ -68,87 +132,94 @@ class MedicineVisionService {
     int? timestampMs,
     double? quality,
     String? qualityPath,
+    MedicineVisionWorkPriority priority = MedicineVisionWorkPriority.background,
   }) async {
-    // Acquire the native-recognizer lease synchronously before the first await.
-    // close() therefore cannot race between admission and the in-flight count.
+    // Admit work to this instance synchronously before the first await.
+    // close() therefore cannot race past a request that is queued for the
+    // process-wide recognizer lease.
     if (_closing || _closed) throw StateError('Medicine scanner is closed.');
     if (_inFlight != 0) {
       throw StateError('Medicine scanner is already processing a frame.');
     }
     _inFlight++;
     try {
-      Object? latin;
-      Object? hindi;
-      Object? barcodeResult;
-      var measuredQuality = CaptureQuality.safeScore(quality);
-      final errors = <Object>[];
-      await Future.wait<void>([
-        if (quality == null && qualityPath != null)
-          _fileQuality(qualityPath).then((value) => measuredQuality = value),
-        _latin
-            .processImage(input)
-            .then<void>(
-              (value) => latin = value,
-              onError: (Object error, StackTrace _) => errors.add(error),
-            ),
-        _hindi
-            .processImage(input)
-            .then<void>(
-              (value) => hindi = value,
-              onError: (Object error, StackTrace _) => errors.add(error),
-            ),
-        _barcodes
-            .processImage(input)
-            .then<void>(
-              (value) => barcodeResult = value,
-              onError: (Object error, StackTrace _) => errors.add(error),
-            ),
-      ]);
-      if (latin == null && hindi == null && barcodeResult == null) {
-        throw StateError(
-          errors.isEmpty
-              ? 'Medicine recognition produced no result.'
-              : 'Medicine recognition is temporarily unavailable.',
-        );
-      }
+      return await _medicineVisionWorkScheduler.run(priority, () async {
+        if (_closing || _closed) {
+          throw StateError('Medicine scanner is closed.');
+        }
+        Object? latin;
+        Object? hindi;
+        Object? barcodeResult;
+        var measuredQuality = CaptureQuality.safeScore(quality);
+        final errors = <Object>[];
+        await Future.wait<void>([
+          if (quality == null && qualityPath != null)
+            _fileQuality(qualityPath).then((value) => measuredQuality = value),
+          _latin
+              .processImage(input)
+              .then<void>(
+                (value) => latin = value,
+                onError: (Object error, StackTrace _) => errors.add(error),
+              ),
+          _hindi
+              .processImage(input)
+              .then<void>(
+                (value) => hindi = value,
+                onError: (Object error, StackTrace _) => errors.add(error),
+              ),
+          _barcodes
+              .processImage(input)
+              .then<void>(
+                (value) => barcodeResult = value,
+                onError: (Object error, StackTrace _) => errors.add(error),
+              ),
+        ]);
+        if (latin == null && hindi == null && barcodeResult == null) {
+          throw StateError(
+            errors.isEmpty
+                ? 'Medicine recognition produced no result.'
+                : 'Medicine recognition is temporarily unavailable.',
+          );
+        }
 
-      final lines = mergeMedicineOcrLines([
-        if (latin is RecognizedText)
-          ...(latin as RecognizedText).text.split('\n'),
-        if (hindi is RecognizedText)
-          ...(hindi as RecognizedText).text.split('\n'),
-      ]);
-      final layoutLines = _mergeLayoutLines([
-        if (latin is RecognizedText)
-          ..._layoutEvidence(latin as RecognizedText),
-        if (hindi is RecognizedText)
-          ..._layoutEvidence(hindi as RecognizedText),
-      ]);
-      final decodedBarcodes = barcodeResult is List<Barcode>
-          ? (barcodeResult as List<Barcode>)
-                .map((barcode) => barcode.rawValue ?? '')
-                .where((value) => value.trim().isNotEmpty)
-          : const <String>[];
-      final barcodeSelection = selectSafeMedicineMachineCodes(decodedBarcodes);
-      final barcodes = barcodeSelection.payloads;
-      final evidenceSource = barcodeSelection.ambiguousTrustedProductCodes
-          ? '${source.trim()} $_ambiguousMedicineCodesMarker'.trim()
-          : source;
+        final lines = mergeMedicineOcrLines([
+          if (latin is RecognizedText)
+            ...(latin as RecognizedText).text.split('\n'),
+          if (hindi is RecognizedText)
+            ...(hindi as RecognizedText).text.split('\n'),
+        ]);
+        final layoutLines = _mergeLayoutLines([
+          if (latin is RecognizedText)
+            ..._layoutEvidence(latin as RecognizedText),
+          if (hindi is RecognizedText)
+            ..._layoutEvidence(hindi as RecognizedText),
+        ]);
+        final decodedBarcodes = barcodeResult is List<Barcode>
+            ? (barcodeResult as List<Barcode>)
+                  .map((barcode) => barcode.rawValue ?? '')
+                  .where((value) => value.trim().isNotEmpty)
+            : const <String>[];
+        final barcodeSelection = selectSafeMedicineMachineCodes(decodedBarcodes);
+        final barcodes = barcodeSelection.payloads;
+        final evidenceSource = barcodeSelection.ambiguousTrustedProductCodes
+            ? '${source.trim()} $_ambiguousMedicineCodesMarker'.trim()
+            : source;
 
-      // Keep physical camera quality semantically pure. Detector confidence is
-      // used only to choose among duplicate OCR layout lines. Downstream capture,
-      // date and evidence-graph logic therefore continues to read `quality` as
-      // focus/contrast/exposure, never as a model correctness probability.
-      return normalizeMedicineFrameEvidence(ScanEvidence(
-        barcode: barcodes.isEmpty ? '' : barcodes.first,
-        barcodes: barcodes,
-        layoutLines: layoutLines,
-        text: lines.join('\n'),
-        source: evidenceSource,
-        sequence: sequence,
-        timestampMs: timestampMs,
-        quality: measuredQuality,
-      ));
+        // Keep physical camera quality semantically pure. Detector confidence is
+        // used only to choose among duplicate OCR layout lines. Downstream capture,
+        // date and evidence-graph logic therefore continues to read `quality` as
+        // focus/contrast/exposure, never as a model correctness probability.
+        return normalizeMedicineFrameEvidence(ScanEvidence(
+          barcode: barcodes.isEmpty ? '' : barcodes.first,
+          barcodes: barcodes,
+          layoutLines: layoutLines,
+          text: lines.join('\n'),
+          source: evidenceSource,
+          sequence: sequence,
+          timestampMs: timestampMs,
+          quality: measuredQuality,
+        ));
+      });
     } finally {
       _inFlight--;
       if (_inFlight == 0) {
