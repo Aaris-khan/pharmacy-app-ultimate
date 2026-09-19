@@ -192,12 +192,16 @@ void main() {
 
       await tester.tap(find.text('Stock').last);
       await tester.pumpAndSettle();
-      expect(find.text('Drotaverine'), findsOneWidget);
 
       final query = find.descendant(
         of: find.byType(SearchScreen),
         matching: find.byType(TextField),
       ).first;
+      await tester.enterText(query, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pumpAndSettle();
+      expect(find.text('Drotaverine'), findsOneWidget);
+
       await tester.enterText(query, 'Azithromycin');
       await tester.pump();
 
