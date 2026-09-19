@@ -208,33 +208,44 @@ class PharmacyController extends ChangeNotifier {
     final previous = _readSnapshot;
     final recordsChanged =
         previous == null || !identical(previous.records, snapshot.records);
+    final settingsChanged =
+        previous == null || !identical(previous.settings, snapshot.settings);
+    final suppliersChanged =
+        previous == null || !identical(previous.suppliers, snapshot.suppliers);
+    final salesChanged =
+        previous == null || !identical(previous.sales, snapshot.sales);
+    final eventsChanged =
+        previous == null || !identical(previous.events, snapshot.events);
     _readSnapshot = snapshot;
 
-    // InventorySnapshot uses copy-on-write collections. Preference, supplier
-    // and sale-history commits can therefore publish a new authoritative
-    // snapshot while the medicine map itself is still the exact same immutable
-    // object. Keep the stable record list and search dataset epoch in that case:
-    // otherwise the next Stock search performs an unnecessary O(N) projection
-    // comparison / worker rebind even though not one searchable medicine fact
-    // changed. Scope settings and the civil day are passed to each search
-    // request separately, so reusing the medicine dataset is still correct.
+    // InventorySnapshot uses copy-on-write collections. Reuse every derived
+    // read model until one of its actual immutable inputs changes. This keeps a
+    // supplier edit, warning preference or sale-history write from forcing the
+    // next unrelated screen to rescan the complete pharmacy.
     if (recordsChanged || _readRecords == null) {
       _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
       _searchDatasetEpoch++;
     }
 
-    // These read models intentionally keep the existing conservative
-    // invalidation boundary. Some depend on settings, suppliers, sale history
-    // or audit events in addition to medicine rows.
-    _statsCache = null;
-    _statsDayKey = '';
-    _homeProjectionCache = null;
-    _homeProjectionDayKey = '';
-    _salesOverviewCache = null;
-    _trackingCache.clear();
-    _trackingDayKey = '';
-    _supplierReturnsCache = null;
-    _supplierReturnsDayKey = '';
+    if (recordsChanged) {
+      _statsCache = null;
+      _statsDayKey = '';
+    }
+    if (recordsChanged || settingsChanged) {
+      _homeProjectionCache = null;
+      _homeProjectionDayKey = '';
+    }
+    if (recordsChanged || salesChanged || eventsChanged) {
+      _salesOverviewCache = null;
+    }
+    if (recordsChanged || salesChanged) {
+      _trackingCache.clear();
+      _trackingDayKey = '';
+    }
+    if (recordsChanged || suppliersChanged) {
+      _supplierReturnsCache = null;
+      _supplierReturnsDayKey = '';
+    }
   }
 
   @visibleForTesting
@@ -755,7 +766,11 @@ class PharmacyController extends ChangeNotifier {
     // write (or another quick selector tap) cannot make the preference stale.
     // Field-specific callers derive from the latest committed settings, which
     // also prevents one rapid selector change from overwriting the other.
-    final value = update(snapshot.settings);
+    final current = snapshot.settings;
+    final value = update(current);
+    if (value.shortDays == current.shortDays && value.months == current.months) {
+      return null;
+    }
     return InventoryMutation(
       expectedRevision: snapshot.revision,
       label: 'Updated expiry warning windows',
