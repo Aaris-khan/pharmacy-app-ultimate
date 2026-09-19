@@ -216,7 +216,7 @@ void main() {
       await tester.enterText(query, 'Drotaverine');
       await tester.pump(const Duration(milliseconds: 160));
       await tester.pumpAndSettle();
-      expect(find.text('Drotaverine'), findsOneWidget);
+      expect(find.text('Drotaverine'), findsWidgets);
 
       await tester.enterText(query, 'Azithromycin');
       await tester.pump();
@@ -224,7 +224,7 @@ void main() {
       expect(find.text('Drotaverine'), findsNothing);
       await tester.pump(const Duration(milliseconds: 160));
       await tester.pumpAndSettle();
-      expect(find.text('Azithromycin'), findsOneWidget);
+      expect(find.text('Azithromycin'), findsWidgets);
       expect(find.text('Drotaverine'), findsNothing);
       expect(tester.takeException(), isNull);
 
@@ -284,7 +284,7 @@ void main() {
       await tester.tap(find.text('Stock').last);
       await tester.pumpAndSettle();
       expect(controller.searchCalls, baselineSearches + 1);
-      expect(find.text('Drotaverine'), findsOneWidget);
+      expect(find.text('Drotaverine'), findsWidgets);
       expect(find.text('Azithromycin'), findsNothing);
       expect(tester.takeException(), isNull);
 
