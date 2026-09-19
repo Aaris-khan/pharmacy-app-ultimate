@@ -1372,12 +1372,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final businessDay = event['businessDay'] is String
         ? event['businessDay'] as String
         : '';
-    final rawTime = event['time'] is String ? event['time'] as String : '';
-    final parsedTime = DateTime.tryParse(rawTime);
-    final localTime = parsedTime?.toLocal();
-    final timeLabel = localTime == null
-        ? 'Time unavailable'
-        : localTime.toString().split('.').first;
+    final timeLabel = localDateTimeLabel(event['time']);
 
     final confirmed =
         await showDialog<bool>(
