@@ -529,9 +529,9 @@ InventorySnapshot nextSnapshot(
   );
   return InventorySnapshot._trusted(
     revision: before.revision + 1,
-    settings: WarningSettings.fromJson(
-      (mutation.settings ?? before.settings).toJson(),
-    ),
+    settings: mutation.settings == null
+        ? before.settings
+        : WarningSettings.fromJson(mutation.settings!.toJson()),
     records: recordsChanged
         ? Map<String, Medicine>.unmodifiable(records)
         : before.records,
