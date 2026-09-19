@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -18,13 +20,28 @@ class _BrowseRecordingController extends PharmacyController {
       );
 
   final browseLimits = <int>[];
+  Completer<void>? _nextBrowseGate;
+
+  Completer<void> gateNextBrowse() {
+    if (_nextBrowseGate != null) {
+      throw StateError('A browse refresh is already gated.');
+    }
+    final gate = Completer<void>();
+    _nextBrowseGate = gate;
+    return gate;
+  }
 
   @override
   Future<List<SearchHit>> browse(
     SearchScope scope, {
     required int limit,
-  }) {
+  }) async {
     browseLimits.add(limit);
+    final gate = _nextBrowseGate;
+    if (gate != null) {
+      _nextBrowseGate = null;
+      await gate.future;
+    }
     return super.browse(scope, limit: limit);
   }
 }
@@ -166,4 +183,64 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets(
+    'warning-window refresh retires a card that left the expiry scope',
+    (tester) async {
+      final medicine = Medicine(
+        id: 'warning-context',
+        name: 'Drotaverine',
+        strength: '80mg',
+        form: 'Tablet',
+        expiry: DateTime(2026, 9, 25),
+        quantity: 10,
+      );
+      final controller = _BrowseRecordingController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {medicine.id: medicine}),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: SearchScreen(
+            controller: controller,
+            scope: SearchScope.shortExpiry,
+            database: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Finder targetCard() => find.byWidgetPredicate(
+        (widget) =>
+            widget is MedicineCard && widget.record.id == medicine.id,
+      );
+      expect(targetCard(), findsOneWidget);
+
+      final refresh = controller.gateNextBrowse();
+      await controller.setShortWarningDays(3);
+      await tester.pump();
+
+      expect(
+        targetCard(),
+        findsNothing,
+        reason:
+            'Changing the warning window can move a row out of this scope, so '
+            'the old card must stop being tappable before refresh completes.',
+      );
+
+      refresh.complete();
+      await tester.pumpAndSettle();
+      expect(targetCard(), findsNothing);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
 }
