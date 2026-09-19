@@ -59,14 +59,14 @@ void main() {
       expect(controller.settings.shortDays, 8);
       expect(find.text('5d'), findsOneWidget);
       expect(find.text('8d'), findsNothing);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byIcon(Icons.sync_rounded), findsOneWidget);
 
       storage.release();
       await tester.pumpAndSettle();
 
       expect(controller.settings.shortDays, 5);
       expect(find.text('5d'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byIcon(Icons.sync_rounded), findsNothing);
     } finally {
       storage.release();
       controller.dispose();
