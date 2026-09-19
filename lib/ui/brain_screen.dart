@@ -35,12 +35,12 @@ class BrainScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.onOpenSection,
-    this.autopilot,
+    required this.autopilot,
   });
 
   final PharmacyController controller;
   final ValueChanged<AppSection> onOpenSection;
-  final AarisAutopilotSupervisor? autopilot;
+  final AarisAutopilotSupervisor autopilot;
 
   @override
   State<BrainScreen> createState() => _BrainScreenState();
@@ -49,27 +49,16 @@ class BrainScreen extends StatefulWidget {
 class _BrainScreenState extends State<BrainScreen> {
   Future<void> _openAttentionQueue() async {
     if (!mounted) return;
-    final shared = widget.autopilot;
-    final supervisor =
-        shared ??
-        AarisAutopilotSupervisor(
-          widget.controller,
-          debounce: Duration.zero,
-        );
-    try {
-      supervisor.refreshNow();
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AttentionScreen(
-            controller: widget.controller,
-            autopilot: supervisor,
-          ),
+    widget.autopilot.refreshNow();
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AttentionScreen(
+          controller: widget.controller,
+          autopilot: widget.autopilot,
         ),
-      );
-    } finally {
-      if (shared == null) supervisor.dispose();
-    }
+      ),
+    );
   }
 
   bool _busy = false;

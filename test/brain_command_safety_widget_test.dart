@@ -1,6 +1,7 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/app_brain.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
+import 'package:aaris_pharmacy/state/autopilot_supervisor.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
 import 'package:aaris_pharmacy/ui/brain_screen.dart';
 import 'package:aaris_pharmacy/ui/design.dart';
@@ -29,6 +30,12 @@ void main() {
       );
       await controller.initialize();
       addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
 
       AppSection? openedSection;
       await tester.pumpWidget(
@@ -37,6 +44,7 @@ void main() {
           home: Scaffold(
             body: BrainScreen(
               controller: controller,
+              autopilot: autopilot,
               onOpenSection: (section) => openedSection = section,
             ),
           ),
@@ -61,6 +69,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
       controller.dispose();
       await tester.pump();
     },

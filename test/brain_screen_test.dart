@@ -1,6 +1,7 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/app_brain.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
+import 'package:aaris_pharmacy/state/autopilot_supervisor.dart';
 import 'package:aaris_pharmacy/state/operational_context.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
 import 'package:aaris_pharmacy/ui/brain_screen.dart';
@@ -62,6 +63,12 @@ void main() {
       );
       await controller.initialize();
       addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
 
       AppSection? openedSection;
       await tester.pumpWidget(
@@ -70,6 +77,7 @@ void main() {
           home: Scaffold(
             body: BrainScreen(
               controller: controller,
+              autopilot: autopilot,
               onOpenSection: (section) => openedSection = section,
             ),
           ),
@@ -139,6 +147,7 @@ void main() {
       // pending. Unmount first, then synchronously dispose the controller so its
       // midnight refresh timer is cancelled before that invariant is checked.
       await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
       controller.dispose();
       await tester.pump();
     },
@@ -176,6 +185,12 @@ void main() {
       );
       await controller.initialize();
       addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
 
       AppSection? openedSection;
       await tester.pumpWidget(
@@ -184,6 +199,7 @@ void main() {
           home: Scaffold(
             body: BrainScreen(
               controller: controller,
+              autopilot: autopilot,
               onOpenSection: (section) => openedSection = section,
             ),
           ),
@@ -224,6 +240,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
       controller.dispose();
       // AiScreen starts a bounded secure-storage load in initState. Flutter
       // widget tests use fake time, so advance beyond that deadline after the
@@ -252,13 +269,23 @@ void main() {
       );
       await controller.initialize();
       addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
       controller.rememberOperationalTarget(medicine.id);
 
       await tester.pumpWidget(
         MaterialApp(
           theme: pharmacyTheme(),
           home: Scaffold(
-            body: BrainScreen(controller: controller, onOpenSection: (_) {}),
+            body: BrainScreen(
+              controller: controller,
+              autopilot: autopilot,
+              onOpenSection: (_) {},
+            ),
           ),
         ),
       );
@@ -279,6 +306,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
       controller.dispose();
       await tester.pump(const Duration(seconds: 5));
     },
@@ -305,6 +333,12 @@ void main() {
       );
       await controller.initialize();
       addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
 
       AppSection? openedSection;
       await tester.pumpWidget(
@@ -313,6 +347,7 @@ void main() {
           home: Scaffold(
             body: BrainScreen(
               controller: controller,
+              autopilot: autopilot,
               onOpenSection: (section) => openedSection = section,
             ),
           ),
@@ -342,6 +377,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
       controller.dispose();
       await tester.pump(const Duration(seconds: 5));
     },
