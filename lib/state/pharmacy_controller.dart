@@ -877,6 +877,26 @@ class PharmacyController extends ChangeNotifier {
           'This stock expired after the SOLD review was opened. Remove it with reason Expired instead; nothing was changed.',
         );
       }
+
+      // A known positive stock count is a real depletion fact and belongs in
+      // the durable sale ledger, not only in the bounded Activity history.
+      // Unknown/zero quantity can still confirm out-of-stock, but must never
+      // invent one sold unit merely to make analytics look complete.
+      final soldQuantity = live.quantity;
+      final saleEvents = <SaleEvent>[
+        if (soldQuantity != null && soldQuantity > 0)
+          SaleEvent(
+            id: newId(),
+            stockId: live.id,
+            medicineName: live.name,
+            strength: live.strength,
+            form: live.form,
+            salt: live.salt,
+            quantity: soldQuantity,
+            occurredAt: now,
+            savedUnitPricePaise: live.unitPricePaise,
+          ),
+      ];
       return InventoryMutation(
         expectedRevision: snapshot.revision,
         label: 'Marked ${live.name} sold',
@@ -889,6 +909,7 @@ class PharmacyController extends ChangeNotifier {
             'soldUnitPricePaise': live.unitPricePaise,
           }),
         ],
+        upsertSales: saleEvents,
       );
     });
   }
