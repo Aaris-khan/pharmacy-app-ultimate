@@ -25,6 +25,25 @@ class InventorySnapshot {
        sales = Map.unmodifiable(sales ?? {}),
        receipts = Set.unmodifiable(receipts ?? {}),
        events = List.unmodifiable(events ?? []);
+
+  /// Internal copy-on-write constructor.
+  ///
+  /// Callers outside this file still enter through the defensive public
+  /// constructor above. Persistence transitions already own freshly frozen
+  /// collections, so reusing untouched immutable collections avoids copying
+  /// the complete pharmacy for a settings-only or unrelated write.
+  InventorySnapshot._trusted({
+    required this.revision,
+    required this.settings,
+    required this.records,
+    required this.suppliers,
+    required this.sales,
+    required this.receipts,
+    required this.events,
+    required this.soldValue,
+    required this.unknownSold,
+  });
+
   final int revision, soldValue, unknownSold;
   final WarningSettings settings;
   final Map<String, Medicine> records;
@@ -335,9 +354,28 @@ InventorySnapshot nextSnapshot(
   InventoryMutation mutation,
   Map<String, dynamic> event,
 ) {
-  final records = {...before.records};
-  final suppliers = {...before.suppliers};
-  final sales = {...before.sales};
+  final recordsChanged =
+      mutation.upserts.isNotEmpty || mutation.removeIds.isNotEmpty;
+  final suppliersChanged =
+      mutation.upsertSuppliers.isNotEmpty ||
+      mutation.removeSupplierIds.isNotEmpty;
+  final salesChanged =
+      mutation.upsertSales.isNotEmpty || mutation.removeSaleIds.isNotEmpty;
+
+  // Copy only the collection a mutation can actually change. These maps are
+  // frozen again before publication; untouched collections are already
+  // immutable because every InventorySnapshot owns unmodifiable collections.
+  // This keeps a preference/supplier/sales write from cloning the full medicine
+  // database twice on the latency-sensitive commit path.
+  final records = recordsChanged
+      ? <String, Medicine>{...before.records}
+      : before.records;
+  final suppliers = suppliersChanged
+      ? <String, Supplier>{...before.suppliers}
+      : before.suppliers;
+  final sales = salesChanged
+      ? <String, SaleEvent>{...before.sales}
+      : before.sales;
   final eventTimeRaw = event['time'];
   if (eventTimeRaw is! String) {
     throw const FormatException('Inventory event time is missing.');
@@ -442,8 +480,13 @@ InventorySnapshot nextSnapshot(
   for (final id in mutation.removeSaleIds) {
     sales.remove(id);
   }
-  // Validate aggregate money before committing, not while a statistics widget renders.
-  InventoryStats(records.values, operationDay);
+  // Aggregate inventory arithmetic can change only when medicine facts change.
+  // Keep the exact-accounting guard on every stock mutation, but do not rescan
+  // the entire pharmacy for warning settings, supplier metadata or sale-history
+  // writes that leave the medicine collection byte-for-byte unchanged.
+  if (recordsChanged) {
+    InventoryStats(records.values, operationDay);
+  }
   var total =
       mutation.soldValueOverride ??
       checkedMoneySum(before.soldValue, event['soldValue'] as int);
@@ -470,24 +513,36 @@ InventorySnapshot nextSnapshot(
         undone.single['unknownSoldBeforeTotal'] as int? ??
         missing - undone.single['unknownSold'] as int;
   }
-  return InventorySnapshot(
-    revision: before.revision + 1,
-    settings: WarningSettings.fromJson(
-      (mutation.settings ?? before.settings).toJson(),
-    ),
-    records: records,
-    suppliers: suppliers,
-    sales: sales,
-    receipts: {
-      ...before.receipts,
-      if (mutation.requestId != null) mutation.requestId!,
-    },
-    events: [
+  final receipts = mutation.requestId == null
+      ? before.receipts
+      : Set<String>.unmodifiable(<String>{
+          ...before.receipts,
+          mutation.requestId!,
+        });
+  final events = List<Map<String, dynamic>>.unmodifiable(
+    <Map<String, dynamic>>[
       event,
       ...before.events.map(
         (e) => e['id'] == mutation.undoEventId ? {...e, 'undone': true} : e,
       ),
-    ].take(200).toList(),
+    ].take(200),
+  );
+  return InventorySnapshot._trusted(
+    revision: before.revision + 1,
+    settings: WarningSettings.fromJson(
+      (mutation.settings ?? before.settings).toJson(),
+    ),
+    records: recordsChanged
+        ? Map<String, Medicine>.unmodifiable(records)
+        : before.records,
+    suppliers: suppliersChanged
+        ? Map<String, Supplier>.unmodifiable(suppliers)
+        : before.suppliers,
+    sales: salesChanged
+        ? Map<String, SaleEvent>.unmodifiable(sales)
+        : before.sales,
+    receipts: receipts,
+    events: events,
     soldValue: total,
     unknownSold: missing,
   );
