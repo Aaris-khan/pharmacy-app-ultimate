@@ -17,6 +17,21 @@ Medicine _futureDatedStock(String id) => Medicine.fromJson({
   'batchNumber': 'CLOCK-$id',
 });
 
+class _ControllableClock {
+  _ControllableClock(this.current);
+
+  DateTime current;
+  final List<DateTime> _queued = <DateTime>[];
+
+  DateTime call() => _queued.isEmpty ? current : _queued.removeAt(0);
+
+  void queue(Iterable<DateTime> values) {
+    _queued
+      ..clear()
+      ..addAll(values);
+  }
+}
+
 void main() {
   group('authoritative inventory business clock', () {
     test(
@@ -101,6 +116,56 @@ void main() {
           operationTime.toIso8601String(),
         );
         expect(controller.snapshot.events.first['businessDay'], '2027-01-01');
+      },
+    );
+
+    test(
+      'receive-stock confirmation keeps one business instant across midnight',
+      () async {
+        final beforeMidnight = DateTime(2026, 9, 20, 23, 59, 59);
+        final afterMidnight = DateTime(2026, 9, 21, 0, 0, 1);
+        final stock = Medicine.fromJson(<String, dynamic>{
+          'id': 'midnight-receive',
+          'name': 'Midnight Receive',
+          'strength': '10mg',
+          'form': 'Tablet',
+          'expiry': '2026-09-20',
+          'quantity': 10,
+        });
+        final clock = _ControllableClock(beforeMidnight);
+        final controller = PharmacyController(
+          MemoryInventoryStorage(
+            InventorySnapshot(
+              records: <String, Medicine>{stock.id: stock},
+            ),
+          ),
+          clock: clock.call,
+          backgroundSearch: false,
+        );
+        await controller.initialize();
+        addTearDown(controller.dispose);
+
+        final review = controller.reviewStockAdjustment(
+          stock.id,
+          kind: StockAdjustmentKind.receive,
+          quantity: 2,
+        );
+
+        clock
+          ..current = afterMidnight
+          ..queue(<DateTime>[beforeMidnight, afterMidnight]);
+
+        await controller.applyStockAdjustment(review);
+
+        expect(controller.snapshot.records[stock.id]?.quantity, 12);
+        expect(
+          controller.snapshot.events.first['time'],
+          beforeMidnight.toUtc().toIso8601String(),
+        );
+        expect(
+          controller.snapshot.events.first['businessDay'],
+          '2026-09-20',
+        );
       },
     );
 
