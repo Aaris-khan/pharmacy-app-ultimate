@@ -179,8 +179,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         supplier.id,
         dueIds,
       );
-      await _returnService.share(review);
-      if (!mounted) return;
+      final shared = await _returnService.share(review);
+      if (!mounted || !shared) return;
 
       final confirm = await showDialog<bool>(
         context: context,

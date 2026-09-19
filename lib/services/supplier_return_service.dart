@@ -10,7 +10,11 @@ import '../domain/supplier_return.dart';
 class SupplierReturnService {
   static const _channel = MethodChannel('com.aaris.pharmacy/documents');
 
-  Future<void> share(ReviewedSupplierReturn review) async {
+  @visibleForTesting
+  static bool shouldOfferHandoverConfirmation(ShareResultStatus status) =>
+      status != ShareResultStatus.dismissed;
+
+  Future<bool> share(ReviewedSupplierReturn review) async {
     if (review.lines.isEmpty || review.lines.length > 500) {
       throw const FormatException(
         'Choose between 1 and 500 reviewed stock entries.',
@@ -31,7 +35,7 @@ class SupplierReturnService {
       if (path == null || path.isEmpty) {
         throw StateError('The supplier return PDF could not be created.');
       }
-      await SharePlus.instance.share(
+      final result = await SharePlus.instance.share(
         ShareParams(
           title: 'Aaris Pharmacy supplier return',
           text:
@@ -39,14 +43,15 @@ class SupplierReturnService {
           files: <XFile>[XFile(path, mimeType: 'application/pdf')],
         ),
       );
-      return;
+      return shouldOfferHandoverConfirmation(result.status);
     }
 
-    await SharePlus.instance.share(
+    final result = await SharePlus.instance.share(
       ShareParams(
         title: 'Aaris Pharmacy supplier return',
         text: const JsonEncoder.withIndent('  ').convert(payload),
       ),
     );
+    return shouldOfferHandoverConfirmation(result.status);
   }
 }

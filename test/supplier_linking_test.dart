@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../lib/data/inventory_database.dart';
 import '../lib/domain/ai_protocol.dart';
@@ -8,6 +9,7 @@ import '../lib/domain/attention.dart';
 import '../lib/domain/medicine.dart';
 import '../lib/domain/supplier.dart';
 import '../lib/state/pharmacy_controller.dart';
+import '../lib/services/supplier_return_service.dart';
 
 const _supplierA = Supplier(
   id: 'supplier_a',
@@ -45,6 +47,57 @@ Medicine _stock(
 
 void main() {
   final today = DateTime(2026, 9, 19);
+
+  test('supplier return projection is memoized per snapshot and civil day', () async {
+    var now = today;
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: () => now,
+      backgroundSearch: false,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.saveSupplier(_supplierA, expectedRevision: 0);
+    await controller.save(_stock('stock-a'), expectedRevision: 1);
+
+    final first = controller.supplierReturns;
+    expect(identical(first, controller.supplierReturns), isTrue);
+
+    now = DateTime(2026, 9, 20);
+    final nextDay = controller.supplierReturns;
+    expect(identical(first, nextDay), isFalse);
+    expect(identical(nextDay, controller.supplierReturns), isTrue);
+
+    final live = controller.snapshot.records['stock-a']!;
+    await controller.save(
+      live.patch(<String, dynamic>{'quantity': 19}),
+      expectedRevision: controller.snapshot.revision,
+    );
+    final afterWrite = controller.supplierReturns;
+    expect(identical(nextDay, afterWrite), isFalse);
+    expect(afterWrite.single.medicine.quantity, 19);
+  });
+
+  test('supplier return confirmation is skipped when sharing is dismissed', () {
+    expect(
+      SupplierReturnService.shouldOfferHandoverConfirmation(
+        ShareResultStatus.dismissed,
+      ),
+      isFalse,
+    );
+    expect(
+      SupplierReturnService.shouldOfferHandoverConfirmation(
+        ShareResultStatus.success,
+      ),
+      isTrue,
+    );
+    expect(
+      SupplierReturnService.shouldOfferHandoverConfirmation(
+        ShareResultStatus.unavailable,
+      ),
+      isTrue,
+    );
+  });
 
   test('supplier return window is derived and reacts immediately to policy changes', () {
     final medicine = _stock('stock-a');
@@ -121,6 +174,8 @@ void main() {
       Supplier.fromJson(_supplierA.toJson()).drugLicenceNo,
       'DL-A-123',
     );
+    expect(isReservedSupplierCustomFieldLabel('Drug licence no.'), isTrue);
+    expect(isReservedSupplierCustomFieldLabel('State code'), isFalse);
 
     expect(
       () => Supplier.fromJson(<String, dynamic>{

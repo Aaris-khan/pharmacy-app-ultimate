@@ -5,6 +5,15 @@ import '../domain/supplier.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
 
+String? _supplierCustomFieldLabelError(String value) {
+  final clean = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (clean.isEmpty) return 'Enter a field name.';
+  if (isReservedSupplierCustomFieldLabel(clean)) {
+    return 'This is already a built-in supplier or stock field.';
+  }
+  return null;
+}
+
 Future<String?> openSupplierEditor(
   BuildContext context,
   PharmacyController controller, {
@@ -94,13 +103,14 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(
               labelText: 'Field name',
-              hintText: 'e.g. Drug licence no.',
+              hintText: 'e.g. State code',
               errorText: error.isEmpty ? null : error,
             ),
             onSubmitted: (_) {
               final clean = label.text.replaceAll(RegExp(r'\s+'), ' ').trim();
-              if (clean.isEmpty) {
-                setDialogState(() => error = 'Enter a field name.');
+              final issue = _supplierCustomFieldLabelError(clean);
+              if (issue != null) {
+                setDialogState(() => error = issue);
                 return;
               }
               Navigator.pop(ctx, clean);
@@ -114,8 +124,9 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
             FilledButton(
               onPressed: () {
                 final clean = label.text.replaceAll(RegExp(r'\s+'), ' ').trim();
-                if (clean.isEmpty) {
-                  setDialogState(() => error = 'Enter a field name.');
+                final issue = _supplierCustomFieldLabelError(clean);
+                if (issue != null) {
+                  setDialogState(() => error = issue);
                   return;
                 }
                 Navigator.pop(ctx, clean);

@@ -186,6 +186,8 @@ class PharmacyController extends ChangeNotifier {
   HomeInventoryProjection? _homeProjectionCache;
   String _homeProjectionDayKey = '';
   SalesOverview? _salesOverviewCache;
+  List<SupplierReturnCandidate>? _supplierReturnsCache;
+  String _supplierReturnsDayKey = '';
   int _searchDatasetEpoch = 0;
 
   DateTime get today => civilDay(clock());
@@ -206,6 +208,8 @@ class PharmacyController extends ChangeNotifier {
     _homeProjectionCache = null;
     _homeProjectionDayKey = '';
     _salesOverviewCache = null;
+    _supplierReturnsCache = null;
+    _supplierReturnsDayKey = '';
     _searchDatasetEpoch++;
   }
 
@@ -503,11 +507,20 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
-  List<SupplierReturnCandidate> get supplierReturns => supplierReturnCandidates(
-    medicines: records,
-    suppliers: snapshot.suppliers,
-    today: today,
-  );
+  List<SupplierReturnCandidate> get supplierReturns {
+    final date = today;
+    final dayKey = dateText(date);
+    _syncReadSnapshot();
+    if (_supplierReturnsCache == null || _supplierReturnsDayKey != dayKey) {
+      _supplierReturnsCache = supplierReturnCandidates(
+        medicines: _stableRecords,
+        suppliers: snapshot.suppliers,
+        today: date,
+      );
+      _supplierReturnsDayKey = dayKey;
+    }
+    return _supplierReturnsCache!;
+  }
 
   ReviewedSupplierReturn reviewSupplierReturn(
     String supplierId,

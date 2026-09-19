@@ -31,6 +31,9 @@ const _reservedSupplierLabels = <String>{
   'stockid',
 };
 
+bool isReservedSupplierCustomFieldLabel(String value) =>
+    _reservedSupplierLabels.contains(_supplierKey(value));
+
 class SupplierCustomField {
   const SupplierCustomField({
     required this.id,
@@ -65,7 +68,7 @@ class SupplierCustomField {
         cleanValue.length > 2000) {
       throw const FormatException('Invalid supplier custom field.');
     }
-    if (_reservedSupplierLabels.contains(_supplierKey(cleanLabel))) {
+    if (isReservedSupplierCustomFieldLabel(cleanLabel)) {
       throw FormatException(
         '$cleanLabel is already a built-in supplier or stock field.',
       );
