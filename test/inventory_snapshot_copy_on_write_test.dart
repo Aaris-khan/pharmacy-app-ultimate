@@ -1,5 +1,4 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
-import 'package:aaris_pharmacy/domain/inventory.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
