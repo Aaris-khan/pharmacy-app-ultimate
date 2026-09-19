@@ -1709,7 +1709,7 @@ class PharmacyController extends ChangeNotifier {
   /// index only when this feature is actually opened.
   Future<List<SearchHit>> searchArchived(String raw) async {
     if (raw.trim().isEmpty) {
-      return browseArchived(limit: 100000);
+      return browseArchived(limit: MedicineSearch.maxArchivedResults);
     }
     final data = _stableRecords;
     final datasetRevision = _searchDatasetEpoch;
