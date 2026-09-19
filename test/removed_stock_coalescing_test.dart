@@ -115,6 +115,12 @@ void main() {
       expect(find.text('Drotaverine'), findsOneWidget);
       expect(find.text('Azithromycin'), findsNothing);
       expect(tester.takeException(), isNull);
+
+      // Dispose the widget and its app-scoped controller before flutter_test's
+      // pending-timer invariant runs. The controller intentionally owns a
+      // midnight rollover timer for its full application lifetime.
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
     },
   );
 
@@ -148,6 +154,9 @@ void main() {
       expect(find.text('Azithromycin'), findsOneWidget);
       expect(find.text('Drotaverine'), findsNothing);
       expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
     },
   );
 }
