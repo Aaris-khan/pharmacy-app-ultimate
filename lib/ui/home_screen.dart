@@ -52,6 +52,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
+    rebuildToken: () => (controller.snapshot, controller.today),
     builder: (context, _) {
       // The controller memoizes this bounded projection by exact inventory
       // snapshot + civil day. AI progress and other non-inventory notifications
