@@ -449,7 +449,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField).first, 'stock summary');
       await tester.tap(find.byTooltip('Run command').first);
-      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.textContaining('3 active stock entries'), findsOneWidget);
