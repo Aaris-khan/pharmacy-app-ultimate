@@ -780,7 +780,18 @@ class PharmacyController extends ChangeNotifier {
     String id, {
     required StockAdjustmentKind kind,
     required int quantity,
-    DateTime? operationTime,
+  }) => _reviewStockAdjustment(
+    id,
+    kind: kind,
+    quantity: quantity,
+    operationTime: clock(),
+  );
+
+  ReviewedStockAdjustment _reviewStockAdjustment(
+    String id, {
+    required StockAdjustmentKind kind,
+    required int quantity,
+    required DateTime operationTime,
   }) {
     final medicine = snapshot.records[id];
     if (medicine == null || medicine.archived) {
@@ -808,7 +819,7 @@ class PharmacyController extends ChangeNotifier {
             'Received stock must be a positive whole-number quantity.',
           );
         }
-        if (isExpiredOn(medicine, operationTime ?? clock())) {
+        if (isExpiredOn(medicine, operationTime)) {
           throw const FormatException(
             'This physical stock entry is expired. Add a new stock entry with its own batch and expiry instead of receiving stock into the expired entry.',
           );
@@ -856,7 +867,7 @@ class PharmacyController extends ChangeNotifier {
     // business instant so a confirmation landing across midnight cannot validate
     // against one civil day and be audited/guarded against the next.
     final operationTime = clock();
-    final fresh = reviewStockAdjustment(
+    final fresh = _reviewStockAdjustment(
       live.id,
       kind: review.kind,
       quantity: review.requestedQuantity,
