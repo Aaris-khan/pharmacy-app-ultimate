@@ -396,138 +396,157 @@ class PharmacyController extends ChangeNotifier {
         'This FEFO sale is incomplete and cannot be saved automatically.',
       );
     }
-
-    // A FEFO confirmation is bound to the physical rows and allocation the
-    // pharmacist actually reviewed, not unrelated inventory traffic. When the
-    // global revision moved, every reviewed allocation row must still have its
-    // exact revision, then FEFO is recomputed from the live Medicine Database.
-    // Any new/changed earlier-priority batch changes the plan and fails closed.
-    // The final commit still uses the current global revision, so a later race is
-    // rejected by the authoritative persistence compare-and-swap boundary.
-    var safeReview = review;
-    if (review.baseRevision != snapshot.revision) {
-      if (review.stockRevisions.length != reviewedPlan.allocations.length) {
-        throw StateError(
-          'This FEFO review cannot be safely rebased. Review the sale again before saving.',
-        );
-      }
-      for (final allocation in reviewedPlan.allocations) {
-        final live = snapshot.records[allocation.stockId];
-        if (live == null ||
-            live.revision != review.stockRevisions[allocation.stockId]) {
+    await _queueReviewedCommit((_) {
+      var safeReview = review;
+      if (review.baseRevision != snapshot.revision) {
+        if (review.stockRevisions.length != reviewedPlan.allocations.length) {
           throw StateError(
-            'A reviewed FEFO batch changed after confirmation was prepared. Review the sale again before saving.',
+            'This FEFO review cannot be safely rebased. Review the sale again before saving.',
           );
         }
+        for (final allocation in reviewedPlan.allocations) {
+          final live = snapshot.records[allocation.stockId];
+          if (live == null ||
+              live.revision != review.stockRevisions[allocation.stockId]) {
+            throw StateError(
+              'A reviewed FEFO batch changed after confirmation was prepared. Review the sale again before saving.',
+            );
+          }
+        }
+        final anchor = snapshot.records[reviewedPlan.allocations.first.stockId];
+        if (anchor == null ||
+            anchor.archived ||
+            anchor.sold ||
+            anchor.identity != reviewedPlan.productKey) {
+          throw StateError(
+            'A reviewed FEFO batch is no longer available. Review the sale again.',
+          );
+        }
+        final fresh = reviewFefoSale(
+          anchor.id,
+          quantity: reviewedPlan.requestedQuantity,
+          occurredAt: review.occurredAt,
+        );
+        if (!_equivalentReviewedFefoPlan(reviewedPlan, fresh.plan)) {
+          throw StateError(
+            'FEFO priority changed after this sale was reviewed. Review the live batch allocation again before saving.',
+          );
+        }
+        safeReview = fresh;
       }
 
-      final anchor = snapshot.records[reviewedPlan.allocations.first.stockId];
-      if (anchor == null ||
-          anchor.archived ||
-          anchor.sold ||
-          anchor.identity != reviewedPlan.productKey) {
-        throw StateError(
-          'A reviewed FEFO batch is no longer available. Review the sale again.',
+      final plan = safeReview.plan;
+      final updates = <Medicine>[];
+      final saleEvents = <SaleEvent>[];
+      for (final allocation in plan.allocations) {
+        final live = snapshot.records[allocation.stockId];
+        if (live == null || live.archived || live.sold) {
+          throw StateError(
+            'A reviewed FEFO batch is no longer available. Review the sale again.',
+          );
+        }
+        if (live.identity != plan.productKey) {
+          throw StateError(
+            'A reviewed FEFO batch no longer matches the medicine identity.',
+          );
+        }
+        validateDispensingDate(live, safeReview.occurredAt);
+        final available = live.quantity;
+        if (available == null || available != allocation.availableQuantity) {
+          throw StateError(
+            'A reviewed FEFO batch quantity changed or became unknown. Review again.',
+          );
+        }
+        if (allocation.quantity < 1 || allocation.quantity > available) {
+          throw StateError('The reviewed FEFO allocation is no longer valid.');
+        }
+        final remaining = available - allocation.quantity;
+        final soldOut = remaining == 0;
+        updates.add(
+          live.patch({
+            'quantity': remaining,
+            if (soldOut) ...{
+              'sold': true,
+              'soldAt': safeReview.occurredAt.toIso8601String(),
+              'soldQuantity': available,
+              'soldUnitPricePaise': live.unitPricePaise,
+            },
+          }),
+        );
+        saleEvents.add(
+          SaleEvent(
+            id: newId(),
+            stockId: live.id,
+            medicineName: live.name,
+            strength: live.strength,
+            form: live.form,
+            salt: live.salt,
+            quantity: allocation.quantity,
+            occurredAt: safeReview.occurredAt,
+            savedUnitPricePaise: live.unitPricePaise,
+          ),
         );
       }
-      final fresh = reviewFefoSale(
-        anchor.id,
-        quantity: reviewedPlan.requestedQuantity,
-        occurredAt: review.occurredAt,
-      );
-      if (!_equivalentReviewedFefoPlan(reviewedPlan, fresh.plan)) {
-        throw StateError(
-          'FEFO priority changed after this sale was reviewed. Review the live batch allocation again before saving.',
-        );
-      }
-      safeReview = fresh;
-    }
-
-    final plan = safeReview.plan;
-    final updates = <Medicine>[];
-    final saleEvents = <SaleEvent>[];
-    for (final allocation in plan.allocations) {
-      final live = snapshot.records[allocation.stockId];
-      if (live == null || live.archived || live.sold) {
-        throw StateError(
-          'A reviewed FEFO batch is no longer available. Review the sale again.',
-        );
-      }
-      if (live.identity != plan.productKey) {
-        throw StateError(
-          'A reviewed FEFO batch no longer matches the medicine identity.',
-        );
-      }
-      validateDispensingDate(live, safeReview.occurredAt);
-      final available = live.quantity;
-      if (available == null || available != allocation.availableQuantity) {
-        throw StateError(
-          'A reviewed FEFO batch quantity changed or became unknown. Review again.',
-        );
-      }
-      if (allocation.quantity < 1 || allocation.quantity > available) {
-        throw StateError('The reviewed FEFO allocation is no longer valid.');
-      }
-
-      final remaining = available - allocation.quantity;
-      final soldOut = remaining == 0;
-      updates.add(
-        live.patch({
-          'quantity': remaining,
-          if (soldOut) ...{
-            'sold': true,
-            'soldAt': safeReview.occurredAt.toIso8601String(),
-            'soldQuantity': available,
-            'soldUnitPricePaise': live.unitPricePaise,
-          },
-        }),
-      );
-      saleEvents.add(
-        SaleEvent(
-          id: newId(),
-          stockId: live.id,
-          medicineName: live.name,
-          strength: live.strength,
-          form: live.form,
-          salt: live.salt,
-          quantity: allocation.quantity,
-          occurredAt: safeReview.occurredAt,
-          savedUnitPricePaise: live.unitPricePaise,
-        ),
-      );
-    }
-
-    await _commit(
-      InventoryMutation(
+      return InventoryMutation(
         expectedRevision: safeReview.baseRevision,
         label:
             'FEFO sale · ${plan.title} · ${plan.requestedQuantity} units · ${plan.allocations.length} ${plan.allocations.length == 1 ? 'batch' : 'batches'}',
         upserts: updates,
         upsertSales: saleEvents,
-      ),
-    );
+      );
+    });
   }
 
-  Future<void> _queueCommit(InventoryMutation Function() buildMutation) {
+  Future<void> _queueCommit(InventoryMutation? Function() buildMutation) {
     final result = _writes.then((_) async {
       if (_disposed) throw StateError('App is closed.');
-      snapshot = await storage.commit(buildMutation());
+      final mutation = buildMutation();
+      if (mutation == null) return;
+      snapshot = await storage.commit(mutation);
       _emit();
     });
     _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
 
+  Future<void> _queueReviewedCommit(
+    InventoryMutation? Function(DateTime operationTime) buildMutation,
+  ) => _queueCommit(() {
+    final operationTime = clock();
+    final mutation = buildMutation(operationTime);
+    return mutation?.withOperationTime(operationTime);
+  });
+
   Future<void> _commit(InventoryMutation mutation, {DateTime? operationTime}) {
-    // Stamp once at the authoritative controller boundary. A lifecycle action
-    // may pass the same instant used to construct its stock transition, which
-    // keeps archivedAt/soldAt and the audit business day coherent even if the
-    // confirmation lands exactly across midnight.
     final committedMutation = mutation.withOperationTime(
       operationTime ?? clock(),
     );
     return _queueCommit(() => committedMutation);
   }
+
+  Future<void> commitReviewedRecordUpdate({
+    required String stockId,
+    required int recordRevision,
+    required String Function(Medicine live) label,
+    required Medicine? Function(Medicine live, DateTime operationTime) update,
+  }) => _queueReviewedCommit((operationTime) {
+    final live = snapshot.records[stockId];
+    if (live == null || live.revision != recordRevision) {
+      throw StateError(
+        'The reviewed stock entry changed or is no longer available. Review the action again.',
+      );
+    }
+    final updated = update(live, operationTime);
+    if (updated == null) return null;
+    if (updated.id != live.id) {
+      throw StateError('A reviewed update cannot replace a different stock ID.');
+    }
+    return InventoryMutation(
+      expectedRevision: snapshot.revision,
+      label: label(live),
+      upserts: <Medicine>[updated],
+    );
+  });
 
   Future<void> saveSupplier(
     Supplier supplier, {
@@ -622,63 +641,54 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applySupplierReturn(ReviewedSupplierReturn review) async {
-    final liveSupplier = snapshot.suppliers[review.supplier.id];
-    if (liveSupplier == null ||
-        liveSupplier.revision != review.supplier.revision ||
-        liveSupplier.returnBeforeExpiryDays !=
-            review.supplier.returnBeforeExpiryDays) {
-      throw StateError(
-        'Supplier details changed after this return was reviewed. Review the return list again.',
-      );
-    }
-
-    // One authoritative instant drives both eligibility and durable lifecycle
-    // metadata. Sampling the clock once prevents a confirmation crossing
-    // midnight from validating against one civil day but being archived/audited
-    // on another.
-    final returnedAt = clock();
-    final day = civilDay(returnedAt);
-    final updates = <Medicine>[];
-    for (final line in review.lines) {
-      final reviewed = line.record;
-      final live = snapshot.records[reviewed.id];
-      if (live == null ||
-          live.archived ||
-          live.sold ||
-          live.revision != reviewed.revision ||
-          live.supplierId != liveSupplier.id ||
-          live.quantity != line.quantity ||
-          live.expiry == null) {
+    await _queueReviewedCommit((returnedAt) {
+      final liveSupplier = snapshot.suppliers[review.supplier.id];
+      if (liveSupplier == null ||
+          liveSupplier.revision != review.supplier.revision ||
+          liveSupplier.returnBeforeExpiryDays !=
+              review.supplier.returnBeforeExpiryDays) {
         throw StateError(
-          'A reviewed stock entry changed before the supplier return was confirmed. Refresh the return list.',
+          'Supplier details changed after this return was reviewed. Review the return list again.',
         );
       }
-      final daysLeft = civilDay(live.expiry!).difference(day).inDays;
-      if (daysLeft < 0 ||
-          daysLeft > liveSupplier.returnBeforeExpiryDays) {
-        throw StateError(
-          'A reviewed stock entry is no longer inside the supplier return window. Refresh the return list.',
+      final day = civilDay(returnedAt);
+      final updates = <Medicine>[];
+      for (final line in review.lines) {
+        final reviewed = line.record;
+        final live = snapshot.records[reviewed.id];
+        if (live == null ||
+            live.archived ||
+            live.sold ||
+            live.revision != reviewed.revision ||
+            live.supplierId != liveSupplier.id ||
+            live.quantity != line.quantity ||
+            live.expiry == null) {
+          throw StateError(
+            'A reviewed stock entry changed before the supplier return was confirmed. Refresh the return list.',
+          );
+        }
+        final daysLeft = civilDay(live.expiry!).difference(day).inDays;
+        if (daysLeft < 0 || daysLeft > liveSupplier.returnBeforeExpiryDays) {
+          throw StateError(
+            'A reviewed stock entry is no longer inside the supplier return window. Refresh the return list.',
+          );
+        }
+        updates.add(
+          archiveMedicine(
+            live,
+            reason: 'Returned to ${liveSupplier.name}',
+            at: returnedAt,
+          ),
         );
       }
-      updates.add(
-        archiveMedicine(
-          live,
-          reason: 'Returned to ${liveSupplier.name}',
-          at: returnedAt,
-        ),
-      );
-    }
-
-    if (updates.isEmpty) return;
-    await _commit(
-      InventoryMutation(
+      if (updates.isEmpty) return null;
+      return InventoryMutation(
         expectedRevision: snapshot.revision,
         label:
             'Supplier return · ${liveSupplier.name} · ${updates.length} stock entries',
         upserts: updates,
-      ),
-      operationTime: returnedAt,
-    );
+      );
+    });
   }
 
   Future<void> save(Medicine record, {required int expectedRevision}) async {
@@ -760,23 +770,22 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applyMarkSold(ReviewedMarkSold review) async {
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        live.archived ||
-        live.sold ||
-        !_sameReviewedMedicine(live, review.record)) {
-      throw StateError(
-        'The reviewed stock entry changed or is no longer active. Review SOLD again.',
-      );
-    }
-    final now = clock();
-    if (isExpiredOn(live, now)) {
-      throw const FormatException(
-        'This stock expired after the SOLD review was opened. Remove it with reason Expired instead; nothing was changed.',
-      );
-    }
-    await _commit(
-      InventoryMutation(
+    await _queueReviewedCommit((now) {
+      final live = snapshot.records[review.stockId];
+      if (live == null ||
+          live.archived ||
+          live.sold ||
+          !_sameReviewedMedicine(live, review.record)) {
+        throw StateError(
+          'The reviewed stock entry changed or is no longer active. Review SOLD again.',
+        );
+      }
+      if (isExpiredOn(live, now)) {
+        throw const FormatException(
+          'This stock expired after the SOLD review was opened. Remove it with reason Expired instead; nothing was changed.',
+        );
+      }
+      return InventoryMutation(
         expectedRevision: snapshot.revision,
         label: 'Marked ${live.name} sold',
         upserts: [
@@ -788,9 +797,8 @@ class PharmacyController extends ChangeNotifier {
             'soldUnitPricePaise': live.unitPricePaise,
           }),
         ],
-      ),
-      operationTime: now,
-    );
+      );
+    });
   }
 
   /// Immediate compatibility gateway for callers with no confirmation delay.
@@ -879,61 +887,50 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applyStockAdjustment(ReviewedStockAdjustment review) async {
-    // This confirmation belongs to one exact physical stock row. An unrelated
-    // medicine being added, sold or edited must not force the pharmacist to
-    // repeat a still-valid review. The row revision and reviewed stock facts are
-    // revalidated below; the final commit rebases onto the live global revision.
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        live.archived ||
-        live.revision != review.recordRevision) {
-      throw StateError(
-        'The reviewed stock entry changed or is no longer active. Review it again.',
+    await _queueReviewedCommit((operationTime) {
+      final live = snapshot.records[review.stockId];
+      if (live == null ||
+          live.archived ||
+          live.revision != review.recordRevision) {
+        throw StateError(
+          'The reviewed stock entry changed or is no longer active. Review it again.',
+        );
+      }
+      final fresh = _reviewStockAdjustment(
+        live.id,
+        kind: review.kind,
+        quantity: review.requestedQuantity,
+        operationTime: operationTime,
       );
-    }
-
-    // Revalidation and persistence are one pharmacist action. Capture one
-    // business instant so a confirmation landing across midnight cannot validate
-    // against one civil day and be audited/guarded against the next.
-    final operationTime = clock();
-    final fresh = _reviewStockAdjustment(
-      live.id,
-      kind: review.kind,
-      quantity: review.requestedQuantity,
-      operationTime: operationTime,
-    );
-    if (fresh.beforeQuantity != review.beforeQuantity ||
-        fresh.afterQuantity != review.afterQuantity ||
-        fresh.wasSold != review.wasSold) {
-      throw StateError(
-        'Stock facts changed after review. Nothing was saved; review the action again.',
-      );
-    }
-    if (!fresh.changesQuantity &&
-        !(fresh.kind == StockAdjustmentKind.receive && fresh.wasSold)) {
-      return;
-    }
-
-    final changes = <String, dynamic>{'quantity': fresh.afterQuantity};
-    if (fresh.kind == StockAdjustmentKind.receive && live.sold) {
-      changes.addAll({
-        'sold': false,
-        'soldAt': null,
-        'soldQuantity': null,
-        'soldUnitPricePaise': null,
-      });
-    }
-    final label = fresh.kind == StockAdjustmentKind.receive
-        ? 'Received stock · ${live.name} · +${fresh.requestedQuantity} units · ${fresh.beforeQuantity}→${fresh.afterQuantity}'
-        : 'Corrected stock · ${live.name} · ${fresh.beforeQuantity == null ? 'unknown' : fresh.beforeQuantity}→${fresh.afterQuantity} units';
-    await _commit(
-      InventoryMutation(
+      if (fresh.beforeQuantity != review.beforeQuantity ||
+          fresh.afterQuantity != review.afterQuantity ||
+          fresh.wasSold != review.wasSold) {
+        throw StateError(
+          'Stock facts changed after review. Nothing was saved; review the action again.',
+        );
+      }
+      if (!fresh.changesQuantity &&
+          !(fresh.kind == StockAdjustmentKind.receive && fresh.wasSold)) {
+        return null;
+      }
+      final changes = <String, dynamic>{'quantity': fresh.afterQuantity};
+      if (fresh.kind == StockAdjustmentKind.receive && live.sold) {
+        changes.addAll({
+          'sold': false,
+          'soldAt': null,
+          'soldQuantity': null,
+          'soldUnitPricePaise': null,
+        });
+      }
+      final label = fresh.kind == StockAdjustmentKind.receive
+          ? 'Received stock · ${live.name} · +${fresh.requestedQuantity} units · ${fresh.beforeQuantity}→${fresh.afterQuantity}'
+          : 'Corrected stock · ${live.name} · ${fresh.beforeQuantity == null ? 'unknown' : fresh.beforeQuantity}→${fresh.afterQuantity} units';
+      return InventoryMutation(
         expectedRevision: fresh.baseRevision,
         label: label,
         upserts: [live.patch(changes)],
-      ),
-      operationTime: operationTime,
-    );
+      );
+    });
   }
 
   ReviewedSale reviewSale(
@@ -1001,61 +998,56 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applySale(ReviewedSale review) async {
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        live.archived ||
-        live.sold ||
-        !_sameReviewedMedicine(live, review.record)) {
-      throw StateError(
-        'The reviewed stock entry changed or is no longer active. Review the sale again; nothing was saved.',
+    await _queueReviewedCommit((_) {
+      final live = snapshot.records[review.stockId];
+      if (live == null ||
+          live.archived ||
+          live.sold ||
+          !_sameReviewedMedicine(live, review.record)) {
+        throw StateError(
+          'The reviewed stock entry changed or is no longer active. Review the sale again; nothing was saved.',
+        );
+      }
+      final fresh = reviewSale(
+        live.id,
+        quantity: review.quantity,
+        totalAmountPaise: review.totalAmountPaise,
+        occurredAt: review.occurredAt,
+        markSoldOut: review.markSoldOut,
+        reviewedRecord: review.record,
       );
-    }
-
-    // Re-run every deterministic sale invariant against the live database. This
-    // deliberately rebases over unrelated global writes while keeping the exact
-    // reviewed stock row immutable. The final persistence CAS still rejects a
-    // later race between this synchronous revalidation and the queued commit.
-    final fresh = reviewSale(
-      live.id,
-      quantity: review.quantity,
-      totalAmountPaise: review.totalAmountPaise,
-      occurredAt: review.occurredAt,
-      markSoldOut: review.markSoldOut,
-      reviewedRecord: review.record,
-    );
-    final medicine = fresh.record;
-    final current = medicine.quantity;
-    final remaining = current == null ? null : current - fresh.quantity;
-    final sale = SaleEvent(
-      id: newId(),
-      stockId: medicine.id,
-      medicineName: medicine.name,
-      strength: medicine.strength,
-      form: medicine.form,
-      salt: medicine.salt,
-      quantity: fresh.quantity,
-      occurredAt: fresh.occurredAt,
-      totalAmountPaise: fresh.totalAmountPaise,
-      savedUnitPricePaise: medicine.unitPricePaise,
-    );
-    final updated = medicine.patch({
-      'quantity': fresh.markSoldOut ? 0 : remaining,
-      if (fresh.markSoldOut) ...{
-        'sold': true,
-        'soldAt': fresh.occurredAt.toIso8601String(),
-        'soldQuantity': current,
-        'soldUnitPricePaise': medicine.unitPricePaise,
-      },
-    });
-    await _commit(
-      InventoryMutation(
+      final medicine = fresh.record;
+      final current = medicine.quantity;
+      final remaining = current == null ? null : current - fresh.quantity;
+      final sale = SaleEvent(
+        id: newId(),
+        stockId: medicine.id,
+        medicineName: medicine.name,
+        strength: medicine.strength,
+        form: medicine.form,
+        salt: medicine.salt,
+        quantity: fresh.quantity,
+        occurredAt: fresh.occurredAt,
+        totalAmountPaise: fresh.totalAmountPaise,
+        savedUnitPricePaise: medicine.unitPricePaise,
+      );
+      final updated = medicine.patch({
+        'quantity': fresh.markSoldOut ? 0 : remaining,
+        if (fresh.markSoldOut) ...{
+          'sold': true,
+          'soldAt': fresh.occurredAt.toIso8601String(),
+          'soldQuantity': current,
+          'soldUnitPricePaise': medicine.unitPricePaise,
+        },
+      });
+      return InventoryMutation(
         expectedRevision: fresh.baseRevision,
         label:
             'Recorded sale · ${medicine.name} · ${fresh.quantity} ${fresh.quantity == 1 ? 'unit' : 'units'}${fresh.markSoldOut ? ' · marked sold' : ''}',
         upserts: [updated],
         upsertSales: [sale],
-      ),
-    );
+      );
+    });
   }
 
   /// Immediate compatibility gateway. New user-facing confirmation flows should
@@ -1102,24 +1094,22 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applyArchive(ReviewedArchive review) async {
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        live.archived ||
-        !_sameReviewedMedicine(live, review.record)) {
-      throw StateError(
-        'The reviewed stock entry changed or is no longer active. Review removal again.',
-      );
-    }
-    final fresh = reviewArchive(live.id, review.reason);
-    final removedAt = clock();
-    await _commit(
-      InventoryMutation(
+    await _queueReviewedCommit((removedAt) {
+      final live = snapshot.records[review.stockId];
+      if (live == null ||
+          live.archived ||
+          !_sameReviewedMedicine(live, review.record)) {
+        throw StateError(
+          'The reviewed stock entry changed or is no longer active. Review removal again.',
+        );
+      }
+      final fresh = reviewArchive(live.id, review.reason);
+      return InventoryMutation(
         expectedRevision: fresh.baseRevision,
         label: 'Removed ${live.name} · ${fresh.reason}',
         upserts: [archiveMedicine(live, reason: fresh.reason, at: removedAt)],
-      ),
-      operationTime: removedAt,
-    );
+      );
+    });
   }
 
   /// Immediate compatibility gateway. User-facing confirmation flows should
@@ -1201,28 +1191,24 @@ class PharmacyController extends ChangeNotifier {
   }
 
   Future<void> applyArchivedRestore(ReviewedArchivedRestore review) async {
-    // Restore is exact-row recovery. Preserve a valid pharmacist confirmation
-    // across unrelated database traffic while binding it to the same archived
-    // row revision, removal reason and removal timestamp. Cross-row integrity is
-    // still enforced at the persistence boundary.
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        !live.archived ||
-        live.revision != review.recordRevision ||
-        live.archiveReason != review.archiveReason ||
-        live.archivedAt != review.archivedAt) {
-      throw StateError(
-        'The reviewed removed-stock entry changed or is no longer removed. Review it again.',
-      );
-    }
-    final fresh = reviewArchivedRestore(live.id);
-    await _commit(
-      InventoryMutation(
+    await _queueReviewedCommit((_) {
+      final live = snapshot.records[review.stockId];
+      if (live == null ||
+          !live.archived ||
+          live.revision != review.recordRevision ||
+          live.archiveReason != review.archiveReason ||
+          live.archivedAt != review.archivedAt) {
+        throw StateError(
+          'The reviewed removed-stock entry changed or is no longer removed. Review it again.',
+        );
+      }
+      final fresh = reviewArchivedRestore(live.id);
+      return InventoryMutation(
         expectedRevision: fresh.baseRevision,
         label: 'Restored ${live.name}',
         upserts: [restoreArchivedMedicine(live)],
-      ),
-    );
+      );
+    });
   }
 
   /// Compatibility gateway for existing internal callers. It captures and
