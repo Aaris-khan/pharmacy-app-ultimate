@@ -83,6 +83,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.browseLimits.last, 240);
 
+      await tester.scrollUntilVisible(
+        find.byType(TextField),
+        -900,
+        scrollable: find.byType(Scrollable).first,
+        maxScrolls: 40,
+      );
       final query = find.byType(TextField).first;
       await tester.enterText(query, 'M');
       await tester.pump(const Duration(milliseconds: 50));
