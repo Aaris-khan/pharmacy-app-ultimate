@@ -161,6 +161,54 @@ void main() {
   );
 
   testWidgets(
+    'covered removed-stock screen cancels pending query work and resumes once',
+    (tester) async {
+      final controller = await _controller();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(_screen(controller));
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Drotaverine');
+
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      unawaited(
+        navigator.push<void>(
+          PageRouteBuilder<void>(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (_, _, _) =>
+                const Scaffold(body: Center(child: Text('Covered route'))),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // The 150 ms debounce would have entered fuzzy search here if the covered
+      // route still owned a live listener/timer.
+      expect(controller.requestedQueries, isEmpty);
+
+      navigator.pop();
+      await tester.pump();
+      await tester.pump();
+
+      // Reactivation retries the current query once, rather than replaying the
+      // cancelled debounce and then starting a second refresh.
+      expect(controller.requestedQueries, <String>['Drotaverine']);
+
+      controller.firstSearchGate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Drotaverine'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
     'changing a removed-stock query clears stale restore rows immediately',
     (tester) async {
       final controller = await _controller();

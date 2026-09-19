@@ -37,6 +37,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   String _error = '';
   int _generation = 0;
   late Object _observedSnapshot;
+  bool _controllerListening = false;
+  bool _refreshWhenActive = false;
   Future<void> _searchTail = Future<void>.value();
 
   @override
@@ -60,12 +62,65 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     );
 
     _observedSnapshot = widget.controller.snapshot;
-    widget.controller.addListener(_inventoryChanged);
     unawaited(_search());
     if (_initialContextRestoreId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_reviewInitialContextRestore());
       });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (active == _controllerListening) return;
+
+    if (!active) {
+      widget.controller.removeListener(_inventoryChanged);
+      _controllerListening = false;
+
+      // A covered recovery screen must become genuinely idle. Retire pending
+      // debounce/in-flight generations now; if work was interrupted, rebuild
+      // the same query exactly once when this route becomes visible again.
+      final workPending = _loading || (_debounce?.isActive ?? false);
+      _debounce?.cancel();
+      if (workPending) {
+        ++_generation;
+        _refreshWhenActive = true;
+      }
+      return;
+    }
+
+    widget.controller.addListener(_inventoryChanged);
+    _controllerListening = true;
+    final currentSnapshot = widget.controller.snapshot;
+    if (_refreshWhenActive ||
+        !identical(currentSnapshot, _observedSnapshot)) {
+      _observedSnapshot = currentSnapshot;
+      _refreshWhenActive = false;
+      _debounce?.cancel();
+      unawaited(_search());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant RemovedStockScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, widget.controller)) return;
+
+    if (_controllerListening) {
+      oldWidget.controller.removeListener(_inventoryChanged);
+      widget.controller.addListener(_inventoryChanged);
+    }
+    _observedSnapshot = widget.controller.snapshot;
+    ++_generation;
+    _debounce?.cancel();
+    if (_controllerListening) {
+      _refreshWhenActive = false;
+      unawaited(_search());
+    } else {
+      _refreshWhenActive = true;
     }
   }
 
@@ -255,7 +310,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   @override
   void dispose() {
     ++_generation;
-    widget.controller.removeListener(_inventoryChanged);
+    if (_controllerListening) {
+      widget.controller.removeListener(_inventoryChanged);
+    }
     _debounce?.cancel();
     _query.dispose();
     super.dispose();
