@@ -14,7 +14,12 @@ class StatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
-    rebuildToken: () => (controller.snapshot, controller.today),
+    rebuildToken: () => (
+      controller.snapshot.records,
+      controller.snapshot.sales,
+      controller.snapshot.events,
+      controller.today,
+    ),
     builder: (context, _) {
       final inventory = controller.stats;
       final sales = controller.salesOverview;
@@ -279,7 +284,11 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
     appBar: AppBar(title: const Text('Sold Medicine Tracker')),
     body: ActiveListenableBuilder(
       listenable: controller,
-      rebuildToken: () => (controller.snapshot, controller.today),
+      rebuildToken: () => (
+        controller.snapshot.records,
+        controller.snapshot.sales,
+        controller.snapshot.events,
+      ),
       builder: (context, _) {
         final overview = controller.salesOverview;
         final ranked = overview.ranked;
