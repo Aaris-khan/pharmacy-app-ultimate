@@ -38,6 +38,8 @@ Future<String?> voiceSearch(
     controller = systemController;
     FocusManager.instance.primaryFocus?.unfocus();
     final navigator = Navigator.of(context);
+    if (!navigator.mounted) return null;
+    final navigatorContext = navigator.context;
     final route = ModalBottomSheetRoute<String>(
       builder: (_) => _VoiceSheet(
         controller: systemController,
@@ -46,7 +48,7 @@ Future<String?> voiceSearch(
       ),
       capturedThemes: InheritedTheme.capture(
         from: context,
-        to: navigator.context,
+        to: navigatorContext,
       ),
       isScrollControlled: true,
       useSafeArea: true,
