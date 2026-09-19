@@ -1,6 +1,7 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/inventory.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
+import 'package:aaris_pharmacy/domain/supplier.dart';
 import 'package:aaris_pharmacy/domain/tracking.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -161,6 +162,43 @@ void main() {
     );
   });
 
+  test('metadata writes invalidate only dependent read models', () async {
+    final medicine = Medicine(id: 'dependency-cache-stock', name: 'Dependency Cache Medicine', strength: '500mg', form: 'Tablet', quantity: 10, expiry: DateTime(2027, 1, 1));
+    final controller = PharmacyController(MemoryInventoryStorage(InventorySnapshot(records: <String, Medicine>{medicine.id: medicine})), clock: () => DateTime(2026, 9, 20, 10), backgroundSearch: false);
+    await controller.initialize();
+    addTearDown(controller.dispose);
+    final range = TrackingRange.lastDays(controller.today, 30);
+    final statsBefore = controller.stats;
+    final homeBefore = controller.homeProjection;
+    final trackingBefore = controller.tracking(range);
+    final returnsBefore = controller.supplierReturns;
+    await controller.setShortWarningDays(5);
+    expect(identical(statsBefore, controller.stats), isTrue);
+    expect(identical(homeBefore, controller.homeProjection), isFalse);
+    expect(identical(trackingBefore, controller.tracking(range)), isTrue);
+    expect(identical(returnsBefore, controller.supplierReturns), isTrue);
+    final statsAfterWarning = controller.stats;
+    final homeAfterWarning = controller.homeProjection;
+    final trackingAfterWarning = controller.tracking(range);
+    final returnsAfterWarning = controller.supplierReturns;
+    await controller.saveSupplier(const Supplier(id: 'dependency-cache-supplier', name: 'Dependency Cache Supplier', returnBeforeExpiryDays: 30), expectedRevision: controller.snapshot.revision);
+    expect(identical(statsAfterWarning, controller.stats), isTrue);
+    expect(identical(homeAfterWarning, controller.homeProjection), isTrue);
+    expect(identical(trackingAfterWarning, controller.tracking(range)), isTrue);
+    expect(identical(returnsAfterWarning, controller.supplierReturns), isFalse);
+  });
+
+  test('unchanged warning settings do not publish or persist work', () async {
+    final controller = PharmacyController(MemoryInventoryStorage(), clock: () => DateTime(2026, 9, 20, 10), backgroundSearch: false);
+    await controller.initialize();
+    addTearDown(controller.dispose);
+    final revision = controller.snapshot.revision;
+    var publications = 0;
+    controller.addListener(() => publications++);
+    await controller.setWarnings(WarningSettings(shortDays: controller.settings.shortDays, months: controller.settings.months));
+    expect(controller.snapshot.revision, revision);
+    expect(publications, 0);
+  });
   test('tracking read model is reused by range and invalidated safely', () async {
     var now = DateTime(2026, 9, 12, 10);
     final controller = PharmacyController(
