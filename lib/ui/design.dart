@@ -925,7 +925,8 @@ class StatusPill extends StatelessWidget {
     accentColor: color,
     shadowColor: color,
     radius: 30,
-    // Nested pills keep gradient/border depth without casting another shadow.\n    elevation: 0,
+    // Nested pills keep gradient/border depth without casting another shadow.
+    elevation: 0,
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     child: Text(
       text,
@@ -1014,7 +1015,8 @@ class MedicineCard extends StatelessWidget {
                             accentColor: statusColor,
                             shadowColor: statusColor,
                             radius: 18,
-                            // The row owns elevation; this inset icon surface does not need a second blur stack.\n                            elevation: 0,
+                            // The row owns elevation; this inset icon surface does not need a second blur stack.
+                            elevation: 0,
                             child: SizedBox(
                               width: 52,
                               height: 52,
