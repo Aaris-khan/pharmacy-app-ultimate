@@ -57,6 +57,7 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _observedSnapshot = widget.controller.snapshot;
     _observedDay = widget.controller.today;
+    _scroll.addListener(_maybeLoadMore);
     unawaited(_search());
   }
 
