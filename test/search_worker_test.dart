@@ -12,8 +12,7 @@ void main() {
       'removed',
       name: 'Drotaverine',
       strength: '80mg',
-      archived: true,
-    );
+    ).patch({'archived': true});
 
     final hits = await worker.searchArchived(
       [removed],
