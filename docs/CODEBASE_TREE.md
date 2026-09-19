@@ -164,6 +164,7 @@ For conversational inventory control:
   with explicit gaps and complete lines; field and ingredient quotes cannot
   bridge omitted text. `local_scan_turn.dart` only retries exact pre-inference
   context-budget failures, not invalid answers or cancelled work.
+- `PharmacyController` owns snapshot/day-scoped read-model caches (including tracking), while `ActiveListenableBuilder` is the UI lifecycle boundary for controller-backed routes so covered or retained screens do not keep rebuilding expensive projections.
 - `CaptureQuality` reads at most 1024 camera pixels with validated strides.
   Android photo metrics reuse the video scoring function on a bounded decode;
   missing metrics cannot suppress OCR. The original image remains unchanged.
