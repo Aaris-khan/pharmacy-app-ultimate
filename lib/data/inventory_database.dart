@@ -612,27 +612,49 @@ class SqliteInventoryStorage implements InventoryStorage {
         throw StateError('This AI request has already been applied.');
       final event = makeEvent(before, mutation);
       final after = nextSnapshot(before, mutation, event);
+      var batch = tx.batch();
+      var queued = 0;
+      Future<void> flushBatch() async {
+        if (queued == 0) return;
+        await batch.commit(noResult: true);
+        batch = tx.batch();
+        queued = 0;
+      }
+
       for (final m in mutation.upserts) {
-        // Revalidate at the persistence boundary, including manual caller changes.
+        // Validate every row before it is queued. Chunked batches keep a
+        // full-phone restore inside one SQLite transaction without either one
+        // platform round-trip per row or one unbounded in-memory Batch.
         final valid = Medicine.fromJson(m.toJson());
-        await tx.insert('medicines', {
-          'id': valid.id,
-          'facts': jsonEncode(valid.toJson()),
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert(
+          'medicines',
+          {'id': valid.id, 'facts': jsonEncode(valid.toJson())},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        queued++;
+        if (queued >= 500) await flushBatch();
       }
       for (final id in mutation.removeIds) {
-        await tx.delete('medicines', where: 'id=?', whereArgs: [id]);
+        batch.delete('medicines', where: 'id=?', whereArgs: [id]);
+        queued++;
+        if (queued >= 500) await flushBatch();
       }
       for (final sale in mutation.upsertSales) {
         final valid = SaleEvent.fromJson(sale.toJson());
-        await tx.insert('sales', {
-          'id': valid.id,
-          'facts': jsonEncode(valid.toJson()),
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert(
+          'sales',
+          {'id': valid.id, 'facts': jsonEncode(valid.toJson())},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        queued++;
+        if (queued >= 500) await flushBatch();
       }
       for (final id in mutation.removeSaleIds) {
-        await tx.delete('sales', where: 'id=?', whereArgs: [id]);
+        batch.delete('sales', where: 'id=?', whereArgs: [id]);
+        queued++;
+        if (queued >= 500) await flushBatch();
       }
+      await flushBatch();
       if (mutation.undoEventId != null) {
         final count = await tx.update(
           'events',
