@@ -645,7 +645,7 @@ class MedicineSearch {
   }) => _searchMatching(
     raw,
     allowedRecord: (record) => record.archived,
-    order: _archivedOrder,
+    order: archivedOrder,
     emptyReason: 'Removed stock',
     limit: min(limit, maxArchivedResults),
   );
@@ -1071,7 +1071,7 @@ const Map<String, String> _searchFormAliases = {
   'sachet': 'sachet',
 };
 
-int _archivedOrder(Medicine a, Medicine b) {
+int archivedOrder(Medicine a, Medicine b) {
   final aTime = a.archivedAt;
   final bTime = b.archivedAt;
   if (aTime == null && bTime != null) return 1;
