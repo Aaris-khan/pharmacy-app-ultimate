@@ -46,6 +46,7 @@ class _SearchScreenState extends State<SearchScreen> {
   ScanResult? _scan;
   late Object _observedSnapshot;
   late DateTime _observedDay;
+  late (int, int) _observedWarnings;
   bool _controllerListening = false;
   bool _refreshWhenActive = false;
   bool _browseExhausted = false;
@@ -57,6 +58,10 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _observedSnapshot = widget.controller.snapshot;
     _observedDay = widget.controller.today;
+    _observedWarnings = (
+      widget.controller.settings.shortDays,
+      widget.controller.settings.months,
+    );
     unawaited(_search());
   }
 
@@ -93,11 +98,17 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_refreshWhenActive ||
         !identical(currentSnapshot, _observedSnapshot) ||
         currentDay != _observedDay) {
-      final preserveResults = _publishedHits.canPreserveAgainst(
-        currentSnapshot.records,
+      final currentWarnings = (
+        widget.controller.settings.shortDays,
+        widget.controller.settings.months,
       );
+      final preserveResults =
+          currentDay == _observedDay &&
+          currentWarnings == _observedWarnings &&
+          _publishedHits.canPreserveAgainst(currentSnapshot.records);
       _observedSnapshot = currentSnapshot;
       _observedDay = currentDay;
+      _observedWarnings = currentWarnings;
       _refreshWhenActive = false;
       _debounce?.cancel();
       _onlineDebounce?.cancel();
@@ -118,6 +129,10 @@ class _SearchScreenState extends State<SearchScreen> {
       }
       _observedSnapshot = widget.controller.snapshot;
       _observedDay = widget.controller.today;
+      _observedWarnings = (
+        widget.controller.settings.shortDays,
+        widget.controller.settings.months,
+      );
     }
     if (!controllerChanged && !searchContextChanged) return;
 
@@ -147,11 +162,17 @@ class _SearchScreenState extends State<SearchScreen> {
         currentDay == _observedDay) {
       return;
     }
-    final preserveResults = _publishedHits.canPreserveAgainst(
-      currentSnapshot.records,
+    final currentWarnings = (
+      widget.controller.settings.shortDays,
+      widget.controller.settings.months,
     );
+    final preserveResults =
+        currentDay == _observedDay &&
+        currentWarnings == _observedWarnings &&
+        _publishedHits.canPreserveAgainst(currentSnapshot.records);
     _observedSnapshot = currentSnapshot;
     _observedDay = currentDay;
+    _observedWarnings = currentWarnings;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     unawaited(_search(preserveResults: preserveResults));
