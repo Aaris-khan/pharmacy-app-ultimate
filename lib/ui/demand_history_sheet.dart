@@ -39,13 +39,16 @@ class _DemandHistory extends StatefulWidget {
 }
 
 class _DemandHistoryState extends State<_DemandHistory> {
-  Object? _snapshot;
+  Object? _records;
+  Object? _sales;
   DateTime? _day;
   DailyDemandProfile? _demand;
 
   DailyDemandProfile _read() {
     final controller = widget.controller;
-    if (!identical(_snapshot, controller.snapshot) ||
+    final snapshot = controller.snapshot;
+    if (!identical(_records, snapshot.records) ||
+        !identical(_sales, snapshot.sales) ||
         _day != controller.today) {
       _demand =
           dailyDemandByProduct(
@@ -54,7 +57,8 @@ class _DemandHistoryState extends State<_DemandHistory> {
             today: controller.today,
           )[widget.productKey] ??
           DailyDemandAccumulator(controller.today).build();
-      _snapshot = controller.snapshot;
+      _records = snapshot.records;
+      _sales = snapshot.sales;
       _day = controller.today;
     }
     return _demand!;
@@ -63,7 +67,11 @@ class _DemandHistoryState extends State<_DemandHistory> {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: widget.controller,
-    rebuildToken: () => (widget.controller.snapshot, widget.controller.today),
+    rebuildToken: () => (
+      widget.controller.snapshot.records,
+      widget.controller.snapshot.sales,
+      widget.controller.today,
+    ),
     builder: (context, _) {
       final demand = _read();
       final days = [
