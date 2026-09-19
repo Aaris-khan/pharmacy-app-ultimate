@@ -123,6 +123,8 @@ class _SearchScreenState extends State<SearchScreen> {
     _onlineDebounce?.cancel();
     _hits = [];
     _scan = null;
+    _browseLimit = _browsePageSize;
+    _browseExhausted = false;
     _catalogHits = [];
     _catalogLoading = false;
     _catalogError = '';
