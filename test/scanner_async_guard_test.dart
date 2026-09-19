@@ -62,6 +62,16 @@ void main() {
   });
 
 
+  test('scanner grouped drain treats no active work as complete', () async {
+    expect(
+      await scannerWorkGroupCompletedWithin(
+        const <Future<dynamic>?>[],
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isTrue,
+    );
+  });
+
   test('scanner lifecycle drains share one deadline without cancelling work', () async {
     final capture = Completer<void>();
     final frame = Completer<bool>();
