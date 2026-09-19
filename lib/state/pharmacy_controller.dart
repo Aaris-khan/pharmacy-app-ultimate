@@ -261,11 +261,30 @@ class PharmacyController extends ChangeNotifier {
     }
   }
 
+  bool _searchProjectionChangedSince(InventorySnapshot? previous) {
+    if (previous == null) return true;
+    final changedIds = snapshot.changedMedicineIds;
+    if (changedIds == null) return true;
+
+    for (final id in changedIds) {
+      final before = previous.records[id];
+      final after = snapshot.records[id];
+      if (before == null ||
+          after == null ||
+          !sameSearchProjection(before, after)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _syncReadSnapshot() {
     if (identical(_readSnapshot, snapshot)) return;
     final previous = _readSnapshot;
     final recordsChanged =
         previous == null || !identical(previous.records, snapshot.records);
+    final searchProjectionChanged =
+        recordsChanged && _searchProjectionChangedSince(previous);
     final settingsChanged =
         previous == null || !identical(previous.settings, snapshot.settings);
     final suppliersChanged =
@@ -283,7 +302,7 @@ class PharmacyController extends ChangeNotifier {
     // next unrelated screen to rescan the complete pharmacy.
     if (recordsChanged || _readRecords == null) {
       _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
-      _searchDatasetEpoch++;
+      if (searchProjectionChanged) _searchDatasetEpoch++;
     }
 
     if (recordsChanged) {

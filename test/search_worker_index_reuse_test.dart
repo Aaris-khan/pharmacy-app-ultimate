@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/data/inventory_database.dart';
 import '../lib/domain/inventory.dart';
 import '../lib/domain/search.dart';
 import '../lib/services/search_worker.dart';
+import '../lib/state/pharmacy_controller.dart';
 import 'domain_contract.dart';
 
 void main() {
@@ -155,5 +157,72 @@ void main() {
       isFalse,
     );
   });
+
+  test(
+    'controller keeps search dataset stable for stock-only medicine writes',
+    () async {
+      final original = stock(
+        'controller-projection',
+        name: 'Drotaverine',
+        strength: '80mg',
+        quantity: 10,
+        price: 200,
+      );
+      final controller = PharmacyController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {original.id: original}),
+        ),
+        clock: () => contractToday,
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      final first = await controller.search('DOTIN 80mg', SearchScope.all);
+      expect(first.single.id, original.id);
+      expect(controller.debugWebSearchIndexBuilds, 1);
+      final initialEpoch = controller.debugSearchDatasetEpoch;
+
+      var live = controller.snapshot.records[original.id]!;
+      await controller.save(
+        live.patch(<String, dynamic>{
+          'quantity': 7,
+          'unitPricePaise': 350,
+        }),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(
+        controller.debugSearchDatasetEpoch,
+        initialEpoch,
+        reason:
+            'Quantity/price changes do not alter local search membership, ranking or browse ordering.',
+      );
+      final afterStockOnly = await controller.search(
+        'DOTIN 80mg',
+        SearchScope.all,
+      );
+      expect(afterStockOnly.single.id, original.id);
+      expect(
+        controller.debugWebSearchIndexBuilds,
+        1,
+        reason: 'A stock-only write must not rebuild the fuzzy search index.',
+      );
+
+      live = controller.snapshot.records[original.id]!;
+      await controller.save(
+        live.patch(<String, dynamic>{'notes': 'Emergency shelf'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(controller.debugSearchDatasetEpoch, initialEpoch + 1);
+      final noteHit = await controller.search(
+        'Emergency shelf',
+        SearchScope.all,
+      );
+      expect(noteHit.single.id, original.id);
+      expect(controller.debugWebSearchIndexBuilds, 2);
+    },
+  );
 
 }
