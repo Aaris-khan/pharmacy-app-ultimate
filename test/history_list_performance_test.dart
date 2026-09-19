@@ -8,6 +8,7 @@ import '../lib/state/pharmacy_controller.dart';
 import '../lib/ui/design.dart';
 import '../lib/ui/removed_stock_screen.dart';
 import '../lib/ui/profile_screen.dart';
+import '../lib/ui/version_history_screen.dart';
 
 Future<PharmacyController> _controller(InventorySnapshot snapshot) async {
   final controller = PharmacyController(
@@ -185,6 +186,79 @@ void main() {
     );
 
     expect(find.text('Activity 099'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+
+  testWidgets('version history lazily builds retained medicine versions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final events = List<Map<String, dynamic>>.generate(
+      200,
+      (index) {
+        final version = Medicine(
+          id: 'version-target',
+          name: 'Version Medicine ${index.toString().padLeft(3, '0')}',
+          expiry: DateTime(2027, 12, 31),
+          quantity: index + 1,
+        );
+        return <String, dynamic>{
+          'id': 'version-event-$index',
+          'revision': 200 - index,
+          'label': 'Edit ${index.toString().padLeft(3, '0')}',
+          'time': DateTime.utc(2026, 9, 20, 12)
+              .subtract(Duration(minutes: index))
+              .toIso8601String(),
+          'undoable': false,
+          'undone': false,
+          'before': <String, dynamic>{'version-target': version.toJson()},
+        };
+      },
+      growable: false,
+    );
+
+    final controller = await _controller(
+      InventorySnapshot(revision: 200, events: events),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: VersionHistoryScreen(
+          controller: controller,
+          medicineId: 'version-target',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final list = tester.widget<ListView>(find.byType(ListView).first);
+    expect(list.childrenDelegate, isA<SliverChildBuilderDelegate>());
+    expect(find.text('Version Medicine 000'), findsOneWidget);
+    expect(
+      find.text('Version Medicine 099'),
+      findsNothing,
+      reason:
+          'A far medicine version must stay outside the element tree until it nears the viewport.',
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('Version Medicine 099'),
+      700,
+      scrollable: find.byType(Scrollable).first,
+      maxScrolls: 50,
+    );
+
+    expect(find.text('Version Medicine 099'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
