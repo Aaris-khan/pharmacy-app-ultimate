@@ -1,4 +1,5 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
+import 'package:aaris_pharmacy/domain/inventory.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
 import 'package:aaris_pharmacy/domain/tracking.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
@@ -118,6 +119,46 @@ void main() {
       expectedRevision: controller.snapshot.revision,
     );
     expect(controller.debugSearchDatasetEpoch, initialEpoch + 1);
+  });
+
+  test('fallback fuzzy index survives metadata-only snapshot writes', () async {
+    final medicine = Medicine(
+      id: 'fallback-search-cache-stock',
+      name: 'Drotaverine',
+      strength: '80mg',
+      form: 'Tablet',
+      quantity: 10,
+      expiry: DateTime(2027, 1, 1),
+    );
+    final controller = PharmacyController(
+      MemoryInventoryStorage(
+        InventorySnapshot(
+          records: <String, Medicine>{medicine.id: medicine},
+        ),
+      ),
+      clock: () => DateTime(2026, 9, 20, 10),
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+
+    expect(controller.debugWebSearchIndexBuilds, 0);
+    final first = await controller.search('Drotaverine', SearchScope.all);
+    expect(first.single.id, medicine.id);
+    expect(controller.debugWebSearchIndexBuilds, 1);
+
+    final datasetEpoch = controller.debugSearchDatasetEpoch;
+    await controller.setShortWarningDays(5);
+    expect(controller.debugSearchDatasetEpoch, datasetEpoch);
+
+    final second = await controller.search('Drotaverine', SearchScope.all);
+    expect(second.single.id, medicine.id);
+    expect(
+      controller.debugWebSearchIndexBuilds,
+      1,
+      reason:
+          'Warning preferences change scope semantics but not the fuzzy medicine dataset.',
+    );
   });
 
   test('tracking read model is reused by range and invalidated safely', () async {

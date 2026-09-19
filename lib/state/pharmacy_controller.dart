@@ -171,7 +171,8 @@ class PharmacyController extends ChangeNotifier {
   Future<void> _writes = Future.value();
   final _searchWorker = SearchWorker();
   MedicineSearch? _webSearch, _webArchivedSearch;
-  InventorySnapshot? _webSearchSnapshot, _webArchivedSearchSnapshot;
+  int _webSearchDatasetEpoch = -1, _webArchivedSearchDatasetEpoch = -1;
+  int _webSearchIndexBuilds = 0, _webArchivedSearchIndexBuilds = 0;
 
   // Read models are derived from one immutable InventorySnapshot. Keep exactly
   // one stable record-reference list and memoized projections per snapshot so
@@ -241,6 +242,12 @@ class PharmacyController extends ChangeNotifier {
     _syncReadSnapshot();
     return _searchDatasetEpoch;
   }
+
+  @visibleForTesting
+  int get debugWebSearchIndexBuilds => _webSearchIndexBuilds;
+
+  @visibleForTesting
+  int get debugWebArchivedSearchIndexBuilds => _webArchivedSearchIndexBuilds;
 
   List<Medicine> get _stableRecords {
     _syncReadSnapshot();
@@ -1678,9 +1685,10 @@ class PharmacyController extends ChangeNotifier {
     final date = today;
     // Isolate.run transfers the result; widgets bind it to their request generation.
     if (kIsWeb || !backgroundSearch) {
-      if (!identical(_webSearchSnapshot, snapshot)) {
+      if (_webSearch == null || _webSearchDatasetEpoch != datasetRevision) {
         _webSearch = MedicineSearch(data);
-        _webSearchSnapshot = snapshot;
+        _webSearchDatasetEpoch = datasetRevision;
+        _webSearchIndexBuilds++;
       }
       return _webSearch!.search(
         raw,
@@ -1739,12 +1747,14 @@ class PharmacyController extends ChangeNotifier {
     final datasetRevision = _searchDatasetEpoch;
     final date = today;
     if (kIsWeb || !backgroundSearch) {
-      if (!identical(_webArchivedSearchSnapshot, snapshot)) {
+      if (_webArchivedSearch == null ||
+          _webArchivedSearchDatasetEpoch != datasetRevision) {
         _webArchivedSearch = MedicineSearch(
           data.where((medicine) => medicine.archived),
           includeArchived: true,
         );
-        _webArchivedSearchSnapshot = snapshot;
+        _webArchivedSearchDatasetEpoch = datasetRevision;
+        _webArchivedSearchIndexBuilds++;
       }
       return _webArchivedSearch!.searchArchived(
         raw,
