@@ -520,128 +520,10 @@ Future<void> showWarningSettings(
   BuildContext context,
   PharmacyController controller,
 ) async {
-  final days = TextEditingController(text: '${controller.settings.shortDays}'),
-      months = TextEditingController(text: '${controller.settings.months}');
-  String? error;
-  int? selectedDays = [3, 5, 8, 10].contains(controller.settings.shortDays)
-      ? controller.settings.shortDays
-      : null;
-  int? selectedMonths = [1, 2, 3].contains(controller.settings.months)
-      ? controller.settings.months
-      : null;
   final settings = await showDialog<WarningSettings>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) => AlertDialog(
-        title: const Text('Your expiry windows'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Short-expiry alert',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final value in [3, 5, 8, 10])
-                    ChoiceChip(
-                      label: Text('$value days'),
-                      selected: selectedDays == value,
-                      onSelected: (_) => setState(() {
-                        selectedDays = value;
-                        days.text = '$value';
-                      }),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: days,
-                onChanged: (_) => setState(() => selectedDays = null),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Custom short warning · days',
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Month-expiry alert',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final value in [1, 2, 3])
-                    ChoiceChip(
-                      label: Text('$value ${value == 1 ? 'month' : 'months'}'),
-                      selected: selectedMonths == value,
-                      onSelected: (_) => setState(() {
-                        selectedMonths = value;
-                        months.text = '$value';
-                      }),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: months,
-                onChanged: (_) => setState(() => selectedMonths = null),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Custom month warning · months',
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'One warning month = 30 days. Short-expiry entries are counted only in the day card.',
-                style: TextStyle(fontSize: 12, color: muted),
-              ),
-              if (error != null)
-                Text(error!, style: const TextStyle(color: red, fontSize: 12)),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              try {
-                final value = WarningSettings.fromJson({
-                  'shortDays': int.tryParse(days.text),
-                  'months': int.tryParse(months.text),
-                });
-                if (int.tryParse(days.text) == null ||
-                    int.tryParse(months.text) == null) {
-                  throw const FormatException('Enter whole numbers.');
-                }
-                Navigator.pop(ctx, value);
-              } catch (e) {
-                setState(
-                  () => error = e.toString().replaceFirst(
-                    'FormatException: ',
-                    '',
-                  ),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    ),
+    builder: (_) => _WarningSettingsDialog(initial: controller.settings),
   );
-  Future<void>.delayed(const Duration(milliseconds: 300), () {
-    days.dispose();
-    months.dispose();
-  });
   if (settings != null) {
     try {
       await controller.setWarnings(settings);
@@ -649,4 +531,148 @@ Future<void> showWarningSettings(
       if (context.mounted) showError(context, e);
     }
   }
+}
+
+class _WarningSettingsDialog extends StatefulWidget {
+  const _WarningSettingsDialog({required this.initial});
+
+  final WarningSettings initial;
+
+  @override
+  State<_WarningSettingsDialog> createState() => _WarningSettingsDialogState();
+}
+
+class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
+  late final TextEditingController _days;
+  late final TextEditingController _months;
+  late int? _selectedDays;
+  late int? _selectedMonths;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _days = TextEditingController(text: '${widget.initial.shortDays}');
+    _months = TextEditingController(text: '${widget.initial.months}');
+    _selectedDays = const [3, 5, 8, 10].contains(widget.initial.shortDays)
+        ? widget.initial.shortDays
+        : null;
+    _selectedMonths = const [1, 2, 3].contains(widget.initial.months)
+        ? widget.initial.months
+        : null;
+  }
+
+  @override
+  void dispose() {
+    _days.dispose();
+    _months.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Your expiry windows'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Short-expiry alert',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final value in const [3, 5, 8, 10])
+                ChoiceChip(
+                  label: Text('$value days'),
+                  selected: _selectedDays == value,
+                  onSelected: (_) => setState(() {
+                    _selectedDays = value;
+                    _days.text = '$value';
+                  }),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _days,
+            onChanged: (_) => setState(() => _selectedDays = null),
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Custom short warning · days',
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Month-expiry alert',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final value in const [1, 2, 3])
+                ChoiceChip(
+                  label: Text('$value ${value == 1 ? 'month' : 'months'}'),
+                  selected: _selectedMonths == value,
+                  onSelected: (_) => setState(() {
+                    _selectedMonths = value;
+                    _months.text = '$value';
+                  }),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _months,
+            onChanged: (_) => setState(() => _selectedMonths = null),
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Custom month warning · months',
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'One warning month = 30 days. Short-expiry entries are counted only in the day card.',
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
+          if (_error != null)
+            Text(_error!, style: const TextStyle(color: red, fontSize: 12)),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          try {
+            final shortDays = int.tryParse(_days.text);
+            final months = int.tryParse(_months.text);
+            if (shortDays == null || months == null) {
+              throw const FormatException('Enter whole numbers.');
+            }
+            final value = WarningSettings.fromJson({
+              'shortDays': shortDays,
+              'months': months,
+            });
+            Navigator.pop(context, value);
+          } catch (e) {
+            setState(
+              () => _error = e.toString().replaceFirst(
+                'FormatException: ',
+                '',
+              ),
+            );
+          }
+        },
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }

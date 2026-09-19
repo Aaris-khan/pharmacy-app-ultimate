@@ -694,8 +694,8 @@ class _EditorScreenState extends State<EditorScreen> {
         ? 'Expiry is not recorded. Verify the physical pack before dispensing.'
         : null;
 
-    final quantity = TextEditingController(text: '1');
-    final amount = TextEditingController();
+    var quantityText = '1';
+    var amountText = '';
     var markSoldOut = false;
     DateTime? occurredAt;
     String error = '';
@@ -744,8 +744,9 @@ class _EditorScreenState extends State<EditorScreen> {
                       ],
                     ),
                   ),
-                TextField(
-                  controller: quantity,
+                TextFormField(
+                  initialValue: quantityText,
+                  onChanged: (value) => quantityText = value,
                   autofocus: true,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
@@ -756,8 +757,9 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                TextField(
-                  controller: amount,
+                TextFormField(
+                  initialValue: amountText,
+                  onChanged: (value) => amountText = value,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
@@ -827,13 +829,13 @@ class _EditorScreenState extends State<EditorScreen> {
             FilledButton(
               onPressed: () {
                 try {
-                  final units = int.tryParse(quantity.text.trim());
+                  final units = int.tryParse(quantityText.trim());
                   if (units == null || units < 1) {
                     throw const FormatException(
                       'Enter a positive whole-number quantity.',
                     );
                   }
-                  final total = parseMoney(amount.text);
+                  final total = parseMoney(amountText);
                   if (markSoldOut &&
                       record.quantity != null &&
                       units != record.quantity) {
@@ -866,12 +868,6 @@ class _EditorScreenState extends State<EditorScreen> {
       ),
     );
 
-    unawaited(
-      Future<void>.delayed(const Duration(milliseconds: 300), () {
-        quantity.dispose();
-        amount.dispose();
-      }),
-    );
     if (result == null || !mounted) return;
 
     setState(() => _busy = true);

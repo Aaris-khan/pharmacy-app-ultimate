@@ -388,15 +388,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _bulk() async {
-    final text = TextEditingController(text: _query.text);
+    var draft = _query.text;
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Search a medicine list'),
         content: SizedBox(
           width: 500,
-          child: TextField(
-            controller: text,
+          child: TextFormField(
+            initialValue: draft,
+            onChanged: (value) => draft = value,
             minLines: 6,
             maxLines: 12,
             maxLength: 30000,
@@ -412,14 +413,11 @@ class _SearchScreenState extends State<SearchScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, text.text),
+            onPressed: () => Navigator.pop(ctx, draft),
             child: const Text('Find medicines'),
           ),
         ],
       ),
-    );
-    unawaited(
-      Future<void>.delayed(const Duration(milliseconds: 300), text.dispose),
     );
     if (result != null && mounted) _setQuery(result);
   }
