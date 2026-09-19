@@ -4,6 +4,32 @@ import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('same-day refresh does not publish redundant UI work', () async {
+    var now = DateTime(2026, 9, 20, 9);
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: () => now,
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+
+    var publications = 0;
+    controller.addListener(() => publications++);
+
+    controller.refreshDay();
+    now = DateTime(2026, 9, 20, 23, 55);
+    controller.refreshDay();
+    expect(publications, 0);
+
+    now = DateTime(2026, 9, 21, 0, 1);
+    controller.refreshDay();
+    expect(publications, 1);
+
+    controller.refreshDay();
+    expect(publications, 1);
+  });
+
   test('derived read models reuse one snapshot and invalidate on the right boundary', () async {
     var now = DateTime(2026, 9, 12, 10);
     final controller = PharmacyController(
