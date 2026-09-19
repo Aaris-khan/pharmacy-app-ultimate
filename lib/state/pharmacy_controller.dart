@@ -1091,6 +1091,7 @@ class PharmacyController extends ChangeNotifier {
             ),
         ],
       ),
+      operationTime: removedAt,
     );
   }
 
@@ -1387,6 +1388,7 @@ class PharmacyController extends ChangeNotifier {
         soldValueOverride: review.backup.soldValue,
         unknownSoldOverride: review.backup.unknownSold,
       ),
+      operationTime: restoreStartedAt,
     );
   }
 
