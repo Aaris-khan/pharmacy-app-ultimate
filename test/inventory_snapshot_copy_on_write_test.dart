@@ -44,6 +44,7 @@ void main() {
     final after = nextSnapshot(before, mutation, makeEvent(before, mutation));
 
     expect(after.settings.shortDays, 5);
+    expect(identical(after.settings, before.settings), isFalse);
     expect(identical(after.records, before.records), isTrue);
     expect(identical(after.suppliers, before.suppliers), isTrue);
     expect(identical(after.sales, before.sales), isTrue);
@@ -65,6 +66,7 @@ void main() {
     final after = nextSnapshot(before, mutation, makeEvent(before, mutation));
 
     expect(after.records['stock']!.quantity, 9);
+    expect(identical(after.settings, before.settings), isTrue);
     expect(identical(after.records, before.records), isFalse);
     expect(identical(after.suppliers, before.suppliers), isTrue);
     expect(identical(after.sales, before.sales), isTrue);
