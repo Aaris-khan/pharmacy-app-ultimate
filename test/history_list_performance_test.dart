@@ -118,12 +118,15 @@ void main() {
           'A far removed-stock card must stay outside the element tree until it nears the viewport.',
     );
 
-    await tester.scrollUntilVisible(
-      find.text(farTitle),
-      700,
-      scrollable: find.byType(Scrollable).last,
-      maxScrolls: 50,
-    );
+    final archiveList = find.byType(ListView).last;
+    for (
+      var scroll = 0;
+      scroll < 50 && find.text(farTitle).evaluate().isEmpty;
+      scroll++
+    ) {
+      await tester.drag(archiveList, const Offset(0, -700));
+      await tester.pumpAndSettle();
+    }
 
     expect(find.text(farTitle), findsOneWidget);
     expect(tester.takeException(), isNull);
