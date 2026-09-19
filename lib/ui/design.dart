@@ -51,7 +51,7 @@ class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _syncSubscription(TickerMode.of(context));
+    _syncSubscription(TickerMode.valuesOf(context).enabled);
   }
 
   @override
