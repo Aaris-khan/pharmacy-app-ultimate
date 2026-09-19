@@ -118,8 +118,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       widget.controller.addListener(_inventoryChanged);
     }
     _observedSnapshot = widget.controller.snapshot;
-    _browseLimit = _browsePageSize;
-    _browseExhausted = false;
+    _resetBrowseWindow();
     ++_generation;
     _debounce?.cancel();
     if (_controllerListening) {
@@ -162,6 +161,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   void _typed(String _) {
     ++_generation;
     _debounce?.cancel();
+    _resetBrowseWindow();
     if (mounted) {
       setState(() {
         // Query meaning changed. Never leave a removed-stock row from the
@@ -180,10 +180,6 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   Future<void> _search() {
     final generation = ++_generation;
     final query = _query.text;
-    if (query.trim().isNotEmpty) {
-      _browseLimit = _browsePageSize;
-      _browseExhausted = false;
-    }
     if (!mounted) return Future<void>.value();
     setState(() {
       _loading = true;
@@ -229,6 +225,11 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
         _error = 'Removed-stock search could not finish. Please try again.';
       });
     }
+  }
+
+  void _resetBrowseWindow() {
+    _browseLimit = _browsePageSize;
+    _browseExhausted = false;
   }
 
   void _expandBrowse() {
@@ -348,6 +349,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       if (medicine != null && medicine.archived) rows.add((hit, medicine));
     }
 
+    final canExpandBrowse =
+        query.isEmpty && !_browseExhausted && rows.isNotEmpty;
+
     // Keep the fixed controls eager, but materialize archived stock cards only
     // near the viewport. Removed history is intentionally bounded upstream;
     // this keeps rendering cost proportional to visible rows as that bound grows.
@@ -356,7 +360,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       body: ListView.builder(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-        itemCount: rows.length + 1,
+        itemCount: rows.length + 1 + (canExpandBrowse ? 1 : 0),
         itemBuilder: (context, index) {
           if (index == 0) {
             return Column(
@@ -401,7 +405,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        query.isEmpty
+                        query.isEmpty && canExpandBrowse
+                            ? 'Showing ${rows.length} removed stock entries'
+                            : query.isEmpty
                             ? '${rows.length} removed stock ${rows.length == 1 ? 'entry' : 'entries'}'
                             : '${rows.length} local ${rows.length == 1 ? 'match' : 'matches'} for “$query”',
                         style: const TextStyle(
@@ -437,6 +443,18 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
                 ],
                 const SizedBox(height: 8),
               ],
+            );
+          }
+
+          if (canExpandBrowse && index == rows.length + 1) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 8),
+              child: Center(
+                child: TextButton(
+                  onPressed: _loading ? null : _expandBrowse,
+                  child: Text(_loading ? 'Loading more…' : 'Load more'),
+                ),
+              ),
             );
           }
 
