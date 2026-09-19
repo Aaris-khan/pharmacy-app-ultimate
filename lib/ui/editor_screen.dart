@@ -203,6 +203,15 @@ class _EditorScreenState extends State<EditorScreen> {
     ..._extraSaltControllers.map((controller) => controller.text),
   ].map((value) => value.trim()).where((value) => value.isNotEmpty).join(' + ');
 
+  // Text controllers and FormField state already repaint the edited field.
+  // The parent screen only needs one rebuild when unsaved-change protection
+  // first becomes active; rebuilding this large form for every character makes
+  // ordinary typing needlessly expensive on low-end devices.
+  void _markDirty() {
+    if (_dirty) return;
+    setState(() => _dirty = true);
+  }
+
   void _addSalt() {
     if (_busy) return;
     setState(() {
@@ -255,7 +264,7 @@ class _EditorScreenState extends State<EditorScreen> {
         TextFormField(
           controller: textController,
           enabled: !_busy,
-          onChanged: (_) => setState(() => _dirty = true),
+          onChanged: (_) => _markDirty(),
           textInputAction: TextInputAction.next,
           onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
           decoration: _editorDecoration(
@@ -955,7 +964,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   : null
             : null,
         enabled: !_busy,
-        onChanged: (_) => setState(() => _dirty = true),
+        onChanged: (_) => _markDirty(),
         maxLines: lines,
         maxLength: max,
         keyboardType: keyboard,
@@ -990,7 +999,7 @@ class _EditorScreenState extends State<EditorScreen> {
       showHelper: false,
       surfaceStyle: true,
       iconColor: green,
-      onChanged: (_) => setState(() => _dirty = true),
+      onChanged: (_) => _markDirty(),
     ),
   );
 
