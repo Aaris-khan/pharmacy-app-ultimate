@@ -23,6 +23,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int? _pendingShortDays;
   int? _pendingMonths;
+  int _shortIntentGeneration = 0;
+  int _monthIntentGeneration = 0;
 
   PharmacyController get controller => widget.controller;
   VoidCallback get onDatabase => widget.onDatabase;
@@ -37,27 +39,50 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _setShortDays(BuildContext context, int value) async {
     final effective = _pendingShortDays ?? controller.settings.shortDays;
     if (value == effective) return;
+    final owner = controller;
+    final generation = ++_shortIntentGeneration;
     _pendingShortDays = value;
     try {
-      await controller.setShortWarningDays(value);
+      await owner.setShortWarningDays(value);
     } catch (e) {
-      if (context.mounted) showError(context, e);
+      if (context.mounted &&
+          identical(controller, owner) &&
+          generation == _shortIntentGeneration) {
+        showError(context, e);
+      }
     } finally {
-      if (_pendingShortDays == value) _pendingShortDays = null;
+      // A completed older request must never retire a newer equal-valued intent.
+      if (generation == _shortIntentGeneration) _pendingShortDays = null;
     }
   }
 
   Future<void> _setMonths(BuildContext context, int value) async {
     final effective = _pendingMonths ?? controller.settings.months;
     if (value == effective) return;
+    final owner = controller;
+    final generation = ++_monthIntentGeneration;
     _pendingMonths = value;
     try {
-      await controller.setWarningMonths(value);
+      await owner.setWarningMonths(value);
     } catch (e) {
-      if (context.mounted) showError(context, e);
+      if (context.mounted &&
+          identical(controller, owner) &&
+          generation == _monthIntentGeneration) {
+        showError(context, e);
+      }
     } finally {
-      if (_pendingMonths == value) _pendingMonths = null;
+      if (generation == _monthIntentGeneration) _pendingMonths = null;
     }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, widget.controller)) return;
+    _pendingShortDays = null;
+    _pendingMonths = null;
+    _shortIntentGeneration++;
+    _monthIntentGeneration++;
   }
 
   @override
