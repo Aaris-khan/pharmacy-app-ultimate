@@ -1600,7 +1600,55 @@ class PharmacyController extends ChangeNotifier {
     }
   }
 
+  /// Returns a bounded ordered window for an empty-query inventory browse.
+  ///
+  /// The native app keeps sorting off the UI isolate and transfers only the
+  /// records the visible list can consume. Larger inventories are revealed
+  /// incrementally by SearchScreen instead of allocating/transferring every
+  /// matching SearchHit just to open the Stock tab.
+  Future<List<SearchHit>> browse(
+    SearchScope scope, {
+    required int limit,
+  }) async {
+    final boundedLimit = limit < 1
+        ? 1
+        : limit > 100000
+        ? 100000
+        : limit;
+    final data = _stableRecords;
+    final datasetRevision = _searchDatasetEpoch;
+    final selectedSettings = settings;
+    final date = today;
+    if (kIsWeb || !backgroundSearch) {
+      final visible = data
+          .where(
+            (medicine) =>
+                inScope(medicine, scope, selectedSettings, date),
+          )
+          .toList(growable: false)
+        ..sort((a, b) => expiryOrder(a, b, date));
+      return visible
+          .take(boundedLimit)
+          .map((medicine) => SearchHit(medicine.id, 1, 'Inventory', ''))
+          .toList(growable: false);
+    }
+    return _searchWorker.search(
+      data,
+      datasetRevision,
+      '',
+      scope,
+      selectedSettings,
+      date,
+      resultLimit: boundedLimit,
+    );
+  }
+
   Future<List<SearchHit>> search(String raw, SearchScope scope) async {
+    if (raw.trim().isEmpty) {
+      // Preserve the public search contract for non-UI callers while avoiding
+      // construction of the fuzzy index for what is only an ordered browse.
+      return browse(scope, limit: 100000);
+    }
     final data = _stableRecords;
     final datasetRevision = _searchDatasetEpoch;
     final selectedSettings = settings;
@@ -1616,7 +1664,7 @@ class PharmacyController extends ChangeNotifier {
         scope,
         selectedSettings,
         date,
-        limit: raw.trim().isEmpty ? 100000 : 150,
+        limit: 150,
       );
     }
     return _searchWorker.search(
