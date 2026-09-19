@@ -217,7 +217,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 160));
       await tester.pumpAndSettle();
       expect(
-        find.widgetWithText(MedicineCard, 'Drotaverine'),
+        find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Drotaverine'),
         findsOneWidget,
       );
 
@@ -228,11 +228,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 160));
       await tester.pumpAndSettle();
       expect(
-        find.widgetWithText(MedicineCard, 'Azithromycin'),
+        find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Azithromycin'),
         findsOneWidget,
       );
       expect(
-        find.widgetWithText(MedicineCard, 'Drotaverine'),
+        find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Drotaverine'),
         findsNothing,
       );
       expect(tester.takeException(), isNull);
@@ -294,11 +294,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.searchCalls, baselineSearches + 1);
       expect(
-        find.widgetWithText(MedicineCard, 'Drotaverine'),
+        find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Drotaverine'),
         findsOneWidget,
       );
       expect(
-        find.widgetWithText(MedicineCard, 'Azithromycin'),
+        find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Azithromycin'),
         findsNothing,
       );
       expect(tester.takeException(), isNull);
