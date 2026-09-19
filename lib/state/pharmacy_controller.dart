@@ -575,8 +575,12 @@ class PharmacyController extends ChangeNotifier {
       );
     }
 
-    final day = today;
+    // One authoritative instant drives both eligibility and durable lifecycle
+    // metadata. Sampling the clock once prevents a confirmation crossing
+    // midnight from validating against one civil day but being archived/audited
+    // on another.
     final returnedAt = clock();
+    final day = civilDay(returnedAt);
     final updates = <Medicine>[];
     for (final line in review.lines) {
       final reviewed = line.record;

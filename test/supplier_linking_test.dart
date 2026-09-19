@@ -174,6 +174,52 @@ void main() {
     expect(controller.snapshot.records['stock-a']!.supplierId, _supplierA.id);
   });
 
+  test('supplier return uses one authoritative instant across midnight', () async {
+    final scripted = <DateTime>[];
+    final fallback = DateTime(2026, 9, 19, 12);
+    DateTime clock() => scripted.isEmpty ? fallback : scripted.removeAt(0);
+
+    const supplier = Supplier(
+      id: 'supplier_midnight',
+      name: 'Midnight Pharma',
+      returnBeforeExpiryDays: 0,
+    );
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: clock,
+      backgroundSearch: false,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.saveSupplier(supplier, expectedRevision: 0);
+    await controller.save(
+      _stock(
+        'midnight-stock',
+        supplierId: supplier.id,
+        expiry: '2026-09-19',
+      ),
+      expectedRevision: 1,
+    );
+    final review = controller.reviewSupplierReturn(
+      supplier.id,
+      const <String>['midnight-stock'],
+    );
+
+    scripted.addAll(<DateTime>[
+      DateTime(2026, 9, 19, 23, 59, 59),
+      DateTime(2026, 9, 20, 0, 0, 1),
+    ]);
+    await controller.applySupplierReturn(review);
+
+    final returned = controller.snapshot.records['midnight-stock']!;
+    expect(dateText(returned.archivedAt!), '2026-09-19');
+    expect(
+      controller.snapshot.events.first['businessDay'],
+      '2026-09-19',
+    );
+  });
+
   test('supplier return review fails closed after the stock row changes', () async {
     final controller = PharmacyController(
       MemoryInventoryStorage(),

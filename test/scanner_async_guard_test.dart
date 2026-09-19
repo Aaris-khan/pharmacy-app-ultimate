@@ -36,4 +36,32 @@ void main() {
       isTrue,
     );
   });
+
+
+  test('scanner lifecycle-style drains stay bounded for every active job', () async {
+    final capture = Completer<void>();
+    final frame = Completer<bool>();
+
+    expect(
+      await scannerWorkCompletedWithin(
+        capture.future,
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isFalse,
+    );
+    expect(
+      await scannerWorkCompletedWithin(
+        frame.future,
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isFalse,
+    );
+    expect(capture.isCompleted, isFalse);
+    expect(frame.isCompleted, isFalse);
+
+    capture.complete();
+    frame.complete(true);
+    await capture.future;
+    await expectLater(frame.future, completion(isTrue));
+  });
 }

@@ -17,6 +17,7 @@ import 'scanner_view.dart';
 
 const _liveFrameDrainTimeout = Duration(seconds: 6);
 const _stillRecognitionTimeout = Duration(seconds: 12);
+const _lifecycleDrainTimeout = Duration(seconds: 2);
 
 /// Bounds only how long the UI waits for an already-owned scanner operation.
 ///
@@ -525,10 +526,19 @@ class _ScannerScreenState extends State<ScannerScreen>
     _camera = null;
     _description = null;
     if (mounted && !_closed) setState(() {});
-    // takePicture and still OCR are part of the same lease as stream OCR.
-    // Detach first to reject new frames, then drain before native disposal.
-    await _captureWork;
-    await _frameWork;
+    // Detach first so no new frames can enter this camera session. A native
+    // callback may outlive its visible UI deadline, so lifecycle recovery gets
+    // only a short grace period instead of inheriting an unbounded wait. These
+    // waits do not cancel recognition; the existing busy/lease guards continue
+    // to prevent overlapping OCR until the original operation really settles.
+    await scannerWorkCompletedWithin(
+      _captureWork,
+      timeout: _lifecycleDrainTimeout,
+    );
+    await scannerWorkCompletedWithin(
+      _frameWork,
+      timeout: _lifecycleDrainTimeout,
+    );
     if (camera != null) {
       try {
         await camera.dispose();
