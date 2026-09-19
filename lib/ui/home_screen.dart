@@ -7,7 +7,7 @@ import 'design.dart';
 import 'search_screen.dart';
 import 'editor_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.controller,
@@ -15,6 +15,17 @@ class HomeScreen extends StatelessWidget {
   });
   final PharmacyController controller;
   final VoidCallback onDatabase;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int? _pendingShortDays;
+  int? _pendingMonths;
+
+  PharmacyController get controller => widget.controller;
+  VoidCallback get onDatabase => widget.onDatabase;
 
   void _open(BuildContext context, SearchScope scope) =>
       Navigator.of(context).push(
@@ -24,20 +35,28 @@ class HomeScreen extends StatelessWidget {
       );
 
   Future<void> _setShortDays(BuildContext context, int value) async {
-    if (value == controller.settings.shortDays) return;
+    final effective = _pendingShortDays ?? controller.settings.shortDays;
+    if (value == effective) return;
+    _pendingShortDays = value;
     try {
       await controller.setShortWarningDays(value);
     } catch (e) {
       if (context.mounted) showError(context, e);
+    } finally {
+      if (_pendingShortDays == value) _pendingShortDays = null;
     }
   }
 
   Future<void> _setMonths(BuildContext context, int value) async {
-    if (value == controller.settings.months) return;
+    final effective = _pendingMonths ?? controller.settings.months;
+    if (value == effective) return;
+    _pendingMonths = value;
     try {
       await controller.setWarningMonths(value);
     } catch (e) {
       if (context.mounted) showError(context, e);
+    } finally {
+      if (_pendingMonths == value) _pendingMonths = null;
     }
   }
 
