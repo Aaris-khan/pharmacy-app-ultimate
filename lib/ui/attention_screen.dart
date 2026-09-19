@@ -270,6 +270,7 @@ class _AttentionScreenState extends State<AttentionScreen> {
       top: false,
       child: ActiveListenableBuilder(
         listenable: widget.controller,
+        rebuildToken: () => (widget.controller.snapshot, widget.controller.today),
         builder: (context, _) {
           _refresh();
           final visible = _filter == 0
