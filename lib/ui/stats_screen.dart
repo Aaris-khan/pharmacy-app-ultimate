@@ -279,6 +279,7 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
     appBar: AppBar(title: const Text('Sold Medicine Tracker')),
     body: ActiveListenableBuilder(
       listenable: controller,
+      rebuildToken: () => (controller.snapshot, controller.today),
       builder: (context, _) {
         final overview = controller.salesOverview;
         final ranked = overview.ranked;

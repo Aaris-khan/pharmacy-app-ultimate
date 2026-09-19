@@ -310,6 +310,10 @@ class _OrderScreenState extends State<OrderScreen> {
       top: false,
       child: ActiveListenableBuilder(
         listenable: widget.controller,
+        rebuildToken: () => (
+          widget.controller.snapshot,
+          widget.controller.today,
+        ),
         builder: (context, _) {
           final suggestions = _suggestions;
           final blocked = _blockedOrders(_operationsPlan(suggestions));

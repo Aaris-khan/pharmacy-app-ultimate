@@ -432,7 +432,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
         },
       ),
     );
-  }}
+  }
+}
 
 class _RemovedStockCard extends StatelessWidget {
   const _RemovedStockCard({

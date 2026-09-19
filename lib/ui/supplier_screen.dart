@@ -40,6 +40,7 @@ class SupplierScreen extends StatelessWidget {
       top: false,
       child: ActiveListenableBuilder(
         listenable: controller,
+        rebuildToken: () => (controller.snapshot, controller.today),
         builder: (context, _) {
           final suppliers = controller.suppliers.toList(growable: false)
             ..sort(
@@ -71,69 +72,73 @@ class SupplierScreen extends StatelessWidget {
             );
           }
 
-          return ListView(
+          return ListView.builder(
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 110),
-            children: [
-              Text(
-                '${suppliers.length} supplier${suppliers.length == 1 ? '' : 's'} · '
-                '${due.length} return due',
-                style: const TextStyle(color: muted, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              for (final supplier in suppliers)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Card(
-                    elevation: 0,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(24),
-                      onTap: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(
-                          builder: (_) => SupplierDetailScreen(
-                            controller: controller,
-                            supplierId: supplier.id,
-                          ),
+            itemCount: suppliers.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    '${suppliers.length} supplier${suppliers.length == 1 ? '' : 's'} · '
+                    '${due.length} return due',
+                    style: const TextStyle(color: muted, fontSize: 13),
+                  ),
+                );
+              }
+
+              final supplier = suppliers[index - 1];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Card(
+                  elevation: 0,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => SupplierDetailScreen(
+                          controller: controller,
+                          supplierId: supplier.id,
                         ),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            const DepthIcon(
-                              Icons.local_shipping_outlined,
-                              size: 42,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    supplier.name,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const DepthIcon(
+                            Icons.local_shipping_outlined,
+                            size: 42,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  supplier.name,
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Return ${supplier.returnBeforeExpiryDays} days before expiry'
+                                  ' · ${dueCounts[supplier.id] ?? 0} due',
+                                  style: const TextStyle(
+                                    color: muted,
+                                    fontSize: 12,
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Return ${supplier.returnBeforeExpiryDays} days before expiry'
-                                    ' · ${dueCounts[supplier.id] ?? 0} due',
-                                    style: const TextStyle(
-                                      color: muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                            const Icon(Icons.chevron_right_rounded),
-                          ],
-                        ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded),
+                        ],
                       ),
                     ),
                   ),
                 ),
-            ],
+              );
+            },
           );
         },
       ),
@@ -225,6 +230,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       top: false,
       child: ActiveListenableBuilder(
         listenable: widget.controller,
+        rebuildToken: () => (
+          widget.controller.snapshot,
+          widget.controller.today,
+        ),
         builder: (context, _) {
           final supplier =
               widget.controller.snapshot.suppliers[widget.supplierId];
