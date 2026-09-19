@@ -16,6 +16,7 @@ import '../domain/operations_plan.dart';
 import '../domain/search.dart';
 import '../domain/tracking.dart';
 import '../services/scan_service.dart';
+import '../state/autopilot_supervisor.dart';
 import '../state/operational_context.dart';
 import '../state/pharmacy_controller.dart';
 import '../state/stock_location_operations.dart';
@@ -34,16 +35,43 @@ class BrainScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.onOpenSection,
+    this.autopilot,
   });
 
   final PharmacyController controller;
   final ValueChanged<AppSection> onOpenSection;
+  final AarisAutopilotSupervisor? autopilot;
 
   @override
   State<BrainScreen> createState() => _BrainScreenState();
 }
 
 class _BrainScreenState extends State<BrainScreen> {
+  Future<void> _openAttentionQueue() async {
+    if (!mounted) return;
+    final shared = widget.autopilot;
+    final supervisor =
+        shared ??
+        AarisAutopilotSupervisor(
+          widget.controller,
+          debounce: Duration.zero,
+        );
+    try {
+      supervisor.refreshNow();
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AttentionScreen(
+            controller: widget.controller,
+            autopilot: supervisor,
+          ),
+        ),
+      );
+    } finally {
+      if (shared == null) supervisor.dispose();
+    }
+  }
+
   bool _busy = false;
   PendingBrainChoice? _pendingChoice;
   String _reply =
@@ -1461,12 +1489,7 @@ class _BrainScreenState extends State<BrainScreen> {
             : 'The operating queue changed before this task opened. Nothing was changed. The new next safe task is ${replacement.item.title}.',
       );
       if (replacement == null) {
-        await Navigator.push<void>(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AttentionScreen(controller: widget.controller),
-          ),
-        );
+        await _openAttentionQueue();
       }
       return;
     }
@@ -1492,12 +1515,7 @@ class _BrainScreenState extends State<BrainScreen> {
             ? 'That recommended task changed while Aaris was opening it. Nothing was changed; the live operating plan is opening for re-evaluation.'
             : '${item.title} involves ${records.length} exact stock rows. Aaris opened the operating plan so you can choose the physical row instead of guessing.',
       );
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AttentionScreen(controller: widget.controller),
-        ),
-      );
+      await _openAttentionQueue();
       return;
     }
 
@@ -1577,12 +1595,7 @@ class _BrainScreenState extends State<BrainScreen> {
       }
       await Future<void>.delayed(Duration.zero);
       if (!mounted) return;
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AttentionScreen(controller: widget.controller),
-        ),
-      );
+      await _openAttentionQueue();
       return;
     }
 
@@ -1594,12 +1607,7 @@ class _BrainScreenState extends State<BrainScreen> {
       }
       await Future<void>.delayed(Duration.zero);
       if (!mounted) return;
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AttentionScreen(controller: widget.controller),
-        ),
-      );
+      await _openAttentionQueue();
       return;
     }
 
