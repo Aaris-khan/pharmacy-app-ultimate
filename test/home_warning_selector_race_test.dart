@@ -152,9 +152,13 @@ void main() {
         storage.releaseSecondCommit();
         await tester.pumpAndSettle();
 
-        expect(storage.commits, 4);
+        // The queued return-to-baseline request becomes a serialized no-op
+        // after the older failing write leaves 8 as the authoritative value.
+        // The fourth UI intent still has to survive and win: storage therefore
+        // sees the failed first 5, the later committed 5, and the final 8.
+        expect(storage.commits, 3);
         expect(controller.settings.shortDays, 8);
-        expect(controller.snapshot.revision, 3);
+        expect(controller.snapshot.revision, 2);
       } finally {
         storage.releaseFirstCommit();
         storage.releaseSecondCommit();
