@@ -40,6 +40,14 @@ void main() {
       );
       final buildEnd = ai.indexOf('class _AiHubHeader', buildStart);
       final build = ai.substring(buildStart, buildEnd);
+      expect(build, contains('child: CustomScrollView('));
+      expect(build, contains('sliver: SliverList.builder('));
+      expect(build, contains('itemCount: _messages.length'));
+      expect(build, isNot(contains('for (final message in _messages)')));
+      expect(
+        build.indexOf('SliverList.builder('),
+        lessThan(build.indexOf('MedicineIntakePanel(')),
+      );
       expect(
         build.indexOf('Expanded('),
         lessThan(build.indexOf('_AiQuickActions(')),
