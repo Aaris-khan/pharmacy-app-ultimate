@@ -210,6 +210,12 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  void _expandBrowse() {
+    if (_loading || _browseExhausted) return;
+    _browseLimit += _browsePageSize;
+    unawaited(_search(preserveResults: true));
+  }
+
   bool _catalogEligibleText(String value) {
     final text = value.trim();
     return text.length >= 3 &&
