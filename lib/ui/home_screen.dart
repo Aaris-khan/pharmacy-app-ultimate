@@ -41,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value == effective) return;
     final owner = controller;
     final generation = ++_shortIntentGeneration;
-    _pendingShortDays = value;
+    setState(() => _pendingShortDays = value);
     try {
       await owner.setShortWarningDays(value);
     } catch (e) {
@@ -52,7 +52,13 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } finally {
       // A completed older request must never retire a newer equal-valued intent.
-      if (generation == _shortIntentGeneration) _pendingShortDays = null;
+      if (generation == _shortIntentGeneration) {
+        if (mounted) {
+          setState(() => _pendingShortDays = null);
+        } else {
+          _pendingShortDays = null;
+        }
+      }
     }
   }
 
@@ -61,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value == effective) return;
     final owner = controller;
     final generation = ++_monthIntentGeneration;
-    _pendingMonths = value;
+    setState(() => _pendingMonths = value);
     try {
       await owner.setWarningMonths(value);
     } catch (e) {
@@ -71,7 +77,13 @@ class _HomeScreenState extends State<HomeScreen> {
         showError(context, e);
       }
     } finally {
-      if (generation == _monthIntentGeneration) _pendingMonths = null;
+      if (generation == _monthIntentGeneration) {
+        if (mounted) {
+          setState(() => _pendingMonths = null);
+        } else {
+          _pendingMonths = null;
+        }
+      }
     }
   }
 
@@ -95,6 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // rescan the full Medicine Database.
       final projection = controller.homeProjection;
       final attention = projection.attention;
+      final visibleShortDays =
+          _pendingShortDays ?? controller.settings.shortDays;
+      final visibleMonths = _pendingMonths ?? controller.settings.months;
       return ListView(
         key: const PageStorageKey('home-scroll'),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -145,7 +160,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: primary,
                   background: primarySoft,
                   selector: _WarningSelector(
-                    label: '${controller.settings.shortDays}d',
+                    label: '${visibleShortDays}d',
+                    busy: _pendingShortDays != null,
                     values: const [3, 5, 8, 10],
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Day' : 'Days'}',
@@ -163,7 +179,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: accent,
                   background: accentSoft,
                   selector: _WarningSelector(
-                    label: '${controller.settings.months}mo',
+                    label: '${visibleMonths}mo',
+                    busy: _pendingMonths != null,
                     values: const [1, 2, 3],
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Month' : 'Months'}',
@@ -423,9 +440,11 @@ class _WarningSelector extends StatelessWidget {
     required this.valueLabel,
     required this.onSelected,
     required this.onCustom,
+    this.busy = false,
   });
 
   final String label;
+  final bool busy;
   final List<int> values;
   final String Function(int) valueLabel;
   final ValueChanged<int> onSelected;
@@ -433,7 +452,9 @@ class _WarningSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<int>(
-    tooltip: 'Change warning window',
+    tooltip: busy
+        ? 'Warning window is saving. You can choose another value.'
+        : 'Change warning window',
     padding: EdgeInsets.zero,
     offset: const Offset(0, 8),
     onSelected: (value) {
@@ -479,8 +500,15 @@ class _WarningSelector extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 3),
-          const Icon(Icons.expand_more_rounded, size: 16, color: ink),
+          const SizedBox(width: 5),
+          if (busy)
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.8),
+            )
+          else
+            const Icon(Icons.expand_more_rounded, size: 16, color: ink),
         ],
       ),
     ),
