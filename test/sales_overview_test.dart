@@ -79,7 +79,7 @@ void main() {
     );
   });
 
-  test('direct SOLD immediately contributes entered amount and sold quantity', () {
+  test('direct SOLD fallback aggregates saved unit price across sold quantity', () {
     final sold = Medicine(
       id: 'p1',
       name: 'Paracetamol',
@@ -93,7 +93,7 @@ void main() {
 
     final overview = SalesOverview(const [], medicines: [sold]);
 
-    expect(overview.salesValuePaise, 2000);
+    expect(overview.salesValuePaise, 50000);
     expect(overview.totalUnitsSold, 25);
     expect(overview.recordedSales, 1);
     expect(overview.ranked.single.name, 'Paracetamol');
@@ -128,7 +128,7 @@ void main() {
     expect(overview.recordedSales, 1);
   });
 
-  test('direct SOLD remains in analytics after later restock', () {
+  test('direct SOLD keeps its persisted aggregate after later restock', () {
     final beforeSold = Medicine(
       id: 'p1',
       name: 'Paracetamol',
@@ -154,7 +154,7 @@ void main() {
       events: [event],
     );
 
-    expect(overview.salesValuePaise, 2000);
+    expect(overview.salesValuePaise, 50000);
     expect(overview.totalUnitsSold, 25);
     expect(overview.ranked.single.name, 'Paracetamol');
   });
