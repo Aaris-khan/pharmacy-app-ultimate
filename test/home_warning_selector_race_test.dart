@@ -58,7 +58,11 @@ Future<void> _disposeHarness(
 
 Future<void> _chooseShortDays(WidgetTester tester, String label) async {
   await tester.tap(find.byType(PopupMenuButton<int>).first);
-  await tester.pumpAndSettle();
+  // A pending warning-window save intentionally shows an indeterminate
+  // progress indicator, so pumpAndSettle can never complete while exercising
+  // the rapid-intent race. Advance only the popup route animation instead.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
   await tester.tap(find.text(label));
   await tester.pump(const Duration(milliseconds: 300));
 }
