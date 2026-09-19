@@ -18,6 +18,20 @@ import '../domain/supplier_return.dart';
 
 const _maxStockQuantity = 100000000;
 
+/// Returns the next civil-day refresh instant in the same time basis as [now].
+///
+/// Production uses a local wall clock, while deterministic tests and embedders
+/// may inject UTC. Mixing a UTC clock with a local DateTime constructor can
+/// produce a zero/negative timer delay on non-UTC devices and repeatedly wake
+/// the controller instead of waiting for the next business day.
+@visibleForTesting
+DateTime nextInventoryDayRefreshInstant(DateTime now) {
+  final nextMidnight = now.isUtc
+      ? DateTime.utc(now.year, now.month, now.day + 1)
+      : DateTime(now.year, now.month, now.day + 1);
+  return nextMidnight.add(const Duration(seconds: 1));
+}
+
 enum StockAdjustmentKind { setExact, receive }
 
 class ReviewedStockAdjustment {
@@ -370,11 +384,7 @@ class PharmacyController extends ChangeNotifier {
     _midnight?.cancel();
     if (_disposed) return;
     final now = clock();
-    final next = DateTime(
-      now.year,
-      now.month,
-      now.day + 1,
-    ).add(const Duration(seconds: 1));
+    final next = nextInventoryDayRefreshInstant(now);
     _midnight = Timer(next.difference(now), refreshDay);
   }
 
