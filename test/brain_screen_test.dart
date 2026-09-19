@@ -252,11 +252,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       autopilot.dispose();
       controller.dispose();
-      // AiScreen starts a bounded secure-storage load in initState. Flutter
-      // widget tests use fake time, so advance beyond that deadline after the
-      // screen is unmounted to let the timeout future settle without leaking a
-      // pending timer into the framework invariant check.
-      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
     },
   );
 
@@ -318,7 +314,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       autopilot.dispose();
       controller.dispose();
-      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
     },
   );
 
@@ -389,7 +385,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       autopilot.dispose();
       controller.dispose();
-      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
     },
   );
   testWidgets(
@@ -461,7 +457,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       autopilot.dispose();
       controller.dispose();
-      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
     },
   );
 

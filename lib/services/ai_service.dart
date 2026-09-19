@@ -23,7 +23,7 @@ class AiService {
   final http.Client Function() _clientFactory;
   static const _storage = FlutterSecureStorage();
   static final _connections = AiConnectionStore(
-    read: (key) => _storage.read(key: key).timeout(const Duration(seconds: 4)),
+    read: (key) => _storage.read(key: key),
     write: (key, value) => _storage.write(key: key, value: value),
   );
   static const _maxResponseBytes = 1500000;
@@ -47,31 +47,73 @@ class AiService {
   bool _localRequest = false;
   bool _ownsLocalLease = false;
   Completer<void>? _localLeaseWaitCancel;
+  final Set<void Function()> _connectionReadCancels = <void Function()>{};
   int _cancelEpoch = 0;
+
+  Future<T> _withConnectionReadDeadline<T>(
+    Future<T> Function() operation, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    final timedOut = Completer<T>();
+    final cancelled = Completer<T>();
+    late final Timer timer;
+    timer = Timer(timeout, () {
+      if (!timedOut.isCompleted) {
+        timedOut.completeError(
+          TimeoutException('Secure storage read timed out.', timeout),
+        );
+      }
+    });
+
+    void cancelRead() {
+      if (!cancelled.isCompleted) {
+        cancelled.completeError(StateError('AI request cancelled.'));
+      }
+    }
+
+    _connectionReadCancels.add(cancelRead);
+    try {
+      return await Future.any<T>([
+        operation(),
+        timedOut.future,
+        cancelled.future,
+      ]);
+    } finally {
+      timer.cancel();
+      _connectionReadCancels.remove(cancelRead);
+    }
+  }
+
+  Future<String?> _readConnectionValue(String key) =>
+      _withConnectionReadDeadline(() => _storage.read(key: key));
 
   /// Reading a cloud credential must not initialize a local model. A missing
   /// or corrupt optional model cannot prevent cloud settings from being read.
   Future<AiConfiguration> loadConfiguration() =>
-      _connections.load().timeout(const Duration(seconds: 4));
+      _connections.load(read: _readConnectionValue);
 
   Future<AiConfiguration?> loadProviderConfiguration(String provider) =>
-      _connections.forProvider(provider).timeout(const Duration(seconds: 8));
+      _connections.forProvider(provider, read: _readConnectionValue);
 
   Future<void> saveConfiguration(AiConfiguration config) =>
-      _connections.save(config);
+      _connections.save(config, read: _readConnectionValue);
 
   Future<void> setLocalBrainEnabled(bool enabled) =>
-      _connections.setLocalBrainEnabled(enabled);
+      _connections.setLocalBrainEnabled(enabled, read: _readConnectionValue);
 
   /// Removes both copies of the active cloud key and preserves the independent
   /// Local Brain preference and other providers' saved connections.
-  Future<void> forgetKey() => _connections.forgetActiveKey();
+  Future<void> forgetKey() =>
+      _connections.forgetActiveKey(read: _readConnectionValue);
 
   /// Cancels this AiService turn and reports whether that exact turn owned the
   /// shared native Local AI lease. The caller can therefore distinguish native
   /// teardown from merely abandoning a queue wait behind an unrelated scan.
   bool cancel() {
     ++_cancelEpoch;
+    for (final cancelRead in _connectionReadCancels.toList(growable: false)) {
+      cancelRead();
+    }
     final waiting = _localLeaseWaitCancel;
     if (waiting != null && !waiting.isCompleted) waiting.complete();
     final ownedLocalLease = _localRequest && _ownsLocalLease;
