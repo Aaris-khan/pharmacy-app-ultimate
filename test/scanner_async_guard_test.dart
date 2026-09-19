@@ -5,6 +5,30 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/ui/scanner_screen.dart';
 
 void main() {
+  test('detached retired reader blocks a new capture until it drains', () {
+    expect(
+      scannerCaptureBlockedByDetachedReader(
+        readerBusy: true,
+        hasTrackedFrame: false,
+      ),
+      isTrue,
+    );
+    expect(
+      scannerCaptureBlockedByDetachedReader(
+        readerBusy: true,
+        hasTrackedFrame: true,
+      ),
+      isFalse,
+    );
+    expect(
+      scannerCaptureBlockedByDetachedReader(
+        readerBusy: false,
+        hasTrackedFrame: false,
+      ),
+      isFalse,
+    );
+  });
+
   test('scanner wait deadline does not cancel the active OCR lease', () async {
     final active = Completer<bool>();
 
