@@ -101,20 +101,14 @@ class SalesOverview {
           : _positiveUnits(before.quantity);
       final name = useCurrentSoldSnapshot ? current.name : before.name;
 
-      int? amount = useCurrentSoldSnapshot
-          ? current.soldUnitPricePaise ?? current.unitPricePaise
-          : before.unitPricePaise;
-
-      // The legacy event aggregate stored quantity × amount. Recover the
-      // original entered medicine amount when the old quantity is known.
-      if (!useCurrentSoldSnapshot &&
-          soldValue is int &&
-          soldValue > 0 &&
-          before.quantity != null &&
-          before.quantity! > 0 &&
-          soldValue % before.quantity! == 0) {
-        amount = soldValue ~/ before.quantity!;
-      }
+      // Persistence stores SOLD value as the transaction aggregate
+      // (captured sold quantity × saved unit price). _record expects that same
+      // aggregate, so converting it back to a unit price would undercount every
+      // direct SOLD transition with more than one unit.
+      final amount =
+          soldValue is int && soldValue > 0 && soldValue <= maxExactPaise
+          ? soldValue
+          : null;
 
       _record(name: name, units: units, knownValuePaise: amount);
     }
@@ -125,11 +119,19 @@ class SalesOverview {
     for (final medicine in medicineList.where((medicine) => medicine.sold)) {
       if (directSoldStockIds.contains(medicine.id)) continue;
       if (_hasRecordedFinalSale(medicine, recordedSaleWitnesses)) continue;
-      _record(
-        name: medicine.name,
-        units: _positiveUnits(medicine.soldQuantity),
-        knownValuePaise: medicine.soldUnitPricePaise ?? medicine.unitPricePaise,
-      );
+      final units = _positiveUnits(medicine.soldQuantity);
+      final unitPrice =
+          medicine.soldUnitPricePaise ?? medicine.unitPricePaise;
+      int? amount;
+      if (unitPrice != null) {
+        try {
+          amount = stockValue(units, unitPrice);
+        } on FormatException {
+          // Legacy/restored data can predate today's aggregate validation.
+          // Keep the sale visible, but do not let an unsafe value crash stats.
+        }
+      }
+      _record(name: medicine.name, units: units, knownValuePaise: amount);
     }
   }
 
