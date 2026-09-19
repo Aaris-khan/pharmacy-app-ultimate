@@ -225,4 +225,60 @@ void main() {
     },
   );
 
+  test(
+    'queued writes cannot hide an earlier search projection change',
+    () async {
+      final searchable = stock(
+        'queued-searchable',
+        name: 'Cefixime',
+        quantity: 8,
+      );
+      final stockOnly = stock(
+        'queued-stock-only',
+        name: 'Paracetamol',
+        quantity: 12,
+      );
+      final controller = PharmacyController(
+        MemoryInventoryStorage(
+          InventorySnapshot(
+            records: {
+              searchable.id: searchable,
+              stockOnly.id: stockOnly,
+            },
+          ),
+        ),
+        clock: () => contractToday,
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      await controller.search('Cefixime', SearchScope.all);
+      final initialEpoch = controller.debugSearchDatasetEpoch;
+      expect(controller.debugWebSearchIndexBuilds, 1);
+
+      var liveSearchable = controller.snapshot.records[searchable.id]!;
+      await controller.save(
+        liveSearchable.patch(<String, dynamic>{'notes': 'Cold shelf'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      var liveStockOnly = controller.snapshot.records[stockOnly.id]!;
+      await controller.save(
+        liveStockOnly.patch(<String, dynamic>{'quantity': 11}),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(
+        controller.debugSearchDatasetEpoch,
+        initialEpoch + 1,
+        reason:
+            'A later stock-only write must not erase an earlier searchable edit before the read cache catches up.',
+      );
+      final refreshed = await controller.search('Cold shelf', SearchScope.all);
+      expect(refreshed.single.id, searchable.id);
+      expect(controller.debugWebSearchIndexBuilds, 2);
+    },
+  );
+
 }

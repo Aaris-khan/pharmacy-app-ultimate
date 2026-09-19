@@ -24,7 +24,6 @@ class InventorySnapshot {
        sales = Map.unmodifiable(sales ?? {}),
        receipts = Set.unmodifiable(receipts ?? {}),
        events = List.unmodifiable(events ?? []),
-       changedMedicineIds = null,
        _moneyTotals = _inventoryMoneyTotals(
          records?.values ?? const <Medicine>[],
        );
@@ -45,10 +44,8 @@ class InventorySnapshot {
     required this.events,
     required this.soldValue,
     required this.unknownSold,
-    required Set<String> changedMedicineIds,
     required _InventoryMoneyTotals moneyTotals,
-  }) : changedMedicineIds = Set<String>.unmodifiable(changedMedicineIds),
-       _moneyTotals = moneyTotals;
+  }) : _moneyTotals = moneyTotals;
 
   final int revision, soldValue, unknownSold;
   final WarningSettings settings;
@@ -57,13 +54,6 @@ class InventorySnapshot {
   final Map<String, SaleEvent> sales;
   final Set<String> receipts;
   final List<Map<String, dynamic>> events;
-
-  /// Exact medicine rows touched by the transition that produced this snapshot.
-  ///
-  /// A persisted/external snapshot has no predecessor witness, so this is null.
-  /// In-process commits publish the exact bounded ID set. Read models can then
-  /// decide whether a derived projection changed without rescanning every row.
-  final Set<String>? changedMedicineIds;
 
   // Exact-accounting witness for this immutable medicine collection. A full
   // scan is paid once when an external snapshot enters the data layer; ordinary
@@ -450,7 +440,7 @@ InventorySnapshot nextSnapshot(
 ) {
   final recordsChanged =
       mutation.upserts.isNotEmpty || mutation.removeIds.isNotEmpty;
-  final changedMedicineIds = recordsChanged
+  final touchedMedicineIds = recordsChanged
       ? <String>{
           ...mutation.upserts.map((record) => record.id),
           ...mutation.removeIds,
@@ -559,7 +549,7 @@ InventorySnapshot nextSnapshot(
     ensureIntegritySafeInventoryMutation(
       before: before.records,
       after: records,
-      touchedStockIds: changedMedicineIds,
+      touchedStockIds: touchedMedicineIds,
       today: operationDay,
     );
     ensureSafeSaleLedgerMutation(
@@ -587,7 +577,7 @@ InventorySnapshot nextSnapshot(
           beforeTotals: before._moneyTotals,
           beforeRecords: before.records,
           afterRecords: records,
-          touchedStockIds: changedMedicineIds,
+          touchedStockIds: touchedMedicineIds,
         )
       : before._moneyTotals;
   var total =
@@ -648,7 +638,6 @@ InventorySnapshot nextSnapshot(
     events: events,
     soldValue: total,
     unknownSold: missing,
-    changedMedicineIds: changedMedicineIds,
     moneyTotals: moneyTotals,
   );
 }

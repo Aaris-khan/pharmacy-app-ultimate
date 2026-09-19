@@ -261,30 +261,11 @@ class PharmacyController extends ChangeNotifier {
     }
   }
 
-  bool _searchProjectionChangedSince(InventorySnapshot? previous) {
-    if (previous == null) return true;
-    final changedIds = snapshot.changedMedicineIds;
-    if (changedIds == null) return true;
-
-    for (final id in changedIds) {
-      final before = previous.records[id];
-      final after = snapshot.records[id];
-      if (before == null ||
-          after == null ||
-          !sameSearchProjection(before, after)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   void _syncReadSnapshot() {
     if (identical(_readSnapshot, snapshot)) return;
     final previous = _readSnapshot;
     final recordsChanged =
         previous == null || !identical(previous.records, snapshot.records);
-    final searchProjectionChanged =
-        recordsChanged && _searchProjectionChangedSince(previous);
     final settingsChanged =
         previous == null || !identical(previous.settings, snapshot.settings);
     final suppliersChanged =
@@ -302,7 +283,6 @@ class PharmacyController extends ChangeNotifier {
     // next unrelated screen to rescan the complete pharmacy.
     if (recordsChanged || _readRecords == null) {
       _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
-      if (searchProjectionChanged) _searchDatasetEpoch++;
     }
 
     if (recordsChanged) {
@@ -438,6 +418,7 @@ class PharmacyController extends ChangeNotifier {
     final loaded = await storage.load();
     if (_disposed) return;
     snapshot = loaded;
+    _searchDatasetEpoch++;
     ready = true;
     _scheduleMidnight();
     _emit();
@@ -624,12 +605,38 @@ class PharmacyController extends ChangeNotifier {
     });
   }
 
+  bool _mutationChangesSearchProjection(
+    InventorySnapshot before,
+    InventorySnapshot after,
+    InventoryMutation mutation,
+  ) {
+    bool changed(String id) {
+      final previous = before.records[id];
+      final current = after.records[id];
+      if (previous == null || current == null) return previous != current;
+      return !sameSearchProjection(previous, current);
+    }
+
+    for (final record in mutation.upserts) {
+      if (changed(record.id)) return true;
+    }
+    for (final id in mutation.removeIds) {
+      if (changed(id)) return true;
+    }
+    return false;
+  }
+
   Future<void> _queueCommit(InventoryMutation? Function() buildMutation) {
     final result = _writes.then((_) async {
       if (_disposed) throw StateError('App is closed.');
       final mutation = buildMutation();
       if (mutation == null) return;
-      snapshot = await storage.commit(mutation);
+      final before = snapshot;
+      final committed = await storage.commit(mutation);
+      if (_mutationChangesSearchProjection(before, committed, mutation)) {
+        _searchDatasetEpoch++;
+      }
+      snapshot = committed;
       _emit();
     });
     _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
