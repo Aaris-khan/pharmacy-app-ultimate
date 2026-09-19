@@ -72,6 +72,11 @@ void main() {
       expect(controller.settings.shortDays, 8);
       expect(controller.settings.months, 2);
       expect(controller.snapshot.revision, 2);
+
+      // PharmacyController owns a civil-day timer. Unmount the Home screen and
+      // cancel that timer before Flutter verifies widget-test invariants.
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
     },
   );
 }
