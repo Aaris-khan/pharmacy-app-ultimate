@@ -508,6 +508,16 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
+  Future<void> _queueCommit(InventoryMutation Function() buildMutation) {
+    final result = _writes.then((_) async {
+      if (_disposed) throw StateError('App is closed.');
+      snapshot = await storage.commit(buildMutation());
+      _emit();
+    });
+    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
+  }
+
   Future<void> _commit(InventoryMutation mutation, {DateTime? operationTime}) {
     // Stamp once at the authoritative controller boundary. A lifecycle action
     // may pass the same instant used to construct its stock transition, which
@@ -516,13 +526,7 @@ class PharmacyController extends ChangeNotifier {
     final committedMutation = mutation.withOperationTime(
       operationTime ?? clock(),
     );
-    final result = _writes.then((_) async {
-      if (_disposed) throw StateError('App is closed.');
-      snapshot = await storage.commit(committedMutation);
-      _emit();
-    });
-    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
-    return result;
+    return _queueCommit(() => committedMutation);
   }
 
   Future<void> saveSupplier(
@@ -702,14 +706,39 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
-  Future<void> setWarnings(WarningSettings value) => _commit(
-    InventoryMutation(
+  Future<void> _updateWarnings(
+    WarningSettings Function(WarningSettings current) update,
+  ) => _queueCommit(() {
+    // Warning windows are preferences, not a review of stock facts. Build the
+    // mutation only when its serialized turn begins so a harmless inventory
+    // write (or another quick selector tap) cannot make the preference stale.
+    // Field-specific callers derive from the latest committed settings, which
+    // also prevents one rapid selector change from overwriting the other.
+    final value = update(snapshot.settings);
+    return InventoryMutation(
       expectedRevision: snapshot.revision,
       label: 'Updated expiry warning windows',
-      upserts: [],
+      upserts: const <Medicine>[],
       settings: value,
-    ),
+    ).withOperationTime(clock());
+  });
+
+  Future<void> setShortWarningDays(int shortDays) => _updateWarnings(
+    (current) => WarningSettings.fromJson(<String, dynamic>{
+      'shortDays': shortDays,
+      'months': current.months,
+    }),
   );
+
+  Future<void> setWarningMonths(int months) => _updateWarnings(
+    (current) => WarningSettings.fromJson(<String, dynamic>{
+      'shortDays': current.shortDays,
+      'months': months,
+    }),
+  );
+
+  Future<void> setWarnings(WarningSettings value) =>
+      _updateWarnings((_) => value);
 
   ReviewedMarkSold reviewMarkSold(String id) {
     final medicine = snapshot.records[id];
