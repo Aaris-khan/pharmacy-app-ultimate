@@ -766,11 +766,7 @@ class PharmacyController extends ChangeNotifier {
     // write (or another quick selector tap) cannot make the preference stale.
     // Field-specific callers derive from the latest committed settings, which
     // also prevents one rapid selector change from overwriting the other.
-    final current = snapshot.settings;
-    final value = update(current);
-    if (value.shortDays == current.shortDays && value.months == current.months) {
-      return null;
-    }
+    final value = update(snapshot.settings);
     return InventoryMutation(
       expectedRevision: snapshot.revision,
       label: 'Updated expiry warning windows',
