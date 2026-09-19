@@ -279,6 +279,34 @@ void main() {
       },
     );
 
+    test('deferred startup waits for an explicit refresh', () async {
+      final controller = PharmacyController(
+        MemoryInventoryStorage(),
+        clock: () => DateTime(2026, 9, 10, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+      final supervisor = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(() {
+        supervisor.dispose();
+        controller.dispose();
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(supervisor.digest.health, AarisAutopilotHealth.waiting);
+
+      supervisor.refreshNow();
+      for (var attempt = 0; attempt < 50; attempt++) {
+        if (supervisor.digest.isReady) break;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(supervisor.digest.health, AarisAutopilotHealth.clear);
+    });
+
     test(
       'initial load wakes supervisor even when revision and day stay unchanged',
       () async {
