@@ -186,6 +186,8 @@ class PharmacyController extends ChangeNotifier {
   HomeInventoryProjection? _homeProjectionCache;
   String _homeProjectionDayKey = '';
   SalesOverview? _salesOverviewCache;
+  final Map<String, TrackingStats> _trackingCache = <String, TrackingStats>{};
+  String _trackingDayKey = '';
   List<SupplierReturnCandidate>? _supplierReturnsCache;
   String _supplierReturnsDayKey = '';
   int _searchDatasetEpoch = 0;
@@ -209,6 +211,8 @@ class PharmacyController extends ChangeNotifier {
     _homeProjectionCache = null;
     _homeProjectionDayKey = '';
     _salesOverviewCache = null;
+    _trackingCache.clear();
+    _trackingDayKey = '';
     _supplierReturnsCache = null;
     _supplierReturnsDayKey = '';
     _searchDatasetEpoch++;
@@ -254,12 +258,38 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
-  TrackingStats tracking(TrackingRange range) => TrackingStats(
-    medicines: _stableRecords,
-    sales: sales,
-    range: range,
-    today: today,
-  );
+  TrackingStats tracking(TrackingRange range) {
+    final date = today;
+    final dayKey = dateText(date);
+    _syncReadSnapshot();
+    if (_trackingDayKey != dayKey) {
+      _trackingCache.clear();
+      _trackingDayKey = dayKey;
+    }
+
+    // Tracking is an expensive read model: it walks current stock, sale history,
+    // daily demand and reorder projections. Screens often ask for the same range
+    // more than once while building related guidance. Reuse only within the
+    // exact immutable inventory snapshot + civil day + requested range.
+    final key =
+        '${range.start.microsecondsSinceEpoch}:${range.end.microsecondsSinceEpoch}';
+    final cached = _trackingCache[key];
+    if (cached != null) return cached;
+
+    // Custom date pickers can produce many distinct ranges over one session.
+    // Keep this a small read-through cache rather than another source of truth.
+    if (_trackingCache.length >= 8) {
+      _trackingCache.remove(_trackingCache.keys.first);
+    }
+    final result = TrackingStats(
+      medicines: _stableRecords,
+      sales: sales,
+      range: range,
+      today: date,
+    );
+    _trackingCache[key] = result;
+    return result;
+  }
 
   Future<void> initialize() {
     if (_disposed) return Future.error(StateError('App is closed.'));

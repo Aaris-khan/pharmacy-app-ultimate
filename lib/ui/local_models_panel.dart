@@ -649,8 +649,8 @@ class _LocalModelsPanelState extends State<LocalModelsPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([local, defaults]),
+  Widget build(BuildContext context) => ActiveListenableBuilder(
+    listenable: Listenable.merge([local, defaults]),
     builder: (context, _) => Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),

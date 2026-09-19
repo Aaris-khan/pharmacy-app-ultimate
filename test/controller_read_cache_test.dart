@@ -1,5 +1,6 @@
 import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
+import 'package:aaris_pharmacy/domain/tracking.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -79,4 +80,44 @@ void main() {
     expect(identical(salesBeforeWrite, controller.salesOverview), isFalse);
     expect(controller.homeProjection.activeCount, 1);
   });
+
+  test('tracking read model is reused by range and invalidated safely', () async {
+    var now = DateTime(2026, 9, 12, 10);
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: () => now,
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+
+    TrackingRange range() => TrackingRange.lastDays(controller.today, 30);
+
+    final dayOne = controller.tracking(range());
+    expect(identical(dayOne, controller.tracking(range())), isTrue);
+
+    // Daily-demand and expiry-aware reorder planning are civil-day sensitive.
+    now = DateTime(2026, 9, 13, 10);
+    controller.refreshDay();
+    final dayTwo = controller.tracking(range());
+    expect(identical(dayOne, dayTwo), isFalse);
+    expect(identical(dayTwo, controller.tracking(range())), isTrue);
+
+    await controller.save(
+      Medicine(
+        id: 'tracking-cache-stock',
+        name: 'Tracking Cache Medicine',
+        strength: '500mg',
+        form: 'Tablet',
+        quantity: 8,
+        expiry: DateTime(2027, 1, 1),
+      ),
+      expectedRevision: controller.snapshot.revision,
+    );
+
+    final afterWrite = controller.tracking(range());
+    expect(identical(dayTwo, afterWrite), isFalse);
+    expect(identical(afterWrite, controller.tracking(range())), isTrue);
+  });
+
 }
