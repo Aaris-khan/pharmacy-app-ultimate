@@ -57,13 +57,13 @@ void main() {
         contractToday,
       );
       expect(expired.single.id, 'expired');
-      final updated = await worker.search(
+      final updated = await worker.browseActive(
         [stock('new', name: 'Cefixime')],
         2,
-        '',
         SearchScope.all,
         contractSettings,
         contractToday,
+        limit: 120,
       );
       expect(updated.single.id, 'new');
     },
