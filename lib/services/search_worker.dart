@@ -79,18 +79,27 @@ void _searchEntry(SendPort main) {
           throw StateError('Search dataset changed. Retry this search.');
         }
         if (kind == 'searchArchived') {
-          archivedEngine ??= MedicineSearch(
-            indexedRecords!.where((medicine) => medicine.archived),
-            includeArchived: true,
-          );
-          main.send({
-            'id': id,
-            'result': archivedEngine!.searchArchived(
-              message['query'] as String,
-              message['today'] as DateTime,
-              limit: message['limit'] as int,
-            ),
-          });
+          final query = message['query'] as String;
+          final limit = message['limit'] as int;
+          if (query.trim().isEmpty) {
+            main.send({
+              'id': id,
+              'result': _browseArchivedRecords(indexedRecords!, limit),
+            });
+          } else {
+            archivedEngine ??= MedicineSearch(
+              indexedRecords!.where((medicine) => medicine.archived),
+              includeArchived: true,
+            );
+            main.send({
+              'id': id,
+              'result': archivedEngine!.searchArchived(
+                query,
+                message['today'] as DateTime,
+                limit: limit,
+              ),
+            });
+          }
         } else if (kind == 'search') {
           final query = message['query'] as String;
           final scope = message['scope'] as SearchScope;
