@@ -208,7 +208,11 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
   /// write from being mistaken for this scan's save.
   Future<bool> _editNewScanForResult(MedicineScanDraft draft) async {
     if (_busy) return false;
-    final knownIds = widget.controller.snapshot.records.keys.toSet();
+    // InventorySnapshot is immutable. Keep the pre-editor map itself as the
+    // witness instead of copying every stock ID on the UI isolate before
+    // navigation. This preserves the exact "must be a newly created row"
+    // safety check with O(1) lookup and no inventory-sized allocation.
+    final beforeRecords = widget.controller.snapshot.records;
     final previousTargetId = widget.controller.operationalTargetId;
     setState(() => _busy = true);
     try {
@@ -217,7 +221,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       final targetId = widget.controller.operationalTargetId;
       if (targetId == null ||
           targetId == previousTargetId ||
-          knownIds.contains(targetId)) {
+          beforeRecords.containsKey(targetId)) {
         return false;
       }
       final saved = widget.controller.snapshot.records[targetId];
