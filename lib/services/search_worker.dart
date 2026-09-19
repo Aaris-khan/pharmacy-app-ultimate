@@ -5,21 +5,17 @@ import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import '../domain/search.dart';
 
-List<SearchHit> _browseActiveRecords(
+List<Medicine> _orderedActiveRecords(
   List<Medicine> records,
   SearchScope scope,
   WarningSettings settings,
   DateTime today,
-  int limit,
 ) {
   final visible = records
       .where((medicine) => inScope(medicine, scope, settings, today))
       .toList(growable: false)
     ..sort((a, b) => expiryOrder(a, b, today));
-  return visible
-      .take(limit)
-      .map((medicine) => SearchHit(medicine.id, 1, 'Inventory', ''))
-      .toList(growable: false);
+  return visible;
 }
 
 List<SearchHit> _browseArchivedRecords(
@@ -45,6 +41,8 @@ void _searchEntry(SendPort main) {
   MedicineSearch? engine;
   MedicineSearch? archivedEngine;
   List<Medicine>? indexedRecords;
+  List<Medicine>? browsedRecords;
+  String browseKey = '';
   var revision = -1;
   receive.listen((dynamic raw) {
     final message = raw as Map;
@@ -58,6 +56,8 @@ void _searchEntry(SendPort main) {
         // expensive token/trigram/delete indexes until a real query arrives.
         engine = null;
         archivedEngine = null;
+        browsedRecords = null;
+        browseKey = '';
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
       } else if (kind == 'reuseIndex') {
@@ -109,15 +109,26 @@ void _searchEntry(SendPort main) {
           final today = message['today'] as DateTime;
           final limit = message['limit'] as int;
           if (query.trim().isEmpty) {
-            main.send({
-              'id': id,
-              'result': _browseActiveRecords(
+            final nextBrowseKey =
+                '${scope.index}:${settings.shortDays}:${settings.months}:${dateText(today)}';
+            if (browsedRecords == null || browseKey != nextBrowseKey) {
+              browsedRecords = _orderedActiveRecords(
                 indexedRecords!,
                 scope,
                 settings,
                 today,
-                limit,
-              ),
+              );
+              browseKey = nextBrowseKey;
+            }
+            main.send({
+              'id': id,
+              'result': browsedRecords!
+                  .take(limit)
+                  .map(
+                    (medicine) =>
+                        SearchHit(medicine.id, 1, 'Inventory', ''),
+                  )
+                  .toList(growable: false),
             });
           } else {
             if (engine == null) {
@@ -459,8 +470,9 @@ class SearchWorker {
     String query,
     SearchScope scope,
     WarningSettings settings,
-    DateTime today,
-  ) {
+    DateTime today, {
+    int? resultLimit,
+  }) {
     final result = _queue.then(
       (_) => _withTransportRecovery(() async {
         final session = await _ensureIndex(records, revision);
@@ -474,7 +486,7 @@ class SearchWorker {
           'scope': scope,
           'settings': settings,
           'today': today,
-          'limit': query.trim().isEmpty ? 100000 : 150,
+          'limit': resultLimit ?? (query.trim().isEmpty ? 100000 : 150),
         });
         return (response as List).cast<SearchHit>();
       }),
