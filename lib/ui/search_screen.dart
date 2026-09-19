@@ -45,6 +45,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _generation = 0, _catalogGeneration = 0;
   ScanResult? _scan;
   late Object _observedSnapshot;
+  late Object _observedRecords;
   late DateTime _observedDay;
   late (int, int) _observedWarnings;
   bool _controllerListening = false;
@@ -57,6 +58,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _observedSnapshot = widget.controller.snapshot;
+    _observedRecords = widget.controller.snapshot.records;
     _observedDay = widget.controller.today;
     _observedWarnings = (
       widget.controller.settings.shortDays,
@@ -102,14 +104,29 @@ class _SearchScreenState extends State<SearchScreen> {
         widget.controller.settings.shortDays,
         widget.controller.settings.months,
       );
-      final preserveResults =
+      final searchInputsUnchanged =
           currentDay == _observedDay &&
           currentWarnings == _observedWarnings &&
-          _publishedHits.canPreserveAgainst(currentSnapshot.records);
+          identical(currentSnapshot.records, _observedRecords);
+      final preserveResults =
+          searchInputsUnchanged ||
+          (currentDay == _observedDay &&
+              currentWarnings == _observedWarnings &&
+              _publishedHits.canPreserveAgainst(currentSnapshot.records));
+      final refreshWasPending = _refreshWhenActive;
       _observedSnapshot = currentSnapshot;
+      _observedRecords = currentSnapshot.records;
       _observedDay = currentDay;
       _observedWarnings = currentWarnings;
       _refreshWhenActive = false;
+
+      // A retained tab can miss supplier, sales-history or audit-only commits.
+      // Those publish a new authoritative snapshot but preserve the exact
+      // immutable medicine map. Search membership/order depends only on that
+      // medicine dataset, warning scope and civil day, so do not restart an
+      // already-valid query merely because unrelated metadata changed.
+      if (searchInputsUnchanged && !refreshWasPending) return;
+
       _debounce?.cancel();
       _onlineDebounce?.cancel();
       unawaited(_search(preserveResults: preserveResults));
@@ -128,6 +145,7 @@ class _SearchScreenState extends State<SearchScreen> {
         widget.controller.addListener(_changed);
       }
       _observedSnapshot = widget.controller.snapshot;
+      _observedRecords = widget.controller.snapshot.records;
       _observedDay = widget.controller.today;
       _observedWarnings = (
         widget.controller.settings.shortDays,
@@ -166,13 +184,21 @@ class _SearchScreenState extends State<SearchScreen> {
       widget.controller.settings.shortDays,
       widget.controller.settings.months,
     );
-    final preserveResults =
+    final searchInputsUnchanged =
         currentDay == _observedDay &&
         currentWarnings == _observedWarnings &&
-        _publishedHits.canPreserveAgainst(currentSnapshot.records);
+        identical(currentSnapshot.records, _observedRecords);
+    final preserveResults =
+        searchInputsUnchanged ||
+        (currentDay == _observedDay &&
+            currentWarnings == _observedWarnings &&
+            _publishedHits.canPreserveAgainst(currentSnapshot.records));
     _observedSnapshot = currentSnapshot;
+    _observedRecords = currentSnapshot.records;
     _observedDay = currentDay;
     _observedWarnings = currentWarnings;
+    if (searchInputsUnchanged) return;
+
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     unawaited(_search(preserveResults: preserveResults));
