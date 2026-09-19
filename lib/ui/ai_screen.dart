@@ -49,6 +49,7 @@ class _AiScreenState extends State<AiScreen> {
   final _input = TextEditingController();
   final _request = TextEditingController();
   final _scroll = ScrollController();
+  late Listenable _screenListenable;
 
   final List<_AiChatMessage> _messages = [];
   int _localHistoryStart = 0;
@@ -85,7 +86,16 @@ class _AiScreenState extends State<AiScreen> {
   @override
   void initState() {
     super.initState();
+    _screenListenable = Listenable.merge([widget.controller, _local]);
     unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant AiScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      _screenListenable = Listenable.merge([widget.controller, _local]);
+    }
   }
 
   Future<void> _load({bool prepareLocal = true}) async {
@@ -874,8 +884,8 @@ class _AiScreenState extends State<AiScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([widget.controller, _local]),
+  Widget build(BuildContext context) => ActiveListenableBuilder(
+    listenable: _screenListenable,
     builder: (context, _) {
       final busy =
           _localCommanding ||

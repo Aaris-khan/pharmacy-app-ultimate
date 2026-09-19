@@ -33,10 +33,12 @@ class MedicineScanEvidenceWindow {
   const MedicineScanEvidenceWindow({
     required this.frames,
     required this.startedNewPack,
+    required this.evidenceChanged,
   });
 
   final List<MedicineFrameEvidence> frames;
   final bool startedNewPack;
+  final bool evidenceChanged;
 }
 
 /// Maintains the evidence window for the explicit "scan one pack" camera lane.
@@ -78,6 +80,7 @@ MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
     return MedicineScanEvidenceWindow(
       frames: List<MedicineFrameEvidence>.unmodifiable([incoming]),
       startedNewPack: true,
+      evidenceChanged: true,
     );
   }
 
@@ -89,6 +92,7 @@ MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
         return MedicineScanEvidenceWindow(
           frames: prior,
           startedNewPack: false,
+          evidenceChanged: false,
         );
       }
 
@@ -102,6 +106,7 @@ MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
       return MedicineScanEvidenceWindow(
         frames: selectOfflineEvidenceFrames(values, maxFrames: limit),
         startedNewPack: false,
+        evidenceChanged: true,
       );
     }
   }
@@ -113,6 +118,7 @@ MedicineScanEvidenceWindow mergeSinglePackMedicineEvidence(
   return MedicineScanEvidenceWindow(
     frames: values,
     startedNewPack: false,
+    evidenceChanged: true,
   );
 }
 

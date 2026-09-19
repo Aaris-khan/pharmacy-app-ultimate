@@ -290,6 +290,14 @@ class _ScannerScreenState extends State<ScannerScreen>
           // instead of letting attempts from the old medicine force early review.
           _captureAttempts = _capturing ? 1 : 0;
         }
+        // Repeated live camera frames often contain byte-different images but
+        // exactly the same accepted OCR/barcode evidence. The evidence-window
+        // owner already rejected those observations, so rerunning the full V2
+        // resolver isolate cannot improve the preview and only burns CPU/battery.
+        // A deliberate still is different: its bounded capture-attempt count can
+        // change handoff guidance even when OCR is identical, so stills continue
+        // through the resolver/review path.
+        if (!window.evidenceChanged && !_capturing) return true;
         final payload = await compute(
           // Keep live preview on the same evidence-safety pipeline as photo,
           // video, import-inbox and explicit cloud review. No catalogue or
