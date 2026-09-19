@@ -96,6 +96,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
+    rebuildToken: () => controller.snapshot,
     builder: (context, _) => ListView(
       key: const PageStorageKey('profile-scroll'),
       padding: const EdgeInsets.fromLTRB(22, 26, 22, 30),
@@ -284,28 +285,39 @@ class ActivityScreen extends StatelessWidget {
     appBar: AppBar(title: const Text('Activity & Undo')),
     body: ActiveListenableBuilder(
       listenable: controller,
-      builder: (context, _) => ListView(
-        padding: const EdgeInsets.all(22),
-        children: [
-          const ScreenIntro(
-            title: 'Your recent activity',
-            message:
-                'See the latest 200 changes. Undo reverses only the most recent current change, including an approved import.',
-            icon: Icons.history_rounded,
-          ),
-          FilledButton.icon(
-            onPressed: controller.canUndo ? () => _undoLast(context) : null,
-            icon: const Icon(Icons.undo_rounded),
-            label: const Text('Review & undo last change'),
-          ),
-          const SizedBox(height: 22),
-          if (controller.snapshot.events.isEmpty)
-            const EmptyState(
-              title: 'A clean slate',
-              message: 'Your saved changes will appear here.',
-            ),
-          ...controller.snapshot.events.map(
-            (e) => Padding(
+      rebuildToken: () => controller.snapshot,
+      builder: (context, _) {
+        final events = controller.snapshot.events;
+        final headerCount = 3;
+        return ListView.builder(
+          padding: const EdgeInsets.all(22),
+          itemCount: events.isEmpty ? headerCount + 1 : headerCount + events.length,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return const ScreenIntro(
+                title: 'Your recent activity',
+                message:
+                    'See the latest 200 changes. Undo reverses only the most recent current change, including an approved import.',
+                icon: Icons.history_rounded,
+              );
+            }
+            if (index == 1) {
+              return FilledButton.icon(
+                onPressed: controller.canUndo ? () => _undoLast(context) : null,
+                icon: const Icon(Icons.undo_rounded),
+                label: const Text('Review & undo last change'),
+              );
+            }
+            if (index == 2) return const SizedBox(height: 22);
+            if (events.isEmpty) {
+              return const EmptyState(
+                title: 'A clean slate',
+                message: 'Your saved changes will appear here.',
+              );
+            }
+
+            final event = events[index - headerCount];
+            return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Surface(
                 padding: const EdgeInsets.all(18),
@@ -313,7 +325,7 @@ class ActivityScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      e['undone'] == true
+                      event['undone'] == true
                           ? Icons.undo_rounded
                           : Icons.check_circle_outline,
                       color: green,
@@ -324,18 +336,18 @@ class ActivityScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${e['label']}',
+                            '${event['label']}',
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 5),
                           Text(
-                            '${e['time']}'
+                            '${event['time']}'
                                 .replaceFirst('T', ' ')
                                 .split('.')
                                 .first,
                             style: const TextStyle(fontSize: 12, color: muted),
                           ),
-                          if (e['undone'] == true)
+                          if (event['undone'] == true)
                             const Text(
                               'Undone',
                               style: TextStyle(color: amber, fontSize: 12),
@@ -346,10 +358,10 @@ class ActivityScreen extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     ),
   );
 }
