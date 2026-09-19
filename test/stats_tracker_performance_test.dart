@@ -44,7 +44,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Sold Medicine Tracker'));
+    final tracker = find.text('Sold Medicine Tracker');
+    await tester.ensureVisible(tracker);
+    await tester.pumpAndSettle();
+    await tester.tap(tracker);
     await tester.pumpAndSettle();
 
     expect(find.text('Medicine 000'), findsOneWidget);
