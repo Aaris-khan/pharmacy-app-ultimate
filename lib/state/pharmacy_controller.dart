@@ -1632,14 +1632,13 @@ class PharmacyController extends ChangeNotifier {
           .map((medicine) => SearchHit(medicine.id, 1, 'Inventory', ''))
           .toList(growable: false);
     }
-    return _searchWorker.search(
+    return _searchWorker.browseActive(
       data,
       datasetRevision,
-      '',
       scope,
       selectedSettings,
       date,
-      resultLimit: boundedLimit,
+      limit: boundedLimit,
     );
   }
 
@@ -1709,6 +1708,9 @@ class PharmacyController extends ChangeNotifier {
   /// path uses the existing background search isolate and builds the archive
   /// index only when this feature is actually opened.
   Future<List<SearchHit>> searchArchived(String raw) async {
+    if (raw.trim().isEmpty) {
+      return browseArchived(limit: 100000);
+    }
     final data = _stableRecords;
     final datasetRevision = _searchDatasetEpoch;
     final date = today;
@@ -1723,7 +1725,7 @@ class PharmacyController extends ChangeNotifier {
       return _webArchivedSearch!.searchArchived(
         raw,
         date,
-        limit: raw.trim().isEmpty ? 100000 : 150,
+        limit: 150,
       );
     }
     return _searchWorker.searchArchived(data, datasetRevision, raw, date);
