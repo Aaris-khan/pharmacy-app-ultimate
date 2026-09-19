@@ -28,21 +28,28 @@ const _lifecycleDrainTimeout = Duration(seconds: 2);
 Future<bool> scannerWorkCompletedWithin<T>(
   Future<T>? work, {
   Duration timeout = _liveFrameDrainTimeout,
-}) async {
-  if (work == null) return true;
-  try {
-    await work.timeout(timeout);
-    return true;
-  } on TimeoutException {
-    return false;
-  } catch (_) {
-    // Drain callers care whether the operation has settled and released its
-    // ownership, not whether recognition itself succeeded. Treat an already
-    // failed operation as drained so teardown/retry cannot inherit a poisoned
-    // lifecycle future. Callers that need the operation result still await the
-    // original future separately and observe its error normally.
-    return true;
+}) {
+  if (work == null) return Future<bool>.value(true);
+
+  final settled = Completer<bool>();
+  Timer? deadline;
+
+  void finish(bool value) {
+    if (settled.isCompleted) return;
+    deadline?.cancel();
+    settled.complete(value);
   }
+
+  deadline = Timer(timeout, () => finish(false));
+  work.then<void>(
+    (_) => finish(true),
+    onError: (Object _, StackTrace __) {
+      // Any source error means the owned operation has already settled. In
+      // particular, a native TimeoutException is not this UI-owned deadline.
+      finish(true);
+    },
+  );
+  return settled.future;
 }
 
 @visibleForTesting

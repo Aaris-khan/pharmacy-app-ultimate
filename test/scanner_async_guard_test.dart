@@ -82,6 +82,26 @@ void main() {
   });
 
 
+  test('scanner wait distinguishes native timeout failures from UI deadline', () async {
+    expect(
+      await scannerWorkCompletedWithin<void>(
+        Future<void>.error(TimeoutException('native reader timed out')),
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isTrue,
+    );
+    expect(
+      await scannerWorkGroupCompletedWithin(
+        <Future<dynamic>?>[
+          Future<void>.error(TimeoutException('native capture timed out')),
+          Future<bool>.value(false),
+        ],
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isTrue,
+    );
+  });
+
   test('scanner grouped drain treats no active work as complete', () async {
     expect(
       await scannerWorkGroupCompletedWithin(
