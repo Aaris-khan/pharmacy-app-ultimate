@@ -30,7 +30,9 @@ List<SearchHit> _browseArchivedRecords(
       .where((medicine) => medicine.archived)
       .toList(growable: false)
     ..sort(archivedOrder);
-  final boundedLimit = limit < maxArchivedResults ? limit : maxArchivedResults;
+  final boundedLimit = limit < MedicineSearch.maxArchivedResults
+      ? limit
+      : MedicineSearch.maxArchivedResults;
   return visible
       .take(boundedLimit)
       .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
