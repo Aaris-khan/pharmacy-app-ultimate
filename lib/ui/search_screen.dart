@@ -29,7 +29,10 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
+  static const _browsePageSize = 120;
+
   final _query = TextEditingController();
+  final _scroll = ScrollController();
   final _catalog = MedicineCatalogService();
   Timer? _debounce, _onlineDebounce;
   List<SearchHit> _hits = [];
@@ -45,6 +48,8 @@ class _SearchScreenState extends State<SearchScreen> {
   late DateTime _observedDay;
   bool _controllerListening = false;
   bool _refreshWhenActive = false;
+  bool _browseExhausted = false;
+  int _browseLimit = _browsePageSize;
   Future<void> _searchTail = Future<void>.value();
 
   @override
