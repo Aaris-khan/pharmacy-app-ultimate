@@ -50,6 +50,13 @@ void main() {
         reason:
             'Once dirty, field-local typing must not rebuild the entire medicine editor.',
       );
+
+      // PharmacyController owns a civil-day timer. Dispose it inside the widget
+      // test body (not only in addTearDown) so Flutter's pending-timer invariant
+      // observes the same lifecycle shutdown the real app performs.
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      await tester.pump();
       expect(tester.takeException(), isNull);
     },
   );

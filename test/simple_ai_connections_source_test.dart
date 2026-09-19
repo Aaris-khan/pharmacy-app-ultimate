@@ -36,7 +36,10 @@ void main() {
       expect(service, contains('memoryWarning'));
 
       expect(routing, contains('if (config.localBrainEnabled)'));
-      expect(routing, contains('_connections.forgetActiveKey()'));
+      expect(
+        routing,
+        contains('_connections.forgetActiveKey(read: _readConnectionValue)'),
+      );
       expect(routing, isNot(contains("forgetKey() => _storage.delete")));
 
       expect(ai, contains('Choose how Aaris uses AI.'));
