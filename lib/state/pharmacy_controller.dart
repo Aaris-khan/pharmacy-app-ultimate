@@ -1568,19 +1568,23 @@ class PharmacyController extends ChangeNotifier {
     preparedActions = 0;
     _emit();
     try {
+      final selectedIndices = selection.toList()..sort();
       final selectedChanges = <AiChange>[];
-      for (var start = 0; start < plan.changes.length; start += 25) {
+      for (var start = 0; start < selectedIndices.length; start += 25) {
         if (_cancelAi || _disposed) {
           throw StateError('Cancelled. No inventory changes were saved.');
         }
-        for (var i = start; i < plan.changes.length && i < start + 25; i++) {
-          if (selection.contains(i)) {
-            selectedChanges.add(plan.changes[i]);
-          }
+        final end = (start + 25).clamp(0, selectedIndices.length);
+        for (var position = start; position < end; position++) {
+          selectedChanges.add(plan.changes[selectedIndices[position]]);
         }
-        preparedActions = (start + 25).clamp(0, plan.changes.length);
+        // Preparation is proportional to the work the owner actually approved.
+        // Do not scan/repaint through thousands of unselected suggestions.
+        preparedActions = end;
         _emit();
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+        // Yield once per real selected batch so Cancel remains responsive
+        // without adding an artificial fixed delay to the save path.
+        await Future<void>.delayed(Duration.zero);
       }
       if (_cancelAi || _disposed) {
         throw StateError('Cancelled. No inventory changes were saved.');
