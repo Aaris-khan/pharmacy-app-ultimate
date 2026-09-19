@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/data/inventory_database.dart';
 import '../lib/domain/medicine.dart';
+import '../lib/domain/search.dart';
 import '../lib/state/pharmacy_controller.dart';
 import '../lib/ui/design.dart';
 import '../lib/ui/removed_stock_screen.dart';
@@ -52,7 +53,9 @@ void main() {
     addTearDown(controller.dispose);
 
     final browse = await controller.searchArchived('');
-    expect(browse.length, 240);
+    // Removed-stock browsing is intentionally bounded so opening history does
+    // not materialize an unbounded archive on ordinary phones.
+    expect(browse.length, MedicineSearch.maxArchivedResults);
     final firstTitle = controller.snapshot.records[browse.first.id]!.title;
     final farTitle = controller.snapshot.records[browse[99].id]!.title;
 

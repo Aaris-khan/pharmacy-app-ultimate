@@ -67,5 +67,10 @@ void main() {
 
     expect(find.text('Medicine 099'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    // PharmacyController owns a civil-day timer. Dispose it before Flutter's
+    // widget-test invariant check rather than relying on post-test tearDown.
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
   });
 }
