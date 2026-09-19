@@ -78,44 +78,37 @@ extension PharmacyStockLocationOperations on PharmacyController {
   Future<void> applyStockLocationUpdate(
     ReviewedStockLocationUpdate review,
   ) async {
-    // A location review is bound to the exact stock row, not to unrelated
-    // inventory traffic. If another batch is added/sold while the pharmacist is
-    // reading this dialog, preserve the review as long as this exact row and its
-    // before/after location facts are unchanged. The final save still uses the
-    // current global revision, so the persistence CAS remains authoritative and
-    // any write racing after this revalidation fails closed.
-    final live = snapshot.records[review.stockId];
-    if (live == null ||
-        live.archived ||
-        live.sold ||
-        live.revision != review.recordRevision) {
-      throw StateError(
-        'The reviewed stock entry changed or is no longer active. Review the location again.',
-      );
-    }
-    final fresh = reviewStockLocationUpdate(live.id, review.patch);
-    if (fresh.beforeBlock != review.beforeBlock ||
-        fresh.beforeRow != review.beforeRow ||
-        fresh.beforeVertical != review.beforeVertical ||
-        fresh.beforeLocation != review.beforeLocation ||
-        fresh.afterBlock != review.afterBlock ||
-        fresh.afterRow != review.afterRow ||
-        fresh.afterVertical != review.afterVertical ||
-        fresh.afterLocation != review.afterLocation) {
-      throw StateError(
-        'Stock location facts changed after review. Nothing was saved; review the move again.',
-      );
-    }
-    if (!fresh.changesLocation) return;
-
-    await save(
-      live.patch({
-        'block': fresh.afterBlock,
-        'row': fresh.afterRow,
-        'vertical': fresh.afterVertical,
-        'location': fresh.afterLocation,
-      }),
-      expectedRevision: fresh.baseRevision,
+    await commitReviewedRecordUpdate(
+      stockId: review.stockId,
+      recordRevision: review.recordRevision,
+      label: (live) => 'Edited ${live.name}',
+      update: (live, _) {
+        if (live.archived || live.sold) {
+          throw StateError(
+            'The reviewed stock entry changed or is no longer active. Review the location again.',
+          );
+        }
+        final fresh = reviewStockLocationUpdate(live.id, review.patch);
+        if (fresh.beforeBlock != review.beforeBlock ||
+            fresh.beforeRow != review.beforeRow ||
+            fresh.beforeVertical != review.beforeVertical ||
+            fresh.beforeLocation != review.beforeLocation ||
+            fresh.afterBlock != review.afterBlock ||
+            fresh.afterRow != review.afterRow ||
+            fresh.afterVertical != review.afterVertical ||
+            fresh.afterLocation != review.afterLocation) {
+          throw StateError(
+            'Stock location facts changed after review. Nothing was saved; review the move again.',
+          );
+        }
+        if (!fresh.changesLocation) return null;
+        return live.patch({
+          'block': fresh.afterBlock,
+          'row': fresh.afterRow,
+          'vertical': fresh.afterVertical,
+          'location': fresh.afterLocation,
+        });
+      },
     );
   }
 }
