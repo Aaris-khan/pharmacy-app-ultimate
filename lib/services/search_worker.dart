@@ -282,7 +282,11 @@ bool _sameSearchProjection(Medicine before, Medicine after) =>
     before.notes == after.notes &&
     before.ocrText == after.ocrText &&
     before.sold == after.sold &&
-    before.archived == after.archived;
+    before.archived == after.archived &&
+    // Removed-stock results are ordered by removal time inside the worker.
+    // Reusing worker objects across an archivedAt-only revision would otherwise
+    // keep stale ordering even though the main isolate holds the new record.
+    before.archivedAt == after.archivedAt;
 
 class SearchWorker {
   _SearchWorkerSession? _session;
