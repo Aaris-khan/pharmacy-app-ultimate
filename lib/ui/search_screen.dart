@@ -123,8 +123,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _onlineDebounce?.cancel();
     _hits = [];
     _scan = null;
-    _browseLimit = _browsePageSize;
-    _browseExhausted = false;
+    _resetBrowseWindow();
     _catalogHits = [];
     _catalogLoading = false;
     _catalogError = '';
@@ -154,10 +153,6 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _search({bool preserveResults = false}) {
     final generation = ++_generation;
     final typedQuery = _query.text;
-    if (typedQuery.trim().isNotEmpty) {
-      _browseLimit = _browsePageSize;
-      _browseExhausted = false;
-    }
     if (!mounted) return Future<void>.value();
     setState(() {
       // Snapshot/day refreshes keep the last valid cards on screen while the
@@ -214,6 +209,11 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  void _resetBrowseWindow() {
+    _browseLimit = _browsePageSize;
+    _browseExhausted = false;
+  }
+
   void _expandBrowse() {
     if (_loading || _browseExhausted) return;
     _browseLimit += _browsePageSize;
@@ -254,6 +254,7 @@ class _SearchScreenState extends State<SearchScreen> {
     ++_generation;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
+    _resetBrowseWindow();
     setState(() {
       // Query meaning changed. Remove old cards immediately rather than leaving
       // a stale medicine tappable during the short debounce.
@@ -272,6 +273,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void _setQuery(String value) {
     _debounce?.cancel();
     _onlineDebounce?.cancel();
+    _resetBrowseWindow();
     setState(() {
       _query.text = value;
       _scan = null;
@@ -382,6 +384,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     ++_catalogGeneration;
+    _resetBrowseWindow();
     setState(() {
       _scan = result;
       _query.text = result.barcode.isNotEmpty ? result.barcode : result.text;
