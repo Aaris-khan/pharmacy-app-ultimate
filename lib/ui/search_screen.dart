@@ -151,7 +151,10 @@ class _SearchScreenState extends State<SearchScreen> {
     unawaited(_search(preserveResults: true));
   }
 
-  void _maybeLoadMore() {}
+  void _maybeLoadMore() {
+    if (!_scroll.hasClients || _loading || _browseExhausted) return;
+    if (_query.text.trim().isNotEmpty || _hits.isEmpty) return;
+  }
 
   Future<void> _search({bool preserveResults = false}) {
     final generation = ++_generation;
