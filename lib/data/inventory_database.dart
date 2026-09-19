@@ -376,12 +376,34 @@ InventorySnapshot nextSnapshot(
     suppliers.remove(id);
   }
 
-  for (final record in records.values) {
+  void validateSupplierLink(Medicine record) {
     final supplierId = record.supplierId.trim();
     if (supplierId.isNotEmpty && !suppliers.containsKey(supplierId)) {
       throw FormatException(
         'Stock entry ${record.id} points to a supplier that does not exist.',
       );
+    }
+  }
+
+  // Supplier integrity is incremental for ordinary stock/sale writes. Existing
+  // rows were already validated when their supplier link was created, so
+  // re-scanning the entire pharmacy after every quantity edit or sale adds
+  // avoidable O(N) work on the UI-critical commit path. Validate only touched
+  // medicine rows against the post-mutation supplier set. Removing a supplier
+  // is the one operation that can invalidate untouched rows, so that rare path
+  // still performs a complete reference scan before persistence.
+  for (final record in mutation.upserts) {
+    validateSupplierLink(records[record.id]!);
+  }
+  if (mutation.removeSupplierIds.isNotEmpty) {
+    final removedSupplierIds = mutation.removeSupplierIds.toSet();
+    for (final record in records.values) {
+      final supplierId = record.supplierId.trim();
+      if (supplierId.isNotEmpty && removedSupplierIds.contains(supplierId)) {
+        throw FormatException(
+          'Stock entry ${record.id} points to a supplier that does not exist.',
+        );
+      }
     }
   }
 

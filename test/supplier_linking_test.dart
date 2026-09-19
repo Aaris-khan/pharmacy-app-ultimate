@@ -376,6 +376,61 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'supplier integrity rejects missing links and allows atomic unlink + removal',
+    () async {
+      final missingSupplier = MemoryInventoryStorage();
+      await expectLater(
+        missingSupplier.commit(
+          InventoryMutation(
+            expectedRevision: 0,
+            label: 'Invalid supplier link',
+            upserts: <Medicine>[
+              _stock('missing-link', supplierId: 'supplier_missing'),
+            ],
+          ),
+        ),
+        throwsFormatException,
+      );
+      expect((await missingSupplier.load()).revision, 0);
+
+      final linked = _stock('linked-stock');
+      final storage = MemoryInventoryStorage(
+        InventorySnapshot(
+          records: <String, Medicine>{linked.id: linked},
+          suppliers: <String, Supplier>{_supplierA.id: _supplierA},
+        ),
+      );
+
+      await expectLater(
+        storage.commit(
+          InventoryMutation(
+            expectedRevision: 0,
+            label: 'Unsafe supplier removal',
+            upserts: const <Medicine>[],
+            removeSupplierIds: const <String>['supplier_a'],
+          ),
+        ),
+        throwsFormatException,
+      );
+      expect((await storage.load()).revision, 0);
+
+      final after = await storage.commit(
+        InventoryMutation(
+          expectedRevision: 0,
+          label: 'Unlink stock and remove supplier',
+          upserts: <Medicine>[
+            linked.patch(<String, dynamic>{'supplierId': ''}),
+          ],
+          removeSupplierIds: const <String>['supplier_a'],
+        ),
+      );
+      expect(after.revision, 1);
+      expect(after.suppliers, isEmpty);
+      expect(after.records['linked-stock']!.supplierId, isEmpty);
+    },
+  );
+
   test('external AI may link only an existing supplier ID', () {
     const requestId = 'supplier_ai_session';
     String request(String supplierId) => jsonEncode(<String, dynamic>{
