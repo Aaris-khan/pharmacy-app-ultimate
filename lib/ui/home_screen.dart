@@ -101,7 +101,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
-    rebuildToken: () => (controller.snapshot, controller.today),
+    // Home renders medicine facts, warning settings and the civil day only.
+    // Supplier/activity/sale-only snapshots must stay frame-quiet here.
+    rebuildToken: () => (
+      controller.snapshot.records,
+      controller.snapshot.settings,
+      controller.today,
+    ),
     builder: (context, _) {
       // Rebuild only for a new inventory snapshot or civil day. The controller
       // memoizes the authoritative projection. While a warning-window write is
