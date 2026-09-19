@@ -124,6 +124,56 @@ void main() {
     );
 
     test(
+      'queued unrelated write preserves an exact location review',
+      () async {
+        final controller = await controllerWithClock();
+        addTearDown(controller.dispose);
+        await controller.save(stock('a'), expectedRevision: 0);
+        final review = controller.reviewStockLocationUpdate(
+          'a',
+          const StockLocationPatch(location: 'Back shelf'),
+        );
+
+        final unrelated = controller.save(
+          stock('b'),
+          expectedRevision: controller.snapshot.revision,
+        );
+        final applied = controller.applyStockLocationUpdate(review);
+        await Future.wait<void>(<Future<void>>[unrelated, applied]);
+
+        expect(controller.snapshot.revision, 3);
+        expect(controller.snapshot.records['a']!.location, 'Back shelf');
+        expect(controller.snapshot.records['b'], isNotNull);
+      },
+    );
+
+    test(
+      'queued same-row write still invalidates a location review',
+      () async {
+        final controller = await controllerWithClock();
+        addTearDown(controller.dispose);
+        await controller.save(stock('a'), expectedRevision: 0);
+        final review = controller.reviewStockLocationUpdate(
+          'a',
+          const StockLocationPatch(location: 'Back shelf'),
+        );
+
+        final first = controller.save(
+          controller.snapshot.records['a']!.patch({
+            'location': 'Cold cabinet',
+          }),
+          expectedRevision: controller.snapshot.revision,
+        );
+        final applied = controller.applyStockLocationUpdate(review);
+        await first;
+        await expectLater(applied, throwsStateError);
+
+        expect(controller.snapshot.revision, 2);
+        expect(controller.snapshot.records['a']!.location, 'Cold cabinet');
+      },
+    );
+
+    test(
       'same-row change after review still fails closed',
       () async {
         final controller = await controllerWithClock();
