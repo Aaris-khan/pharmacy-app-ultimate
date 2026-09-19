@@ -2,17 +2,22 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/services/search_worker.dart';
 import '../lib/domain/inventory.dart';
+import '../lib/domain/medicine.dart';
 import 'domain_contract.dart';
 
 void main() {
   test('removed-stock search does not depend on active fuzzy indexing', () async {
     final worker = SearchWorker();
     addTearDown(worker.close);
-    final removed = stock(
-      'removed',
-      name: 'Drotaverine',
-      strength: '80mg',
-    ).patch({'archived': true});
+    final removed = archiveMedicine(
+      stock(
+        'removed',
+        name: 'Drotaverine',
+        strength: '80mg',
+      ),
+      reason: 'Test removal',
+      at: contractToday,
+    );
 
     final hits = await worker.searchArchived(
       [removed],
