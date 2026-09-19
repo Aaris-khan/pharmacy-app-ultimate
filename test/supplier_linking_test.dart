@@ -337,7 +337,7 @@ void main() {
       MemoryInventoryStorage(
         InventorySnapshot(
           records: {for (final medicine in medicines) medicine.id: medicine},
-          suppliers: <String, Supplier>{supplier.id: supplier},
+          suppliers: <String, Supplier>{'supplier_large': supplier},
         ),
       ),
       clock: () => today,
