@@ -23,6 +23,8 @@ class _GatedRemovedStockController extends PharmacyController {
   final requestedQueries = <String>[];
   bool _blockedFirstQuery = false;
 
+  void publishNonInventoryChangeForTest() => notifyListeners();
+
   @override
   Future<List<SearchHit>> searchArchived(String raw) async {
     final query = raw.trim();
@@ -119,6 +121,40 @@ void main() {
       // Dispose the widget and its app-scoped controller before flutter_test's
       // pending-timer invariant runs. The controller intentionally owns a
       // midnight rollover timer for its full application lifetime.
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'removed-stock search ignores non-inventory controller notifications',
+    (tester) async {
+      final controller = await _controller();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(_screen(controller));
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      controller.firstSearchGate.complete();
+      await tester.pumpAndSettle();
+
+      expect(controller.requestedQueries, <String>['Drotaverine']);
+      expect(find.text('Drotaverine'), findsOneWidget);
+
+      // AI preparation/progress and other controller-only UI notifications do
+      // not change the immutable inventory snapshot. Removed-stock discovery
+      // must stay idle instead of repeating the same fuzzy search.
+      controller.publishNonInventoryChangeForTest();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(controller.requestedQueries, <String>['Drotaverine']);
+      expect(find.text('Drotaverine'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
     },
