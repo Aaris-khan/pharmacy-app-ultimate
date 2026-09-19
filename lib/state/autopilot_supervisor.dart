@@ -314,7 +314,7 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
     settings: settings,
     today: today,
     reorder: tracking.reorder,
-    sales: sales,
+    sales: recentSales,
     saleHistorySales: saleHistorySales,
   );
   final plan = PharmacyOperationsPlan.build(
