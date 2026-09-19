@@ -37,4 +37,32 @@ void main() {
     expect(panel, contains("'Next'"));
     expect(panel, contains('queue.retry(job, rescanVideo: true)'));
   });
+  test('media import cancellation reaches the durable queue boundary', () {
+    final service = File(
+      'lib/services/medicine_intake_service.dart',
+    ).readAsStringSync();
+    final screen = File('lib/ui/import_screen.dart').readAsStringSync();
+
+    expect(
+      service,
+      contains('class MedicineIntakeEnqueueCancelled implements Exception'),
+    );
+    expect(service, contains('bool Function()? cancelled,'));
+    expect(service, contains('_throwIfEnqueueCancelled(cancelled);'));
+    expect(
+      RegExp(r'_persist\(job, insert: true, publish: false\)')
+          .allMatches(service)
+          .length,
+      2,
+    );
+    expect(service, contains('if (publish) notifyListeners();'));
+    expect(
+      screen,
+      contains(
+        'cancelled: () => !mounted || generation != _generation,',
+      ),
+    );
+    expect(screen, contains('on MedicineIntakeEnqueueCancelled'));
+  });
+
 }

@@ -21,6 +21,10 @@ import 'media_import_service.dart';
 import 'offline_recognition_memory_service.dart';
 import 'scan_service.dart';
 
+class MedicineIntakeEnqueueCancelled implements Exception {
+  const MedicineIntakeEnqueueCancelled();
+}
+
 /// Persistent, bounded work queue shared by AI Hub and ordinary import.
 /// Captures are acknowledged after private-file copy + SQLite job commit,
 /// independently of OCR/LLM latency. Inventory is never written by this service.
@@ -187,7 +191,11 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _persist(MedicineIntakeJob job, {bool insert = false}) async {
+  Future<void> _persist(
+    MedicineIntakeJob job, {
+    bool insert = false,
+    bool publish = true,
+  }) async {
     final data = jsonEncode(job.toJson());
     if (data.length > 20000000) {
       throw StateError('Capture draft limit reached. Split this video.');
@@ -214,7 +222,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     } else {
       _scanRequests.remove(job.id)?.close();
     }
-    notifyListeners();
+    if (publish) notifyListeners();
   }
 
   LocalScanRequest _scanRequestFor(MedicineIntakeJob job) {
@@ -262,12 +270,20 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     return future;
   }
 
+  void _throwIfEnqueueCancelled(bool Function()? cancelled) {
+    if (cancelled?.call() ?? false) {
+      throw const MedicineIntakeEnqueueCancelled();
+    }
+  }
+
   Future<void> addFile(
     String path, {
     required String kind,
     required String title,
+    bool Function()? cancelled,
   }) => _enqueue(() async {
     await initialize();
+    _throwIfEnqueueCancelled(cancelled);
     if (!supported) {
       throw UnsupportedError('Capture queue requires the Android app.');
     }
@@ -281,6 +297,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
     }
     final local = LocalAiService.instance;
     final modelId = await LocalBrainRoutePolicy.captureModelId(local);
+    _throwIfEnqueueCancelled(cancelled);
     final job = MedicineIntakeJob(
       id: intakeId(),
       kind: kind,
@@ -288,6 +305,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
       modelId: modelId,
     );
     job.path = _capturePath(job.id, kind);
+    var durable = false;
     try {
       final length = await File(path).length();
       final facts = await const MethodChannel('com.aaris.pharmacy/documents')
@@ -298,17 +316,37 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
           'Not enough private storage to safely queue this capture. Original file is unchanged.',
         );
       }
+      _throwIfEnqueueCancelled(cancelled);
       await File(path).copy(job.path);
       if (await File(job.path).length() != length) {
         throw StateError(
           'Incomplete capture copy. Please select the original again.',
         );
       }
-      await _persist(job, insert: true);
+      _throwIfEnqueueCancelled(cancelled);
+      await _persist(job, insert: true, publish: false);
+      durable = true;
+      if (cancelled?.call() ?? false) {
+        var rolledBack = false;
+        try {
+          final deleted = await _database!.delete(
+            'jobs',
+            where: 'id=?',
+            whereArgs: [job.id],
+          );
+          rolledBack = deleted == 1;
+        } catch (_) {}
+        if (rolledBack) {
+          durable = false;
+          throw const MedicineIntakeEnqueueCancelled();
+        }
+      }
       _jobs.add(job);
     } catch (_) {
-      final copy = File(job.path);
-      if (await copy.exists()) await copy.delete();
+      if (!durable) {
+        final copy = File(job.path);
+        if (await copy.exists()) await copy.delete();
+      }
       rethrow;
     }
     notifyListeners();
@@ -337,7 +375,7 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
       evidence: List.of(evidence),
       modelId: modelId,
     );
-    await _persist(job, insert: true);
+    await _persist(job, insert: true, publish: false);
     _jobs.add(job);
     notifyListeners();
     _kick();

@@ -99,7 +99,14 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
         revision: () => widget.controller.snapshot.revision,
       );
       if (!mounted || generation != _generation) return;
-      await queue.addFile(source.path, kind: kind, title: source.name);
+      await queue.addFile(
+        source.path,
+        kind: kind,
+        title: source.name,
+        cancelled: () => !mounted || generation != _generation,
+      );
+    } on MedicineIntakeEnqueueCancelled {
+      // Explicit user cancellation is expected and leaves no partial queue row.
     } catch (error) {
       if (mounted && generation == _generation) showError(context, error);
     } finally {
