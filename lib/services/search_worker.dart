@@ -22,6 +22,21 @@ List<SearchHit> _browseActiveRecords(
       .toList(growable: false);
 }
 
+List<SearchHit> _browseArchivedRecords(
+  List<Medicine> records,
+  int limit,
+) {
+  final visible = records
+      .where((medicine) => medicine.archived)
+      .toList(growable: false)
+    ..sort(archivedOrder);
+  final boundedLimit = limit < maxArchivedResults ? limit : maxArchivedResults;
+  return visible
+      .take(boundedLimit)
+      .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
+      .toList(growable: false);
+}
+
 void _searchEntry(SendPort main) {
   final receive = ReceivePort();
   main.send(receive.sendPort);
