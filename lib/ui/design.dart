@@ -122,29 +122,20 @@ int _alpha(int value, double elevation) =>
 Color _ambient(Color color) => Color.lerp(color, const Color(0xFF172033), .045)!;
 
 List<BoxShadow> _surfaceDepth(double elevation) => [
+  // Keep the raised ceramic silhouette with a bounded paint budget. A long
+  // medicine list can have several cards visible at once, so repeated shadow
+  // stacks become raster work even though the data list itself is lazy.
   BoxShadow(
-    color: const Color(0xFF172033).withAlpha(_alpha(50, elevation)),
-    blurRadius: 6,
-    spreadRadius: -2,
-    offset: const Offset(-3, -3),
+    color: Colors.white.withAlpha(_alpha(214, elevation)),
+    blurRadius: 14,
+    spreadRadius: -5,
+    offset: const Offset(-5, -5),
   ),
   BoxShadow(
-    color: Colors.white.withAlpha(_alpha(238, elevation)),
-    blurRadius: 18,
-    spreadRadius: -6,
-    offset: const Offset(-7, -7),
-  ),
-  BoxShadow(
-    color: const Color(0xFF172033).withAlpha(_alpha(64, elevation)),
-    blurRadius: 5,
-    spreadRadius: -1,
-    offset: const Offset(0, 5),
-  ),
-  BoxShadow(
-    color: const Color(0xFF172033).withAlpha(_alpha(46, elevation)),
-    blurRadius: 29,
+    color: const Color(0xFF172033).withAlpha(_alpha(58, elevation)),
+    blurRadius: 22,
     spreadRadius: -7,
-    offset: const Offset(9, 14),
+    offset: const Offset(7, 10),
   ),
 ];
 
@@ -202,70 +193,41 @@ class GlassPanel extends StatelessWidget {
     final shadows = <BoxShadow>[];
     if (elevation > 0) {
       if (strong) {
+        // One highlight, one grounding shadow and one semantic glow preserve
+        // depth without layering five independent blurs on every dark surface.
         final glow = _ambient(semantic ?? tint);
         shadows.addAll([
           BoxShadow(
-            color: glow.withAlpha(_alpha(66, elevation)),
-            blurRadius: 26,
+            color: Colors.white.withAlpha(_alpha(28, elevation)),
+            blurRadius: 13,
             spreadRadius: -6,
-            offset: const Offset(1, 8),
+            offset: const Offset(-6, -6),
           ),
           BoxShadow(
-            color: Colors.black.withAlpha(_alpha(56, elevation)),
-            blurRadius: 6,
-            spreadRadius: -2,
-            offset: const Offset(-3, -3),
-          ),
-          BoxShadow(
-            color: Colors.white.withAlpha(_alpha(26, elevation)),
-            blurRadius: 14,
+            color: Colors.black.withAlpha(_alpha(104, elevation)),
+            blurRadius: 18,
             spreadRadius: -6,
-            offset: const Offset(-7, -7),
+            offset: const Offset(0, 7),
           ),
           BoxShadow(
-            color: Colors.black.withAlpha(_alpha(108, elevation)),
-            blurRadius: 5,
-            spreadRadius: -1,
-            offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: Colors.black.withAlpha(_alpha(72, elevation)),
-            blurRadius: 29,
-            spreadRadius: -7,
-            offset: const Offset(9, 14),
+            color: glow.withAlpha(_alpha(58, elevation)),
+            blurRadius: 30,
+            spreadRadius: -10,
+            offset: const Offset(8, 12),
           ),
         ]);
       } else {
         if (semantic != null) {
-          final glow = _ambient(semantic);
           shadows.add(
             BoxShadow(
-              color: glow.withAlpha(_alpha(46, elevation)),
+              color: _ambient(semantic).withAlpha(_alpha(42, elevation)),
               blurRadius: 25,
-              spreadRadius: -6,
-              offset: const Offset(1, 7),
+              spreadRadius: -8,
+              offset: const Offset(3, 9),
             ),
           );
-          if (tint != Colors.white) {
-            shadows.add(
-              BoxShadow(
-                color: glow.withAlpha(_alpha(21, elevation)),
-                blurRadius: 42,
-                spreadRadius: -13,
-                offset: const Offset(5, 13),
-              ),
-            );
-          }
         }
         shadows.addAll(_surfaceDepth(elevation));
-        shadows.add(
-          BoxShadow(
-            color: const Color(0xFF172033).withAlpha(_alpha(18, elevation)),
-            blurRadius: 21,
-            spreadRadius: -9,
-            offset: const Offset(9, 14),
-          ),
-        );
       }
     }
 
@@ -963,7 +925,7 @@ class StatusPill extends StatelessWidget {
     accentColor: color,
     shadowColor: color,
     radius: 30,
-    elevation: .55,
+    // Nested pills keep gradient/border depth without casting another shadow.\n    elevation: 0,
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     child: Text(
       text,
@@ -1052,7 +1014,7 @@ class MedicineCard extends StatelessWidget {
                             accentColor: statusColor,
                             shadowColor: statusColor,
                             radius: 18,
-                            elevation: .95,
+                            // The row owns elevation; this inset icon surface does not need a second blur stack.\n                            elevation: 0,
                             child: SizedBox(
                               width: 52,
                               height: 52,
