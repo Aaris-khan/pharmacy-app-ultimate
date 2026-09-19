@@ -208,13 +208,23 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     try {
       final browsing = query.trim().isEmpty;
       final requestedBrowseLimit = _browseLimit;
+      final probeLimit = browsing
+          ? requestedBrowseLimit >= 100000
+                ? 100000
+                : requestedBrowseLimit + 1
+          : requestedBrowseLimit;
       final hits = browsing
-          ? await widget.controller.browseArchived(limit: requestedBrowseLimit)
+          ? await widget.controller.browseArchived(limit: probeLimit)
           : await widget.controller.searchArchived(query);
       if (!mounted || generation != _generation) return;
+      final hasMoreBrowseRows =
+          browsing && hits.length > requestedBrowseLimit;
+      final visibleHits = hasMoreBrowseRows
+          ? hits.take(requestedBrowseLimit).toList(growable: false)
+          : hits;
       setState(() {
-        _hits = hits;
-        _browseExhausted = browsing && hits.length < requestedBrowseLimit;
+        _hits = visibleHits;
+        _browseExhausted = browsing && !hasMoreBrowseRows;
         _loading = false;
       });
     } catch (_) {

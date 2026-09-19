@@ -35,7 +35,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final medicines = List<Medicine>.generate(
-        120,
+        121,
         (index) => archiveMedicine(
           Medicine(
             id: 'removed-$index',
@@ -70,7 +70,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(controller.browseLimits, <int>[120]);
+      expect(controller.browseLimits, <int>[121]);
 
       await tester.scrollUntilVisible(
         find.text('Load more'),
@@ -81,7 +81,7 @@ void main() {
       expect(find.text('Load more'), findsOneWidget);
       await tester.tap(find.text('Load more'));
       await tester.pumpAndSettle();
-      expect(controller.browseLimits.last, 240);
+      expect(controller.browseLimits.last, 241);
 
       await tester.scrollUntilVisible(
         find.byType(TextField),
@@ -98,12 +98,64 @@ void main() {
 
       expect(
         controller.browseLimits.last,
-        120,
+        121,
         reason:
             'Changing query intent must retire the expanded archive window even '
             'when the fuzzy search is cancelled before its debounce fires.',
       );
       expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'exact full removed-stock page does not expose phantom Load more',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final medicines = List<Medicine>.generate(
+        120,
+        (index) => archiveMedicine(
+          Medicine(
+            id: 'exact-removed-$index',
+            name: 'Exact Removed $index',
+            strength: '500mg',
+            form: 'Tablet',
+            expiry: DateTime(2027, 1, 1),
+            quantity: 10,
+          ),
+          reason: 'Damaged pack',
+          at: DateTime(2026, 9, 20, 10).add(Duration(seconds: index)),
+        ),
+        growable: false,
+      );
+      final controller = _RemovedBrowseRecordingController(
+        MemoryInventoryStorage(
+          InventorySnapshot(
+            records: {
+              for (final medicine in medicines) medicine.id: medicine,
+            },
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: RemovedStockScreen(controller: controller),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.browseLimits, <int>[121]);
+      expect(find.text('Load more'), findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();

@@ -185,16 +185,26 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final browsing = typedQuery.trim().isEmpty;
       final requestedBrowseLimit = _browseLimit;
+      final probeLimit = browsing
+          ? requestedBrowseLimit >= 100000
+                ? 100000
+                : requestedBrowseLimit + 1
+          : requestedBrowseLimit;
       final hits = browsing
           ? await widget.controller.browse(
               widget.scope,
-              limit: requestedBrowseLimit,
+              limit: probeLimit,
             )
           : await widget.controller.search(typedQuery, widget.scope);
       if (!mounted || generation != _generation) return;
+      final hasMoreBrowseRows =
+          browsing && hits.length > requestedBrowseLimit;
+      final visibleHits = hasMoreBrowseRows
+          ? hits.take(requestedBrowseLimit).toList(growable: false)
+          : hits;
       setState(() {
-        _hits = hits;
-        _browseExhausted = browsing && hits.length < requestedBrowseLimit;
+        _hits = visibleHits;
+        _browseExhausted = browsing && !hasMoreBrowseRows;
         _error = '';
         _loading = false;
       });
