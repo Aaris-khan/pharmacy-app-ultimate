@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -10,6 +11,8 @@ import '../lib/domain/medicine.dart';
 import '../lib/domain/supplier.dart';
 import '../lib/state/pharmacy_controller.dart';
 import '../lib/services/supplier_return_service.dart';
+import '../lib/ui/design.dart';
+import '../lib/ui/supplier_screen.dart';
 
 const _supplierA = Supplier(
   id: 'supplier_a',
@@ -302,6 +305,75 @@ void main() {
       throwsStateError,
     );
     expect(controller.snapshot.records['stock-a']!.archived, isFalse);
+  });
+
+  testWidgets('supplier detail lazily builds a large linked stock list', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const supplier = Supplier(
+      id: 'supplier_large',
+      name: 'Large Supplier',
+      returnBeforeExpiryDays: 30,
+    );
+    final medicines = List<Medicine>.generate(
+      240,
+      (index) => Medicine(
+        id: 'large-stock-$index',
+        name: 'Medicine $index',
+        strength: '500mg',
+        form: 'Tablet',
+        expiry: DateTime(2027, 12, 31),
+        quantity: 10,
+        supplierId: supplier.id,
+      ),
+      growable: false,
+    );
+    final controller = PharmacyController(
+      MemoryInventoryStorage(
+        InventorySnapshot(
+          records: {for (final medicine in medicines) medicine.id: medicine},
+          suppliers: const <String, Supplier>{supplier.id: supplier},
+        ),
+      ),
+      clock: () => today,
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: SupplierDetailScreen(
+          controller: controller,
+          supplierId: supplier.id,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All stock · 240'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Medicine 0 · 500mg'), findsOneWidget);
+    // The old eager children list created all 240 cards at route-open time.
+    // A far row now stays out of the element tree until scrolling reaches it.
+    expect(find.text('Medicine 99 · 500mg'), findsNothing);
+
+    await tester.scrollUntilVisible(
+      find.text('Medicine 99 · 500mg'),
+      700,
+      scrollable: find.byType(Scrollable).last,
+      maxScrolls: 40,
+    );
+    expect(find.text('Medicine 99 · 500mg'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
   });
 
   test('external AI may link only an existing supplier ID', () {

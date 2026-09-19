@@ -267,147 +267,174 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               ? all.where((medicine) => dueIds.contains(medicine.id)).toList()
               : all;
 
-          return ListView(
+          // A supplier can own hundreds or thousands of exact stock lots. Keep
+          // the deterministic projection up front, but materialize cards only
+          // as they approach the viewport so opening this route stays smooth.
+          return ListView.builder(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 30),
-            children: [
-              Surface(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            itemCount: visible.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const DepthIcon(
-                          Icons.local_shipping_outlined,
-                          size: 42,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
+                    Surface(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                supplier.name,
-                                style: Theme.of(context).textTheme.titleLarge,
+                              const DepthIcon(
+                                Icons.local_shipping_outlined,
+                                size: 42,
                               ),
-                              const SizedBox(height: 5),
-                              Text(
-                                'Return ${supplier.returnBeforeExpiryDays} days before expiry',
-                                style: const TextStyle(
-                                  color: primary,
-                                  fontWeight: FontWeight.w800,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      supplier.name,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      'Return ${supplier.returnBeforeExpiryDays} days before expiry',
+                                      style: const TextStyle(
+                                        color: primary,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              IconButton(
+                                tooltip: 'Edit supplier',
+                                onPressed: () => _edit(supplier),
+                                icon: const Icon(Icons.edit_outlined),
                               ),
                             ],
                           ),
+                          if (supplier.address.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              supplier.address,
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                          if (supplier.gstin.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'GSTIN · ${supplier.gstin}',
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                          if (supplier.drugLicenceNo.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Drug licence · ${supplier.drugLicenceNo}',
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                          for (final field in supplier.customFields) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              '${field.label} · ${field.value.isEmpty ? '—' : field.value}',
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        ChoiceChip(
+                          label: Text('Return due · ${dueIds.length}'),
+                          selected: _dueOnly,
+                          onSelected: (_) => setState(() => _dueOnly = true),
                         ),
-                        IconButton(
-                          tooltip: 'Edit supplier',
-                          onPressed: () => _edit(supplier),
-                          icon: const Icon(Icons.edit_outlined),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: Text('All stock · ${all.length}'),
+                          selected: !_dueOnly,
+                          onSelected: (_) => setState(() => _dueOnly = false),
                         ),
                       ],
                     ),
-                    if (supplier.address.isNotEmpty) ...[
-                      const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                    if (returnableIds.isNotEmpty)
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _returning
+                              ? null
+                              : () => _prepareReturn(supplier, returnableIds),
+                          icon: _returning
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.picture_as_pdf_outlined),
+                          label: Text(
+                            _returning
+                                ? 'Preparing return…'
+                                : 'Prepare return · ${returnableIds.length}',
+                          ),
+                        ),
+                      ),
+                    if (unknownQuantityDue > 0) ...[
+                      const SizedBox(height: 8),
                       Text(
-                        supplier.address,
-                        style: const TextStyle(color: muted, fontSize: 12.5),
+                        '$unknownQuantityDue due stock ${unknownQuantityDue == 1 ? 'entry needs' : 'entries need'} a quantity count before it can be added to the return PDF.',
+                        style: const TextStyle(color: muted, fontSize: 12),
                       ),
                     ],
-                    if (supplier.gstin.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'GSTIN · ${supplier.gstin}',
-                        style: const TextStyle(color: muted, fontSize: 12.5),
+                    if (dueIds.isNotEmpty) const SizedBox(height: 14),
+                    if (visible.isEmpty)
+                      Surface(
+                        child: Text(
+                          _dueOnly
+                              ? 'No linked medicine has reached this supplier’s return window yet.'
+                              : 'No active stock is linked to this supplier yet.',
+                          style: const TextStyle(color: muted),
+                        ),
                       ),
-                    ],
-                    if (supplier.drugLicenceNo.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Drug licence · ${supplier.drugLicenceNo}',
-                        style: const TextStyle(color: muted, fontSize: 12.5),
-                      ),
-                    ],
-                    for (final field in supplier.customFields) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '${field.label} · ${field.value.isEmpty ? '—' : field.value}',
-                        style: const TextStyle(color: muted, fontSize: 12.5),
-                      ),
-                    ],
                   ],
+                );
+              }
+
+              final medicine = visible[index - 1];
+              return _SupplierMedicineRow(
+                key: ValueKey(medicine.id),
+                medicine: medicine,
+                today: widget.controller.today,
+                due: dueIds.contains(medicine.id),
+                onTap: () => openEditor(
+                  context,
+                  widget.controller,
+                  record: medicine,
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  ChoiceChip(
-                    label: Text('Return due · ${dueIds.length}'),
-                    selected: _dueOnly,
-                    onSelected: (_) => setState(() => _dueOnly = true),
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: Text('All stock · ${all.length}'),
-                    selected: !_dueOnly,
-                    onSelected: (_) => setState(() => _dueOnly = false),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (returnableIds.isNotEmpty)
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _returning
-                        ? null
-                        : () => _prepareReturn(supplier, returnableIds),
-                    icon: _returning
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.picture_as_pdf_outlined),
-                    label: Text(
-                      _returning
-                          ? 'Preparing return…'
-                          : 'Prepare return · ${returnableIds.length}',
-                    ),
-                  ),
-                ),
-              if (unknownQuantityDue > 0) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '$unknownQuantityDue due stock ${unknownQuantityDue == 1 ? 'entry needs' : 'entries need'} a quantity count before it can be added to the return PDF.',
-                  style: const TextStyle(color: muted, fontSize: 12),
-                ),
-              ],
-              if (dueIds.isNotEmpty) const SizedBox(height: 14),
-              if (visible.isEmpty)
-                Surface(
-                  child: Text(
-                    _dueOnly
-                        ? 'No linked medicine has reached this supplier’s return window yet.'
-                        : 'No active stock is linked to this supplier yet.',
-                    style: const TextStyle(color: muted),
-                  ),
-                )
-              else
-                for (final medicine in visible)
-                  _SupplierMedicineRow(
-                    medicine: medicine,
-                    supplier: supplier,
-                    today: widget.controller.today,
-                    due: dueIds.contains(medicine.id),
-                    onTap: () => openEditor(
-                      context,
-                      widget.controller,
-                      record: medicine,
-                    ),
-                  ),
-            ],
+              );
+            },
           );
         },
       ),
@@ -417,15 +444,14 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
 class _SupplierMedicineRow extends StatelessWidget {
   const _SupplierMedicineRow({
+    super.key,
     required this.medicine,
-    required this.supplier,
     required this.today,
     required this.due,
     required this.onTap,
   });
 
   final Medicine medicine;
-  final Supplier supplier;
   final DateTime today;
   final bool due;
   final VoidCallback onTap;
