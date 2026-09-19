@@ -36,10 +36,8 @@ class _AttentionScreenState extends State<AttentionScreen> {
       // Navigation is allowed only from a queue computed for the exact live
       // inventory revision and business day. A write or midnight rollover can
       // land while this route is open; never act on a stale projection.
-      final queue = widget.autopilot.workQueue.value;
-      if (!queue.isReady ||
-          queue.inventoryRevision != widget.controller.snapshot.revision ||
-          queue.day != dateText(widget.controller.today)) {
+      final queue = widget.autopilot.currentWorkQueue;
+      if (queue == null) {
         widget.autopilot.refreshNow();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -218,10 +216,10 @@ class _AttentionScreenState extends State<AttentionScreen> {
               builder: (context, queue, _) {
                 final liveRevision = widget.controller.snapshot.revision;
                 final liveDay = dateText(widget.controller.today);
-                final current =
-                    queue.isReady &&
-                    queue.inventoryRevision == liveRevision &&
-                    queue.day == liveDay;
+                final current = identical(
+                  widget.autopilot.currentWorkQueue,
+                  queue,
+                );
                 final degraded =
                     queue.status == AarisAutopilotWorkQueueStatus.degraded &&
                     queue.inventoryRevision == liveRevision &&

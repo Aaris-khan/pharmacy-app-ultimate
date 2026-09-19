@@ -507,6 +507,20 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   /// force the Home beacon/navigation badge to repaint.
   ValueListenable<AarisAutopilotWorkQueue> get workQueue => _workQueue;
 
+  /// Returns the background queue only when it belongs to the exact live
+  /// inventory revision and civil business day. Consumers must not each invent
+  /// their own freshness rule: one ownership point keeps route guards, Brain
+  /// shortcuts and future queue surfaces fail-closed in the same way.
+  AarisAutopilotWorkQueue? get currentWorkQueue {
+    final current = _workQueue.value;
+    if (!current.isReady ||
+        current.inventoryRevision != controller.snapshot.revision ||
+        current.day != dateText(controller.today)) {
+      return null;
+    }
+    return current;
+  }
+
   Timer? _timer;
   int _generation = 0;
   bool _disposed = false;

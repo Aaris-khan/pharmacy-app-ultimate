@@ -342,6 +342,66 @@ void main() {
       },
     );
 
+
+    test(
+      'current work queue is exposed only for the exact live revision and day',
+      () async {
+        final controller = PharmacyController(
+          MemoryInventoryStorage(),
+          clock: () => DateTime(2026, 9, 10, 10),
+          backgroundSearch: false,
+        );
+        await controller.initialize();
+        final supervisor = AarisAutopilotSupervisor(
+          controller,
+          debounce: const Duration(hours: 1),
+          startImmediately: false,
+        );
+        addTearDown(() {
+          supervisor.dispose();
+          controller.dispose();
+        });
+
+        expect(supervisor.currentWorkQueue, isNull);
+        supervisor.refreshNow();
+        for (var attempt = 0; attempt < 50; attempt++) {
+          if (supervisor.currentWorkQueue != null) break;
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(
+          supervisor.currentWorkQueue?.inventoryRevision,
+          controller.snapshot.revision,
+        );
+
+        await controller.save(
+          Medicine.fromJson(<String, dynamic>{
+            'id': 'freshness-row',
+            'name': 'Dolo',
+            'quantity': 1,
+          }),
+          expectedRevision: controller.snapshot.revision,
+        );
+
+        // The old queue remains available for rendering while the debounced
+        // worker catches up, but action consumers must fail closed immediately.
+        expect(supervisor.workQueue.value.isReady, isTrue);
+        expect(supervisor.currentWorkQueue, isNull);
+
+        supervisor.refreshNow();
+        for (var attempt = 0; attempt < 50; attempt++) {
+          if (supervisor.currentWorkQueue?.inventoryRevision ==
+              controller.snapshot.revision) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(
+          supervisor.currentWorkQueue?.inventoryRevision,
+          controller.snapshot.revision,
+        );
+      },
+    );
+
     test(
       'background suspension drops stale work and resume catches up once',
       () async {

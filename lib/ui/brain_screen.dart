@@ -1457,21 +1457,101 @@ class _BrainScreenState extends State<BrainScreen> {
     return null;
   }
 
+  AarisAutopilotWorkQueue? _currentAutopilotQueue() {
+    final queue = widget.autopilot.currentWorkQueue;
+    final digest = widget.autopilot.digest;
+    if (queue == null ||
+        !digest.isReady ||
+        digest.inventoryRevision != widget.controller.snapshot.revision) {
+      return null;
+    }
+    return queue;
+  }
+
+  OperationsPlanStep? _stepInQueue(
+    AarisAutopilotWorkQueue queue,
+    String key,
+  ) {
+    for (final task in queue.tasks) {
+      if (task.key == key) return task.step;
+    }
+    return null;
+  }
+
+  OperationsPlanStep? _currentAutopilotStep(String key) {
+    final queue = _currentAutopilotQueue();
+    return queue == null ? null : _stepInQueue(queue, key);
+  }
+
+  ({
+    int issueCount,
+    int critical,
+    int high,
+    int medium,
+    int blockedCount,
+    int readyCount,
+    OperationsPlanStep? next,
+  })
+  _attentionProjection() {
+    final queue = _currentAutopilotQueue();
+    if (queue != null) {
+      final digest = widget.autopilot.digest;
+      final next = digest.nextTaskKey.isEmpty
+          ? null
+          : _stepInQueue(queue, digest.nextTaskKey);
+      // Supplier-return presentation may intentionally replace one generic
+      // short-expiry card. In that rare case the planner's next key is not in
+      // the display queue, so preserve correctness by using the authoritative
+      // synchronous fallback rather than guessing from presentation order.
+      if (digest.nextTaskKey.isEmpty || next != null) {
+        final readyCount = (digest.issueCount - digest.blockedCount).clamp(
+          0,
+          digest.issueCount,
+        );
+        return (
+          issueCount: digest.issueCount,
+          critical: digest.criticalCount,
+          high: digest.highCount,
+          medium: digest.mediumCount,
+          blockedCount: digest.blockedCount,
+          readyCount: readyCount,
+          next: next,
+        );
+      }
+    }
+
+    final report = _currentAttentionReport();
+    final plan = _currentOperationsPlan(report);
+    return (
+      issueCount: report.items.length,
+      critical: report.critical,
+      high: report.high,
+      medium: report.medium,
+      blockedCount: plan.blockedCount,
+      readyCount: plan.readyCount,
+      next: plan.nextStep,
+    );
+  }
+
   Future<void> _openRecommendedAttentionStep(
     OperationsPlanStep proposed,
   ) async {
     if (!mounted) return;
 
-    // Never route from a cached operational recommendation. Rebuild the
-    // deterministic report and require the exact attention key to still exist
-    // and still be unblocked immediately before navigation. A concurrent stock
-    // change therefore invalidates the recommendation instead of acting on a
-    // stale task.
-    final liveReport = _currentAttentionReport();
-    final livePlan = _currentOperationsPlan(liveReport);
-    final step = _findPlanStep(livePlan, proposed.item.key);
+    // The supervisor already produced this exact revision/day plan off the UI
+    // isolate. Reuse it when current instead of synchronously rebuilding full
+    // tracking + attention analytics on the tap path. If the background queue is
+    // unavailable, filtered, stale or blocked, fall back to a fresh deterministic
+    // rebuild before any navigation so the safety boundary remains unchanged.
+    var step = _currentAutopilotStep(proposed.item.key);
+    PharmacyOperationsPlan? livePlan;
     if (step == null || step.blocked) {
-      final replacement = livePlan.nextStep;
+      final liveReport = _currentAttentionReport();
+      livePlan = _currentOperationsPlan(liveReport);
+      step = _findPlanStep(livePlan, proposed.item.key);
+    }
+    if (step == null || step.blocked) {
+      final replacement = livePlan?.nextStep;
       setState(
         () => _reply = replacement == null
             ? 'The operating queue changed before this task opened. Aaris stopped instead of using a stale recommendation. Open Needs attention to review the current verified blockers.'
@@ -1559,11 +1639,10 @@ class _BrainScreenState extends State<BrainScreen> {
   }
 
   Future<void> _attentionBrief({bool focusNext = false}) async {
-    final report = _currentAttentionReport();
-    final plan = _currentOperationsPlan(report);
-    final next = plan.nextStep;
+    final projection = _attentionProjection();
+    final next = projection.next;
 
-    if (report.isEmpty) {
+    if (projection.issueCount == 0) {
       if (mounted) {
         setState(
           () => _reply = focusNext
@@ -1578,8 +1657,8 @@ class _BrainScreenState extends State<BrainScreen> {
       if (mounted) {
         setState(
           () => _reply = next == null
-              ? 'Attention queue: ${report.items.length} items, but no downstream task is safe to start until its recorded prerequisites are rechecked. Opening the operating plan; nothing will be changed automatically.'
-              : 'Attention queue: ${report.items.length} item${report.items.length == 1 ? '' : 's'} · ${report.critical} critical · ${report.high} high · ${report.medium} medium · ${plan.readyCount} ready now · ${plan.blockedCount} waiting on prerequisites. Next safe task: ${next.item.title}.',
+              ? 'Attention queue: ${projection.issueCount} items, but no downstream task is safe to start until its recorded prerequisites are rechecked. Opening the operating plan; nothing will be changed automatically.'
+              : 'Attention queue: ${projection.issueCount} item${projection.issueCount == 1 ? '' : 's'} · ${projection.critical} critical · ${projection.high} high · ${projection.medium} medium · ${projection.readyCount} ready now · ${projection.blockedCount} waiting on prerequisites. Next safe task: ${next.item.title}.',
         );
       }
       await Future<void>.delayed(Duration.zero);
