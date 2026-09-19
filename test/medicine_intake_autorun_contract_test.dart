@@ -65,4 +65,26 @@ void main() {
     expect(screen, contains('on MedicineIntakeEnqueueCancelled'));
   });
 
+  test('review navigation waits for a durable terminal checkpoint', () {
+    final service = File(
+      'lib/services/medicine_intake_service.dart',
+    ).readAsStringSync();
+    final start = service.indexOf('Future<void> continueWithDraft(');
+    final end = service.indexOf('Future<void> _enqueue(', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+
+    final body = service.substring(start, end);
+    expect(body, contains('if (!_jobs.contains(job) || !job.canReview) return;'));
+    expect(body, contains('await _persist(job, publish: false);'));
+    expect(
+      body.indexOf('await _persist(job, publish: false);'),
+      lessThan(body.lastIndexOf('notifyListeners();')),
+    );
+    expect(
+      body,
+      contains("throw StateError('This saved capture is no longer available.');"),
+    );
+  });
+
 }

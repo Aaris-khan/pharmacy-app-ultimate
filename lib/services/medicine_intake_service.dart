@@ -246,22 +246,38 @@ class MedicineIntakeService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Freeze the available draft before navigation, without waiting for optional
   /// inference. A scope revokes only this scan's lease; late results are ignored.
+  ///
+  /// Review is an actionable terminal state, so callers must not be released
+  /// until that state is durably checkpointed. Re-checkpoint an already-frozen
+  /// review as well: if an earlier SQLite write failed, a second Next tap retries
+  /// the durability boundary instead of silently trusting memory-only state.
   Future<void> continueWithDraft(
     MedicineIntakeJob job, {
     bool timedOut = false,
   }) async {
-    if (!_jobs.contains(job) ||
-        !job.finishOptionalReview(
-          message: timedOut
-              ? 'Local AI review timed out. Scanned details are ready to check.'
-              : '',
-        ))
-      return;
-    _scanRequests.remove(job.id)?.close();
-    notifyListeners();
+    if (!_jobs.contains(job) || !job.canReview) return;
+    final transitioned = job.finishOptionalReview(
+      message: timedOut
+          ? 'Local AI review timed out. Scanned details are ready to check.'
+          : '',
+    );
+    if (transitioned) {
+      _scanRequests.remove(job.id)?.close();
+    }
+    if (!job.terminal) return;
+
     await _enqueue(() async {
-      if (_jobs.contains(job)) await _persist(job);
+      if (!_jobs.contains(job)) {
+        throw StateError('This saved capture is no longer available.');
+      }
+      if (!job.terminal) {
+        throw StateError(
+          'Capture review changed before its checkpoint could be saved.',
+        );
+      }
+      await _persist(job, publish: false);
     });
+    notifyListeners();
   }
 
   Future<void> _enqueue(Future<void> Function() action) {
