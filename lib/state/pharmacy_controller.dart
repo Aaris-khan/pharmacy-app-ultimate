@@ -1677,6 +1677,33 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
+  /// Returns a bounded chronological window over archived rows without
+  /// constructing the fuzzy removed-stock index.
+  Future<List<SearchHit>> browseArchived({required int limit}) async {
+    final boundedLimit = limit < 1
+        ? 1
+        : limit > 100000
+        ? 100000
+        : limit;
+    final data = _stableRecords;
+    final datasetRevision = _searchDatasetEpoch;
+    if (kIsWeb || !backgroundSearch) {
+      final visible = data
+          .where((medicine) => medicine.archived)
+          .toList(growable: false)
+        ..sort(archivedOrder);
+      return visible
+          .take(boundedLimit)
+          .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
+          .toList(growable: false);
+    }
+    return _searchWorker.browseArchived(
+      data,
+      datasetRevision,
+      limit: boundedLimit,
+    );
+  }
+
   /// Read-only fuzzy lookup over Removed stock. This is a projection over the
   /// same authoritative Medicine objects, not a second database. The native
   /// path uses the existing background search isolate and builds the archive
