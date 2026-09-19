@@ -186,7 +186,11 @@ class _ShellState extends State<_Shell> {
           database: true,
           embedded: true,
         ),
-        2 => BrainScreen(controller: c, onOpenSection: _openSection),
+        2 => BrainScreen(
+          controller: c,
+          onOpenSection: _openSection,
+          autopilot: widget.autopilot,
+        ),
         3 => StatsScreen(controller: c),
         _ => ProfileScreen(controller: c),
       },
