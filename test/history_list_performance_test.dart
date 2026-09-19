@@ -7,6 +7,7 @@ import '../lib/domain/search.dart';
 import '../lib/state/pharmacy_controller.dart';
 import '../lib/ui/design.dart';
 import '../lib/ui/removed_stock_screen.dart';
+import '../lib/ui/profile_screen.dart';
 
 Future<PharmacyController> _controller(InventorySnapshot snapshot) async {
   final controller = PharmacyController(
@@ -18,7 +19,49 @@ Future<PharmacyController> _controller(InventorySnapshot snapshot) async {
   return controller;
 }
 
+class _PulseNotifier extends ChangeNotifier {
+  int token = 0;
+
+  void pulse() => notifyListeners();
+
+  void advance() {
+    token++;
+    notifyListeners();
+  }
+}
+
 void main() {
+  testWidgets('active builder filters irrelevant listenable notifications', (
+    tester,
+  ) async {
+    final notifier = _PulseNotifier();
+    addTearDown(notifier.dispose);
+    var builds = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ActiveListenableBuilder(
+          listenable: notifier,
+          rebuildToken: () => notifier.token,
+          builder: (context, _) {
+            builds++;
+            return Text('build ${notifier.token}');
+          },
+        ),
+      ),
+    );
+
+    expect(builds, 1);
+    notifier.pulse();
+    await tester.pump();
+    expect(builds, 1);
+
+    notifier.advance();
+    await tester.pump();
+    expect(builds, 2);
+    expect(find.text('build 1'), findsOneWidget);
+  });
+
   testWidgets('removed-stock history lazily builds a large archive', (
     tester,
   ) async {
@@ -88,4 +131,61 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
+  testWidgets('activity history lazily builds retained audit rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final events = List<Map<String, dynamic>>.generate(
+      200,
+      (index) => <String, dynamic>{
+        'id': 'activity-$index',
+        'revision': 200 - index,
+        'label': 'Activity ${index.toString().padLeft(3, '0')}',
+        'time': DateTime.utc(2026, 9, 20, 12)
+            .subtract(Duration(minutes: index))
+            .toIso8601String(),
+        'undoable': false,
+        'undone': false,
+      },
+      growable: false,
+    );
+
+    final controller = await _controller(
+      InventorySnapshot(revision: 200, events: events),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: ActivityScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Activity 000'), findsOneWidget);
+    expect(
+      find.text('Activity 099'),
+      findsNothing,
+      reason:
+          'A far activity card must stay outside the element tree until it nears the viewport.',
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('Activity 099'),
+      700,
+      scrollable: find.byType(Scrollable).last,
+      maxScrolls: 40,
+    );
+
+    expect(find.text('Activity 099'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
 }
