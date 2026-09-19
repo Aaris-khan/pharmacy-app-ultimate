@@ -228,11 +228,13 @@ class AarisAutopilotDigest {
     return 'Aaris Autopilot found $issueCount attention items: $urgency.$next';
   }
 
-  /// Ignores [evaluatedAt] so a manual refresh that produces identical facts
-  /// does not cause a pointless application-wide repaint.
+  /// Ignores freshness-only metadata so a refresh that produces identical
+  /// operational facts does not cause a pointless navigation/beacon repaint.
+  ///
+  /// [_publish] still swaps in the newest digest, so [inventoryRevision] and
+  /// [evaluatedAt] remain current for callers that read them after the refresh.
   bool sameOperationalState(AarisAutopilotDigest other) =>
       health == other.health &&
-      inventoryRevision == other.inventoryRevision &&
       issueCount == other.issueCount &&
       criticalCount == other.criticalCount &&
       highCount == other.highCount &&
@@ -362,6 +364,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
        ) {
     _observedRevision = controller.snapshot.revision;
     _observedDay = dateText(controller.today);
+    _observedReady = controller.ready;
     controller.addListener(_onControllerChanged);
     refreshNow();
   }
@@ -380,6 +383,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   bool _lifecycleActive = true;
   int _observedRevision = -1;
   String _observedDay = '';
+  bool _observedReady = false;
 
   bool get lifecycleActive => _lifecycleActive;
 
@@ -405,9 +409,15 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   void _onControllerChanged() {
     final revision = controller.snapshot.revision;
     final day = dateText(controller.today);
-    if (revision == _observedRevision && day == _observedDay) return;
+    final ready = controller.ready;
+    if (revision == _observedRevision &&
+        day == _observedDay &&
+        ready == _observedReady) {
+      return;
+    }
     _observedRevision = revision;
     _observedDay = day;
+    _observedReady = ready;
     _schedule();
   }
 
