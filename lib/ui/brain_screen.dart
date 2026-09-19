@@ -1504,10 +1504,9 @@ class _BrainScreenState extends State<BrainScreen> {
       // the display queue, so preserve correctness by using the authoritative
       // synchronous fallback rather than guessing from presentation order.
       if (digest.nextTaskKey.isEmpty || next != null) {
-        final readyCount = (digest.issueCount - digest.blockedCount).clamp(
-          0,
-          digest.issueCount,
-        );
+        final readyCount = digest.issueCount > digest.blockedCount
+            ? digest.issueCount - digest.blockedCount
+            : 0;
         return (
           issueCount: digest.issueCount,
           critical: digest.criticalCount,
