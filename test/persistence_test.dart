@@ -162,11 +162,12 @@ void main() {
   test(
     'imported SOLD row stays stock history without inventing a sale',
     () async {
+      final importedSoldAt = contractToday.subtract(const Duration(days: 1));
       final imported = Medicine.fromJson(<String, dynamic>{
         ...stock('imported-sold', quantity: 4).toJson(),
         'sold': true,
         'quantity': 0,
-        'soldAt': contractToday.toIso8601String(),
+        'soldAt': importedSoldAt.toIso8601String(),
         'soldQuantity': 4,
       });
 
@@ -176,6 +177,7 @@ void main() {
       expect(saved.sold, isTrue);
       expect(saved.quantity, 0);
       expect(saved.soldQuantity, 4);
+      expect(saved.soldAt, importedSoldAt.toIso8601String());
       expect(controller.sales, isEmpty);
       expect(controller.list(SearchScope.sold).single.id, imported.id);
     },
