@@ -665,6 +665,18 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
 
   void _publishWorkQueue(AarisAutopilotWorkQueue next) {
     if (_disposed) return;
+    final current = _workQueue.value;
+
+    // Work cards are a deterministic projection of one inventory revision and
+    // civil business day. Route-open/close refreshes may recompute that exact
+    // projection without changing either input; retaining the current object
+    // avoids rebuilding a large visible task list for identical work. Status is
+    // part of the key so waiting/degraded recovery always remains observable.
+    if (current.status == next.status &&
+        current.inventoryRevision == next.inventoryRevision &&
+        current.day == next.day) {
+      return;
+    }
     _workQueue.value = next;
   }
 
