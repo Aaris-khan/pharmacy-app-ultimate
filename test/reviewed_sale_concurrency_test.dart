@@ -51,6 +51,25 @@ void main() {
       expect(value.sales.single.totalAmountPaise, 4200);
     });
 
+    test('survives an unrelated write already queued ahead of apply', () async {
+      final value = await controller();
+      addTearDown(value.dispose);
+      await value.save(stock('a'), expectedRevision: 0);
+      final review = value.reviewSale('a', quantity: 2);
+
+      final unrelated = value.save(
+        stock('b', name: 'Crocin'),
+        expectedRevision: value.snapshot.revision,
+      );
+      final applied = value.applySale(review);
+      await Future.wait<void>(<Future<void>>[unrelated, applied]);
+
+      expect(value.snapshot.revision, 3);
+      expect(value.snapshot.records['a']!.quantity, 8);
+      expect(value.snapshot.records['b']!.quantity, 10);
+      expect(value.sales.single.quantity, 2);
+    });
+
     test('rejects a target row changed after review', () async {
       final value = await controller();
       addTearDown(value.dispose);
