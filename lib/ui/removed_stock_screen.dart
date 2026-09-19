@@ -327,101 +327,112 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       if (medicine != null && medicine.archived) rows.add((hit, medicine));
     }
 
+    // Keep the fixed controls eager, but materialize archived stock cards only
+    // near the viewport. Removed history is intentionally bounded upstream;
+    // this keeps rendering cost proportional to visible rows as that bound grows.
     return Scaffold(
       appBar: AppBar(title: const Text('Removed stock')),
-      body: ListView(
+      body: ListView.builder(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-        children: [
-          const ScreenIntro(
-            title: 'Find & restore removed stock',
-            message:
-                'Search local removed history by medicine, brand, salt, barcode, batch, expiry, location or scanned keywords. Restoring always requires an exact-row review.',
-            icon: Icons.inventory_2_outlined,
-            color: amber,
-          ),
-          Surface(
-            padding: EdgeInsets.zero,
-            child: TextField(
-              controller: _query,
-              onChanged: _typed,
-              maxLength: 300,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => unawaited(_search()),
-              decoration: InputDecoration(
-                counterText: '',
-                hintText: 'Search removed medicines…',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        onPressed: () {
-                          _query.clear();
-                          _typed('');
-                        },
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  query.isEmpty
-                      ? '${rows.length} removed stock ${rows.length == 1 ? 'entry' : 'entries'}'
-                      : '${rows.length} local ${rows.length == 1 ? 'match' : 'matches'} for “$query”',
-                  style: const TextStyle(
-                    color: muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+        itemCount: rows.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ScreenIntro(
+                  title: 'Find & restore removed stock',
+                  message:
+                      'Search local removed history by medicine, brand, salt, barcode, batch, expiry, location or scanned keywords. Restoring always requires an exact-row review.',
+                  icon: Icons.inventory_2_outlined,
+                  color: amber,
+                ),
+                Surface(
+                  padding: EdgeInsets.zero,
+                  child: TextField(
+                    controller: _query,
+                    onChanged: _typed,
+                    maxLength: 300,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => unawaited(_search()),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      hintText: 'Search removed medicines…',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      suffixIcon: query.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: () {
+                                _query.clear();
+                                _typed('');
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
                   ),
                 ),
-              ),
-              if (_loading)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        query.isEmpty
+                            ? '${rows.length} removed stock ${rows.length == 1 ? 'entry' : 'entries'}'
+                            : '${rows.length} local ${rows.length == 1 ? 'match' : 'matches'} for “$query”',
+                        style: const TextStyle(
+                          color: muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (_loading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
                 ),
-            ],
-          ),
-          if (_error.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Surface(
-              color: errorSoft,
-              child: Text(_error, style: const TextStyle(color: red)),
+                if (_error.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Surface(
+                    color: errorSoft,
+                    child: Text(_error, style: const TextStyle(color: red)),
+                  ),
+                ],
+                if (!_loading && _error.isEmpty && rows.isEmpty) ...[
+                  const SizedBox(height: 18),
+                  EmptyState(
+                    title: query.isEmpty ? 'No removed stock' : 'No removed match',
+                    message: query.isEmpty
+                        ? 'Removed entries will appear here and remain recoverable.'
+                        : 'Try the medicine name, barcode, batch number, strength or storage location. Aaris will not guess a different row.',
+                  ),
+                ],
+                const SizedBox(height: 8),
+              ],
+            );
+          }
+
+          final entry = rows[index - 1];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _RemovedStockCard(
+              hit: entry.$1,
+              record: entry.$2,
+              showConfidence: query.isNotEmpty,
+              onRestore: () => _reviewRestore(entry.$2),
             ),
-          ],
-          if (!_loading && _error.isEmpty && rows.isEmpty) ...[
-            const SizedBox(height: 18),
-            EmptyState(
-              title: query.isEmpty ? 'No removed stock' : 'No removed match',
-              message: query.isEmpty
-                  ? 'Removed entries will appear here and remain recoverable.'
-                  : 'Try the medicine name, barcode, batch number, strength or storage location. Aaris will not guess a different row.',
-            ),
-          ],
-          const SizedBox(height: 8),
-          for (final entry in rows)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _RemovedStockCard(
-                hit: entry.$1,
-                record: entry.$2,
-                showConfidence: query.isNotEmpty,
-                onRestore: () => _reviewRestore(entry.$2),
-              ),
-            ),
-        ],
+          );
+        },
       ),
     );
-  }
-}
+  }}
 
 class _RemovedStockCard extends StatelessWidget {
   const _RemovedStockCard({
