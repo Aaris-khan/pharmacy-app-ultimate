@@ -154,6 +154,10 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _search({bool preserveResults = false}) {
     final generation = ++_generation;
     final typedQuery = _query.text;
+    if (typedQuery.trim().isNotEmpty) {
+      _browseLimit = _browsePageSize;
+      _browseExhausted = false;
+    }
     if (!mounted) return Future<void>.value();
     setState(() {
       // Snapshot/day refreshes keep the last valid cards on screen while the
