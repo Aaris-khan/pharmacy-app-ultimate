@@ -26,11 +26,7 @@ class HomeScreen extends StatelessWidget {
   Future<void> _setShortDays(BuildContext context, int value) async {
     if (value == controller.settings.shortDays) return;
     try {
-      final settings = WarningSettings.fromJson({
-        'shortDays': value,
-        'months': controller.settings.months,
-      });
-      await controller.setWarnings(settings);
+      await controller.setShortWarningDays(value);
     } catch (e) {
       if (context.mounted) showError(context, e);
     }
@@ -39,11 +35,7 @@ class HomeScreen extends StatelessWidget {
   Future<void> _setMonths(BuildContext context, int value) async {
     if (value == controller.settings.months) return;
     try {
-      final settings = WarningSettings.fromJson({
-        'shortDays': controller.settings.shortDays,
-        'months': value,
-      });
-      await controller.setWarnings(settings);
+      await controller.setWarningMonths(value);
     } catch (e) {
       if (context.mounted) showError(context, e);
     }
