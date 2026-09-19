@@ -57,7 +57,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final active = TickerMode.of(context);
+    final active = TickerMode.valuesOf(context).enabled;
     if (active == _controllerListening) return;
     if (!active) {
       widget.controller.removeListener(_changed);
