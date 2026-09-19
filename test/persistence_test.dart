@@ -119,6 +119,31 @@ void main() {
     expect(controller.list(SearchScope.all).single.id, 'a');
     expect(controller.snapshot.records['a']!.archived, false);
   });
+  test('bulk removal keeps lifecycle and audit on one business day', () async {
+    final scripted = <DateTime>[];
+    final fallback = DateTime.utc(2026, 9, 19, 12);
+    DateTime clock() =>
+        scripted.isEmpty ? fallback : scripted.removeAt(0);
+    final local = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: clock,
+      backgroundSearch: false,
+    );
+    addTearDown(local.dispose);
+    await local.initialize();
+    await local.save(stock('bulk-midnight'), expectedRevision: 0);
+    final review = local.reviewArchiveAll();
+
+    scripted.addAll([
+      DateTime.utc(2026, 9, 19, 23, 59, 59),
+      DateTime.utc(2026, 9, 20, 0, 0, 1),
+    ]);
+    await local.applyArchiveAll(review);
+
+    final removed = local.snapshot.records['bulk-midnight']!;
+    expect(dateText(removed.archivedAt!), '2026-09-19');
+    expect(local.snapshot.events.first['businessDay'], '2026-09-19');
+  });
   test(
     'undo sold removes its amount estimate and restores prior quantity',
     () async {
@@ -468,6 +493,36 @@ void main() {
       expect(controller.snapshot.records['later']!.archived, false);
     },
   );
+  test('backup restore keeps lifecycle and audit on one business day', () async {
+    final scripted = <DateTime>[];
+    final fallback = DateTime.utc(2026, 9, 19, 12);
+    DateTime clock() =>
+        scripted.isEmpty ? fallback : scripted.removeAt(0);
+    final local = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: clock,
+      backgroundSearch: false,
+    );
+    addTearDown(local.dispose);
+    await local.initialize();
+    await local.save(stock('backup-original'), expectedRevision: 0);
+    final backup = local.createBackup().encode();
+    await local.save(
+      stock('backup-later', name: 'Later medicine'),
+      expectedRevision: local.snapshot.revision,
+    );
+    final review = await local.reviewBackup(backup);
+
+    scripted.addAll([
+      DateTime.utc(2026, 9, 19, 23, 59, 59),
+      DateTime.utc(2026, 9, 20, 0, 0, 1),
+    ]);
+    await local.restoreBackup(review);
+
+    final removed = local.snapshot.records['backup-later']!;
+    expect(dateText(removed.archivedAt!), '2026-09-19');
+    expect(local.snapshot.events.first['businessDay'], '2026-09-19');
+  });
   test('medicine version history restores exact prior facts', () async {
     await controller.save(stock('a', quantity: 10), expectedRevision: 0);
     final edited = controller.snapshot.records['a']!.patch({
