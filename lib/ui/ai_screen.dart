@@ -138,10 +138,12 @@ class _AiScreenState extends State<AiScreen> {
     });
   }
 
-  void _appendMessage(String text, bool user) {
+  void _appendMessage(String text, bool user, {bool status = false}) {
     final clean = text.trim();
     if (!mounted || clean.isEmpty) return;
-    setState(() => _messages.add(_AiChatMessage(clean, user)));
+    setState(
+      () => _messages.add(_AiChatMessage(clean, user, status: status)),
+    );
     _scrollToEnd(force: user);
   }
 
@@ -580,7 +582,11 @@ class _AiScreenState extends State<AiScreen> {
         _appendMessage(response.reply, false);
         return;
       }
-      _appendMessage('External AI response pasted for review.', true);
+      _appendMessage(
+        'External AI response pasted for review.',
+        false,
+        status: true,
+      );
       await _review();
     } catch (error) {
       if (mounted) {
@@ -880,30 +886,6 @@ class _AiScreenState extends State<AiScreen> {
       return Column(
         children: [
           _AiHubHeader(configured: _hasAiRoute, onSettings: _openConnections),
-          _AiComposer(
-            controller: _request,
-            busy: busy,
-            onSend: _sendComposer,
-            onCamera: () async {
-              await openMedicineCapture(context, widget.controller);
-              if (mounted) _scrollToEnd();
-            },
-            onMic: () async {
-              final words = await voiceSearch(
-                context,
-                offlineOnly: true,
-                title: 'Speak to Aaris',
-                actionLabel: 'Use message',
-              );
-              if (mounted && words != null) {
-                setState(() => _request.text = words);
-              }
-            },
-          ),
-          _AiQuickActions(
-            busy: busy || widget.onQuickAction == null,
-            onTap: _runQuickAction,
-          ),
           if (_configuration.localBrainEnabled && _local.hasSelection)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
@@ -1034,6 +1016,30 @@ class _AiScreenState extends State<AiScreen> {
               ),
             ),
           ),
+          _AiQuickActions(
+            busy: busy || widget.onQuickAction == null,
+            onTap: _runQuickAction,
+          ),
+          _AiComposer(
+            controller: _request,
+            busy: busy,
+            onSend: _sendComposer,
+            onCamera: () async {
+              await openMedicineCapture(context, widget.controller);
+              if (mounted) _scrollToEnd();
+            },
+            onMic: () async {
+              final words = await voiceSearch(
+                context,
+                offlineOnly: true,
+                title: 'Speak to Aaris',
+                actionLabel: 'Use message',
+              );
+              if (mounted && words != null) {
+                setState(() => _request.text = words);
+              }
+            },
+          ),
         ],
       );
     },
@@ -1147,10 +1153,11 @@ class _AiHubHeader extends StatelessWidget {
 }
 
 class _AiChatMessage {
-  const _AiChatMessage(this.text, this.user);
+  const _AiChatMessage(this.text, this.user, {this.status = false});
 
   final String text;
   final bool user;
+  final bool status;
 }
 
 class _AiThinkingBubble extends StatelessWidget {
@@ -1225,6 +1232,45 @@ class _AiMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+
+    if (message.status) {
+      return Align(
+        alignment: Alignment.center,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: _aiBlue.withAlpha(dark ? 24 : 12),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: _aiBlue.withAlpha(dark ? 55 : 32)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.description_outlined,
+                size: 15,
+                color: _aiBlue,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  message.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _aiBlue,
+                    fontSize: 10.8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Align(
       alignment: message.user ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -1448,60 +1494,111 @@ class _AiQuickActions extends StatelessWidget {
   final bool busy;
   final ValueChanged<AiHubQuickAction> onTap;
 
+  Future<void> _showMore(BuildContext context) async {
+    if (busy) return;
+    final action = await showModalBottomSheet<AiHubQuickAction>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(8, 2, 8, 8),
+                  child: Text(
+                    'More pharmacy actions',
+                    style: TextStyle(
+                      color: ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.inventory_2_outlined, color: red),
+                title: const Text('Removed stock'),
+                subtitle: const Text('Review removed medicines'),
+                onTap: () => Navigator.pop(
+                  sheetContext,
+                  AiHubQuickAction.removed,
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: red),
+                title: const Text('Delete medicine'),
+                subtitle: const Text('Choose the exact medicine first'),
+                onTap: () => Navigator.pop(
+                  sheetContext,
+                  AiHubQuickAction.delete,
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_rounded, color: _aiPurple),
+                title: const Text('Modify medicine'),
+                subtitle: const Text('Open exact-row edit flow'),
+                onTap: () => Navigator.pop(
+                  sheetContext,
+                  AiHubQuickAction.modify,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (action != null) onTap(action);
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-    child: GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 8,
-      mainAxisSpacing: 8,
-      childAspectRatio: 1.55,
-      children: [
-        _AiQuickActionTile(
-          label: 'Sold',
-          icon: Icons.shopping_cart_checkout_rounded,
-          color: amber,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.sold),
-        ),
-        _AiQuickActionTile(
-          label: 'Removed',
-          icon: Icons.inventory_2_outlined,
-          color: red,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.removed),
-        ),
-        _AiQuickActionTile(
-          label: 'Stock summary',
-          icon: Icons.bar_chart_rounded,
-          color: primary,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.stockSummary),
-        ),
-        _AiQuickActionTile(
-          label: 'Add',
-          icon: Icons.add_circle_rounded,
-          color: green,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.add),
-        ),
-        _AiQuickActionTile(
-          label: 'Delete',
-          icon: Icons.delete_outline_rounded,
-          color: red,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.delete),
-        ),
-        _AiQuickActionTile(
-          label: 'Modify',
-          icon: Icons.edit_rounded,
-          color: _aiPurple,
-          onTap: busy ? null : () => onTap(AiHubQuickAction.modify),
-        ),
-      ],
+    padding: const EdgeInsets.fromLTRB(12, 5, 12, 7),
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      child: Row(
+        children: [
+          _AiQuickActionChip(
+            label: 'Add',
+            icon: Icons.add_rounded,
+            color: green,
+            onTap: busy ? null : () => onTap(AiHubQuickAction.add),
+          ),
+          const SizedBox(width: 8),
+          _AiQuickActionChip(
+            label: 'Sold',
+            icon: Icons.shopping_cart_checkout_rounded,
+            color: amber,
+            onTap: busy ? null : () => onTap(AiHubQuickAction.sold),
+          ),
+          const SizedBox(width: 8),
+          _AiQuickActionChip(
+            label: 'Stock',
+            icon: Icons.bar_chart_rounded,
+            color: primary,
+            onTap: busy ? null : () => onTap(AiHubQuickAction.stockSummary),
+          ),
+          const SizedBox(width: 8),
+          _AiQuickActionChip(
+            label: 'More',
+            icon: Icons.more_horiz_rounded,
+            color: _aiPurple,
+            onTap: busy ? null : () => _showMore(context),
+          ),
+        ],
+      ),
     ),
   );
 }
 
-class _AiQuickActionTile extends StatelessWidget {
-  const _AiQuickActionTile({
+class _AiQuickActionChip extends StatelessWidget {
+  const _AiQuickActionChip({
     required this.label,
     required this.icon,
     required this.color,
@@ -1516,55 +1613,33 @@ class _AiQuickActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 140),
-          opacity: onTap == null ? .48 : 1,
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 140),
+      opacity: onTap == null ? .45 : 1,
+      child: Material(
+        color: dark ? const Color(0xFF1B2130) : Colors.white.withAlpha(238),
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 13),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withAlpha(dark ? 38 : 20),
-                  dark
-                      ? const Color(0xFF1B2130).withAlpha(230)
-                      : Colors.white.withAlpha(238),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: color.withAlpha(dark ? 80 : 58)),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withAlpha(dark ? 20 : 18),
-                  blurRadius: 14,
-                  spreadRadius: -7,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: color.withAlpha(dark ? 72 : 42)),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, color: color, size: 21),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: ink,
-                      fontSize: 12,
-                      height: 1.08,
-                      fontWeight: FontWeight.w800,
-                    ),
+                Icon(icon, color: color, size: 18),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: ink,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],

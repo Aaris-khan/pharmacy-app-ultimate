@@ -31,13 +31,8 @@ class AarisAutopilotBeacon extends StatelessWidget {
       final scheme = theme.colorScheme;
       final degraded = digest.health == AarisAutopilotHealth.degraded;
       final critical = digest.criticalCount > 0;
-      final useErrorSurface = degraded || critical;
-      final background = useErrorSurface
-          ? scheme.errorContainer
-          : scheme.primaryContainer;
-      final foreground = useErrorSurface
-          ? scheme.onErrorContainer
-          : scheme.onPrimaryContainer;
+      final useErrorTone = degraded || critical;
+      final accent = useErrorTone ? scheme.error : scheme.primary;
       final priorityText = degraded
           ? 'दोबारा जाँचें'
           : critical
@@ -47,63 +42,76 @@ class AarisAutopilotBeacon extends StatelessWidget {
           ? stockActionLabel(digest.nextKind!)
           : 'काम देखने के लिए टैप करें';
 
-      return Semantics(
-        button: true,
-        label: 'आज के काम · $priorityText · $next',
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Material(
-            color: background,
-            elevation: 4,
-            shadowColor: scheme.shadow.withValues(alpha: .18),
-            borderRadius: BorderRadius.circular(18),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onOpenWorkQueue,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      degraded
-                          ? Icons.sync_problem_rounded
-                          : critical
-                          ? Icons.health_and_safety_rounded
-                          : Icons.psychology_alt_rounded,
-                      color: foreground,
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'आज के काम · $priorityText',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              color: foreground,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            next,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: foreground,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Semantics(
+          button: true,
+          label: 'आज के काम · $priorityText · $next',
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: Material(
+              color: Color.alphaBlend(
+                accent.withAlpha(12),
+                scheme.surface,
+              ),
+              elevation: 0,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onOpenWorkQueue,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: accent.withAlpha(42)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        degraded
+                            ? Icons.sync_problem_rounded
+                            : critical
+                            ? Icons.error_outline_rounded
+                            : Icons.psychology_alt_rounded,
+                        color: accent,
+                        size: 20,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(Icons.arrow_forward_rounded, color: foreground),
-                  ],
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'आज के काम · $priorityText',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: scheme.onSurface,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              next,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.arrow_forward_rounded,
+                        color: accent,
+                        size: 19,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -113,3 +121,4 @@ class AarisAutopilotBeacon extends StatelessWidget {
     },
   );
 }
+

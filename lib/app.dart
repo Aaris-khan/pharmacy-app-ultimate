@@ -168,36 +168,30 @@ class _ShellState extends State<_Shell> {
 
     return Scaffold(
       body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
+        child: Column(
           children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900),
-                child: IndexedStack(
-                  index: tab,
-                  children: [
-                    for (var index = 0; index < 5; index++)
-                      TickerMode(
-                        enabled: index == tab,
-                        child: _visited[index] ?? const SizedBox.shrink(),
-                      ),
-                  ],
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 900),
+                  child: IndexedStack(
+                    index: tab,
+                    children: [
+                      for (var index = 0; index < 5; index++)
+                        TickerMode(
+                          enabled: index == tab,
+                          child: _visited[index] ?? const SizedBox.shrink(),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 12,
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: AarisAutopilotBeacon(
-                  supervisor: widget.autopilot,
-                  onOpenWorkQueue: _openAutopilotQueue,
-                ),
+            if (tab == 0)
+              AarisAutopilotBeacon(
+                supervisor: widget.autopilot,
+                onOpenWorkQueue: _openAutopilotQueue,
               ),
-            ),
           ],
         ),
       ),

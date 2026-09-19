@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'Aaris Brain uses one unified AI composer with six real quick actions',
+    'Aaris Brain keeps chat primary with compact safe quick actions',
     () {
       final brain = File('lib/ui/brain_screen.dart').readAsStringSync();
       final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
@@ -22,15 +22,36 @@ void main() {
       expect(brain, contains('onQuickAction: _handleQuickAction'));
 
       for (final label in <String>[
-        "label: 'Sold'",
-        "label: 'Removed'",
-        "label: 'Stock summary'",
         "label: 'Add'",
-        "label: 'Delete'",
-        "label: 'Modify'",
+        "label: 'Sold'",
+        "label: 'Stock'",
+        "label: 'More'",
       ]) {
         expect(ai, contains(label), reason: label);
       }
+      expect(ai, contains("title: const Text('Removed stock')"));
+      expect(ai, contains("title: const Text('Delete medicine')"));
+      expect(ai, contains("title: const Text('Modify medicine')"));
+      expect(ai, isNot(contains('GridView.count(')));
+      expect(ai, contains('status: true'));
+
+      final buildStart = ai.indexOf(
+        'Widget build(BuildContext context) => AnimatedBuilder(',
+      );
+      final buildEnd = ai.indexOf('class _AiHubHeader', buildStart);
+      final build = ai.substring(buildStart, buildEnd);
+      expect(
+        build.indexOf('Expanded('),
+        lessThan(build.indexOf('_AiQuickActions(')),
+      );
+      expect(
+        build.indexOf('_AiQuickActions('),
+        lessThan(build.indexOf('_AiComposer(')),
+      );
+
+      final app = File('lib/app.dart').readAsStringSync();
+      expect(app, contains('if (tab == 0)'));
+      expect(app, isNot(contains('Positioned(')));
 
       final deleteRoute = RegExp(
         r'AiHubQuickAction\.delete\s*=>\s*_openQuickTargetPicker\(\s*AppBrainAction\.removeMedicine,?\s*\)',
