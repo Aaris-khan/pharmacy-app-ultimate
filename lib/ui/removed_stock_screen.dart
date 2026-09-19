@@ -180,6 +180,10 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   Future<void> _search() {
     final generation = ++_generation;
     final query = _query.text;
+    if (query.trim().isNotEmpty) {
+      _browseLimit = _browsePageSize;
+      _browseExhausted = false;
+    }
     if (!mounted) return Future<void>.value();
     setState(() {
       _loading = true;
@@ -206,10 +210,15 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   }) async {
     if (!mounted || generation != _generation) return;
     try {
-      final hits = await widget.controller.searchArchived(query);
+      final browsing = query.trim().isEmpty;
+      final requestedBrowseLimit = _browseLimit;
+      final hits = browsing
+          ? await widget.controller.browseArchived(limit: requestedBrowseLimit)
+          : await widget.controller.searchArchived(query);
       if (!mounted || generation != _generation) return;
       setState(() {
         _hits = hits;
+        _browseExhausted = browsing && hits.length < requestedBrowseLimit;
         _loading = false;
       });
     } catch (_) {
@@ -220,6 +229,12 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
         _error = 'Removed-stock search could not finish. Please try again.';
       });
     }
+  }
+
+  void _expandBrowse() {
+    if (_loading || _browseExhausted) return;
+    _browseLimit += _browsePageSize;
+    unawaited(_search());
   }
 
   Future<void> _reviewRestore(Medicine record) async {
