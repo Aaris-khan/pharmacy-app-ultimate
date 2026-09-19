@@ -34,11 +34,20 @@ class ActiveListenableBuilder extends StatefulWidget {
     required this.listenable,
     required this.builder,
     this.child,
+    this.rebuildToken,
   });
 
   final Listenable listenable;
   final TransitionBuilder builder;
   final Widget? child;
+
+  /// Optional projection token used to ignore notifications that do not change
+  /// the state this subtree renders. Equality is compared with `==`.
+  ///
+  /// For inventory-only screens, a record such as
+  /// `() => (controller.snapshot, controller.today)` prevents transient AI or
+  /// preparation notifications from rebuilding large read-only surfaces.
+  final Object? Function()? rebuildToken;
 
   @override
   State<ActiveListenableBuilder> createState() =>
@@ -47,6 +56,17 @@ class ActiveListenableBuilder extends StatefulWidget {
 
 class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
   bool _listening = false;
+  Object? _token;
+
+  @override
+  void initState() {
+    super.initState();
+    _captureToken();
+  }
+
+  void _captureToken() {
+    _token = widget.rebuildToken?.call();
+  }
 
   @override
   void didChangeDependencies() {
@@ -57,17 +77,18 @@ class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
   @override
   void didUpdateWidget(covariant ActiveListenableBuilder oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_listening || identical(oldWidget.listenable, widget.listenable)) {
-      return;
+    if (_listening && !identical(oldWidget.listenable, widget.listenable)) {
+      oldWidget.listenable.removeListener(_changed);
+      widget.listenable.addListener(_changed);
     }
-    oldWidget.listenable.removeListener(_changed);
-    widget.listenable.addListener(_changed);
+    _captureToken();
   }
 
   void _syncSubscription(bool active) {
     if (_listening == active) return;
     _listening = active;
     if (active) {
+      _captureToken();
       widget.listenable.addListener(_changed);
     } else {
       widget.listenable.removeListener(_changed);
@@ -75,7 +96,14 @@ class _ActiveListenableBuilderState extends State<ActiveListenableBuilder> {
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final selector = widget.rebuildToken;
+    if (selector != null) {
+      final next = selector();
+      if (next == _token) return;
+      _token = next;
+    }
+    setState(() {});
   }
 
   @override
