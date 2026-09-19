@@ -29,6 +29,9 @@ Read [the architecture map](docs/ARCHITECTURE.md) and
 
 ## Verification policy
 
-`tool/bootstrap.sh` resolves packages and runs analysis/tests only. GitHub
-Actions also runs checks only. APK creation and release signing are deliberately
-left to the repository owner.
+`tool/bootstrap.sh` resolves packages and runs the same Dart analysis scope plus
+the full Flutter test suite used by CI; it intentionally does not build an APK.
+On pushes and pull requests to `main`, Pharmacy checks also compiles a debug
+Android APK. The release workflow analyzes/tests committed source and builds a
+release APK artifact. Release signing and distribution remain explicit
+owner-controlled steps.
