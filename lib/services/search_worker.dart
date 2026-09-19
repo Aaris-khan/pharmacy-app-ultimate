@@ -18,7 +18,7 @@ List<Medicine> _orderedActiveRecords(
   return visible;
 }
 
-List<SearchHit> _browseArchivedRecords(
+List<SearchHit> _browseArchivedWindow(
   List<Medicine> records,
   int limit,
 ) {
@@ -26,14 +26,26 @@ List<SearchHit> _browseArchivedRecords(
       .where((medicine) => medicine.archived)
       .toList(growable: false)
     ..sort(archivedOrder);
-  final boundedLimit = limit < MedicineSearch.maxArchivedResults
-      ? limit
-      : MedicineSearch.maxArchivedResults;
+  final boundedLimit = limit < 1
+      ? 1
+      : limit > 100000
+      ? 100000
+      : limit;
   return visible
       .take(boundedLimit)
       .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
       .toList(growable: false);
 }
+
+List<SearchHit> _browseArchivedRecords(
+  List<Medicine> records,
+  int limit,
+) => _browseArchivedWindow(
+  records,
+  limit < MedicineSearch.maxArchivedResults
+      ? limit
+      : MedicineSearch.maxArchivedResults,
+);
 
 void _searchEntry(SendPort main) {
   final receive = ReceivePort();
@@ -80,7 +92,15 @@ void _searchEntry(SendPort main) {
         if (indexedRecords == null || revision != message['revision']) {
           throw StateError('Search dataset changed. Retry this search.');
         }
-        if (kind == 'searchArchived') {
+        if (kind == 'browseArchived') {
+          main.send({
+            'id': id,
+            'result': _browseArchivedWindow(
+              indexedRecords!,
+              message['limit'] as int,
+            ),
+          });
+        } else if (kind == 'searchArchived') {
           final query = message['query'] as String;
           final limit = message['limit'] as int;
           if (query.trim().isEmpty) {
@@ -487,6 +507,26 @@ class SearchWorker {
           'settings': settings,
           'today': today,
           'limit': resultLimit ?? (query.trim().isEmpty ? 100000 : 150),
+        });
+        return (response as List).cast<SearchHit>();
+      }),
+    );
+    _queue = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
+  }
+
+  Future<List<SearchHit>> browseArchived(
+    List<Medicine> records,
+    int revision, {
+    required int limit,
+  }) {
+    final result = _queue.then(
+      (_) => _withTransportRecovery(() async {
+        final session = await _ensureIndex(records, revision);
+        final response = await session.request({
+          'kind': 'browseArchived',
+          'revision': revision,
+          'limit': limit,
         });
         return (response as List).cast<SearchHit>();
       }),
