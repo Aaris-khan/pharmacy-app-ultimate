@@ -41,18 +41,22 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _sharing = false;
   bool _reviewing = false;
 
-  Object? _readSnapshot;
+  Object? _readRecords;
+  Object? _readSales;
   DateTime? _readDay;
   TrackingRange? _readRange;
   String? _readFocus;
   List<ReorderSuggestion>? _readSuggestions;
   List<ReorderSuggestion>? _planSuggestions;
+  Object? _planSettings;
+  DateTime? _planDay;
   PharmacyOperationsPlan? _readPlan;
 
   List<ReorderSuggestion> get _suggestions {
     final snapshot = widget.controller.snapshot;
     final day = widget.controller.today;
-    if (identical(snapshot, _readSnapshot) &&
+    if (identical(snapshot.records, _readRecords) &&
+        identical(snapshot.sales, _readSales) &&
         day == _readDay &&
         widget.range.start == _readRange?.start &&
         widget.range.end == _readRange?.end &&
@@ -64,7 +68,8 @@ class _OrderScreenState extends State<OrderScreen> {
       ...source.where((item) => item.productKey == widget.focusProductKey),
       ...source.where((item) => item.productKey != widget.focusProductKey),
     ];
-    _readSnapshot = snapshot;
+    _readRecords = snapshot.records;
+    _readSales = snapshot.sales;
     _readDay = day;
     _readRange = widget.range;
     _readFocus = widget.focusProductKey;
@@ -72,11 +77,17 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   PharmacyOperationsPlan _operationsPlan(List<ReorderSuggestion> suggestions) {
-    if (identical(suggestions, _planSuggestions)) return _readPlan!;
+    final settings = widget.controller.snapshot.settings;
+    final day = widget.controller.today;
+    if (identical(suggestions, _planSuggestions) &&
+        identical(settings, _planSettings) &&
+        day == _planDay) {
+      return _readPlan!;
+    }
     final attention = PharmacyAttentionReport.build(
       medicines: widget.controller.records,
-      settings: widget.controller.settings,
-      today: widget.controller.today,
+      settings: settings,
+      today: day,
       reorder: suggestions,
       sales: widget.controller.sales,
     );
@@ -85,6 +96,8 @@ class _OrderScreenState extends State<OrderScreen> {
       medicines: widget.controller.records,
     );
     _planSuggestions = suggestions;
+    _planSettings = settings;
+    _planDay = day;
     return _readPlan = plan;
   }
 
@@ -311,7 +324,9 @@ class _OrderScreenState extends State<OrderScreen> {
       child: ActiveListenableBuilder(
         listenable: widget.controller,
         rebuildToken: () => (
-          widget.controller.snapshot,
+          widget.controller.snapshot.records,
+          widget.controller.snapshot.sales,
+          widget.controller.snapshot.settings,
           widget.controller.today,
         ),
         builder: (context, _) {
