@@ -47,4 +47,45 @@ void main() {
       expect(builds, greaterThan(hiddenBuilds));
     },
   );
+
+  testWidgets(
+    'ActiveListenableBuilder ignores notifications with an unchanged projection',
+    (tester) async {
+      final source = ValueNotifier<int>(0);
+      addTearDown(source.dispose);
+      var builds = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ActiveListenableBuilder(
+            listenable: source,
+            rebuildToken: () => source.value ~/ 10,
+            builder: (context, child) {
+              builds++;
+              return Text('bucket:${source.value ~/ 10}');
+            },
+          ),
+        ),
+      );
+
+      expect(builds, 1);
+      expect(find.text('bucket:0'), findsOneWidget);
+
+      source.value = 1;
+      await tester.pump();
+      expect(
+        builds,
+        1,
+        reason:
+            'A notifier update outside this subtree projection must stay frame-quiet.',
+      );
+      expect(find.text('bucket:0'), findsOneWidget);
+
+      source.value = 10;
+      await tester.pump();
+      expect(builds, 2);
+      expect(find.text('bucket:1'), findsOneWidget);
+    },
+  );
+
 }
