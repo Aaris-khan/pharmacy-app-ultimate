@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/pharmacy_controller.dart';
+import '../domain/home_projection.dart';
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import 'design.dart';
@@ -103,13 +104,30 @@ class _HomeScreenState extends State<HomeScreen> {
     rebuildToken: () => (controller.snapshot, controller.today),
     builder: (context, _) {
       // Rebuild only for a new inventory snapshot or civil day. The controller
-      // also memoizes this bounded projection, so parent-driven rebuilds do not
-      // rescan the full Medicine Database.
-      final projection = controller.homeProjection;
+      // memoizes the authoritative projection. While a warning-window write is
+      // pending, derive one transient projection from that same snapshot so the
+      // title, counts, attention rows and row styling all acknowledge the tap
+      // together instead of mixing new controls with old persisted semantics.
+      final authoritativeSettings = controller.settings;
+      final hasPendingWarningWindow =
+          _pendingShortDays != null || _pendingMonths != null;
+      final visibleSettings = hasPendingWarningWindow
+          ? WarningSettings.fromJson(<String, dynamic>{
+              'shortDays':
+                  _pendingShortDays ?? authoritativeSettings.shortDays,
+              'months': _pendingMonths ?? authoritativeSettings.months,
+            })
+          : authoritativeSettings;
+      final projection = hasPendingWarningWindow
+          ? HomeInventoryProjection.build(
+              medicines: controller.records,
+              settings: visibleSettings,
+              today: controller.today,
+            )
+          : controller.homeProjection;
       final attention = projection.attention;
-      final visibleShortDays =
-          _pendingShortDays ?? controller.settings.shortDays;
-      final visibleMonths = _pendingMonths ?? controller.settings.months;
+      final visibleShortDays = visibleSettings.shortDays;
+      final visibleMonths = visibleSettings.months;
       return ListView(
         key: const PageStorageKey('home-scroll'),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
@@ -153,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
               final tiles = [
                 _OverviewTile(
                   title:
-                      '${controller.settings.shortDays} ${controller.settings.shortDays == 1 ? 'Day' : 'Days'} Left',
+                      '$visibleShortDays ${visibleShortDays == 1 ? 'Day' : 'Days'} Left',
                   caption: 'Short expiry',
                   count: projection.shortExpiryCount,
                   icon: Icons.timelapse_rounded,
@@ -172,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 _OverviewTile(
                   title:
-                      '${controller.settings.months} ${controller.settings.months == 1 ? 'Month' : 'Months'} Left',
+                      '$visibleMonths ${visibleMonths == 1 ? 'Month' : 'Months'} Left',
                   caption: 'Month warning',
                   count: projection.monthExpiryCount,
                   icon: Icons.calendar_month_rounded,
@@ -325,7 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ...attention.map(
               (m) => MedicineCard(
                 record: m,
-                settings: controller.settings,
+                settings: visibleSettings,
                 today: controller.today,
                 onTap: () => openEditor(context, controller, record: m),
               ),
