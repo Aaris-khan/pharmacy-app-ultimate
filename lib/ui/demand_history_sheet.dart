@@ -61,8 +61,9 @@ class _DemandHistoryState extends State<_DemandHistory> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
+  Widget build(BuildContext context) => ActiveListenableBuilder(
+    listenable: widget.controller,
+    rebuildToken: () => (widget.controller.snapshot, widget.controller.today),
     builder: (context, _) {
       final demand = _read();
       final days = [
