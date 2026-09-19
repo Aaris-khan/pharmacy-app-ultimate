@@ -61,6 +61,26 @@ void main() {
     );
   });
 
+  test('scanner wait treats settled failures as drained', () async {
+    expect(
+      await scannerWorkCompletedWithin<void>(
+        Future<void>.error(StateError('reader failed')),
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isTrue,
+    );
+    expect(
+      await scannerWorkGroupCompletedWithin(
+        <Future<dynamic>?>[
+          Future<void>.error(StateError('capture failed')),
+          Future<bool>.value(false),
+        ],
+        timeout: const Duration(milliseconds: 15),
+      ),
+      isTrue,
+    );
+  });
+
 
   test('scanner grouped drain treats no active work as complete', () async {
     expect(

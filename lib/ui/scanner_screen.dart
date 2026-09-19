@@ -35,6 +35,13 @@ Future<bool> scannerWorkCompletedWithin<T>(
     return true;
   } on TimeoutException {
     return false;
+  } catch (_) {
+    // Drain callers care whether the operation has settled and released its
+    // ownership, not whether recognition itself succeeded. Treat an already
+    // failed operation as drained so teardown/retry cannot inherit a poisoned
+    // lifecycle future. Callers that need the operation result still await the
+    // original future separately and observe its error normally.
+    return true;
   }
 }
 
