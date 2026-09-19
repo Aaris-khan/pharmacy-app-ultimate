@@ -36,6 +36,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   bool _loading = true;
   String _error = '';
   int _generation = 0;
+  Future<void> _searchTail = Future<void>.value();
 
   @override
   void initState() {
@@ -93,9 +94,13 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   }
 
   void _typed(String _) {
+    ++_generation;
     _debounce?.cancel();
     if (mounted) {
       setState(() {
+        // Query meaning changed. Never leave a removed-stock row from the
+        // previous query tappable while the debounce/new search is pending.
+        _hits = const [];
         _loading = true;
         _error = '';
       });
@@ -106,15 +111,34 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     );
   }
 
-  Future<void> _search() async {
+  Future<void> _search() {
     final generation = ++_generation;
     final query = _query.text;
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = '';
-      });
-    }
+    if (!mounted) return Future<void>.value();
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+
+    // The shared search worker serializes expensive fuzzy work. Coalesce again
+    // at this screen boundary so superseded removed-stock queries are discarded
+    // before they can enter that queue. One already-running search may finish;
+    // after it drains, only the newest queued generation performs real work.
+    final operation = _searchTail.then<void>(
+      (_) => _runSearch(generation: generation, query: query),
+    );
+    _searchTail = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  Future<void> _runSearch({
+    required int generation,
+    required String query,
+  }) async {
+    if (!mounted || generation != _generation) return;
     try {
       final hits = await widget.controller.searchArchived(query);
       if (!mounted || generation != _generation) return;
