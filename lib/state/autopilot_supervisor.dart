@@ -281,7 +281,7 @@ class AarisAutopilotDigest {
     return 'Aaris Autopilot found $issueCount attention items: $urgency.$next';
   }
 
-  AarisAutopilotDigest withEvaluatedAt(DateTime value) =>
+  AarisAutopilotDigest _withEvaluatedAt(DateTime value) =>
       AarisAutopilotDigest._(
         health: health,
         inventoryRevision: inventoryRevision,
@@ -488,9 +488,9 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
 /// It continuously coalesces Medicine Database changes into the existing
 /// deterministic Needs Attention + dependency planner. Heavy operational
 /// analysis runs away from the UI isolate, never calls a stock mutation API, and
-/// publishes only if the exact inventory revision is still current. At most one
-/// worker runs at a time; newer writes invalidate old output and collapse into a
-/// single fresh pass.
+/// publishes only if the exact immutable snapshot and civil day are still current.
+/// At most one worker runs at a time; newer writes invalidate old output and
+/// collapse into a single fresh pass.
 class AarisAutopilotSupervisor extends ChangeNotifier {
   AarisAutopilotSupervisor(
     this.controller, {
@@ -555,12 +555,8 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   int _observedRevision = -1;
   String _observedDay = '';
   bool _observedReady = false;
-  int _evaluationRuns = 0;
 
   bool get lifecycleActive => _lifecycleActive;
-
-  @visibleForTesting
-  int get debugEvaluationRuns => _evaluationRuns;
 
   /// Pauses read-only background planning outside the foreground lifecycle. Any
   /// in-flight result is generation-invalidated and therefore cannot publish a
@@ -663,7 +659,7 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
       // Operational planning is deterministic for one immutable snapshot and
       // civil day. Route-open/resume refreshes should update freshness metadata
       // without rebuilding the full payload or starting another isolate.
-      _digest = _digest.withEvaluatedAt(controller.clock());
+      _digest = _digest._withEvaluatedAt(controller.clock());
       return;
     }
 
@@ -684,7 +680,6 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
         'today': today,
       };
 
-      _evaluationRuns++;
       final result = await compute(_evaluateAutopilot, payload);
       if (_disposed || !_lifecycleActive || generation != _generation) return;
       if (!identical(controller.snapshot, source) ||
