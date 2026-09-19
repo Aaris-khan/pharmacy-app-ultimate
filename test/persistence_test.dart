@@ -159,6 +159,28 @@ void main() {
     expect(controller.snapshot.records[live.id]!.quantity, 3);
     expect(controller.sales, isEmpty);
   });
+  test(
+    'imported SOLD row stays stock history without inventing a sale',
+    () async {
+      final imported = Medicine.fromJson(<String, dynamic>{
+        ...stock('imported-sold', quantity: 4).toJson(),
+        'sold': true,
+        'quantity': 0,
+        'soldAt': contractToday.toIso8601String(),
+        'soldQuantity': 4,
+      });
+
+      await controller.save(imported, expectedRevision: 0);
+
+      final saved = controller.snapshot.records[imported.id]!;
+      expect(saved.sold, isTrue);
+      expect(saved.quantity, 0);
+      expect(saved.soldQuantity, 4);
+      expect(controller.sales, isEmpty);
+      expect(controller.list(SearchScope.sold).single.id, imported.id);
+    },
+  );
+
   test('invalid second row rolls back the entire SQL transaction', () async {
     await expectLater(
       storage.commit(
