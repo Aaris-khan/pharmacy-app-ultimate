@@ -77,7 +77,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _refreshWhenActive = false;
       _debounce?.cancel();
       _onlineDebounce?.cancel();
-      unawaited(_search());
+      unawaited(_search(preserveResults: true));
     }
   }
 
@@ -126,18 +126,19 @@ class _SearchScreenState extends State<SearchScreen> {
     _observedDay = currentDay;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
-    unawaited(_search());
+    unawaited(_search(preserveResults: true));
   }
 
-  Future<void> _search() async {
+  Future<void> _search({bool preserveResults = false}) async {
     final generation = ++_generation;
     final typedQuery = _query.text;
     if (!mounted) return;
     setState(() {
-      // Keep the last valid result list visible while the next background
-      // search is running. Clearing it here made every keystroke collapse and
-      // rebuild the result area before the debounced answer arrived.
+      // Snapshot/day refreshes keep the last valid cards on screen while the
+      // same query is recomputed. A new query clears them immediately so stale
+      // results can never remain tappable under different search text.
       _loading = true;
+      if (!preserveResults) _hits = [];
       _error = '';
     });
     try {
@@ -194,9 +195,9 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     setState(() {
-      // Preserve the current cards during the short debounce so typing does not
-      // flash an empty state between queries. Generation checks still prevent
-      // stale results from replacing the eventual answer.
+      // Query meaning changed. Remove old cards immediately rather than leaving
+      // a stale medicine tappable during the short debounce.
+      _hits = [];
       _loading = true;
       _error = '';
       _scan = null;
