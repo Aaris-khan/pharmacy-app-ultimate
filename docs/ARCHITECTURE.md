@@ -39,7 +39,7 @@ the exact invisible stock ID; they never repeat a name search to find an editor.
 | `domain/stock_risk.dart` | Read-only FEFO expiry-waste pressure from known stock plus recorded sales; uncertainty fails closed |
 | `domain/ai_protocol.dart` | Pharmacy-only export and strict reviewed mutation protocol |
 | `domain/backup.dart` | Versioned full-backup envelope and restore validation |
-| `data/inventory_database.dart` | SQLite v3, serialized atomic commits, events, receipts and Undo facts |
+| `data/inventory_database.dart` | SQLite v4, serialized atomic commits, events, receipts and Undo facts |
 | `state/pharmacy_controller.dart` | Reactive state, midnight rollover, commands and isolate search orchestration |
 | `state/stock_location_operations.dart` | Revision-bound reviewed physical-stock relocation; no clinical or sales write authority |
 | `services/` | OCR/barcode, media import, speech, AI transport, backup sharing and purchase orders |
@@ -220,7 +220,8 @@ narrow screens and large text. Physical Android QA is still required for camera
 focus, vendor speech behavior, file pickers, long videos, PDF sharing and low-end
 device memory.
 
-This code-upgrade pass does not run workflows or build an APK. Its checkpoint
-commits carry `[skip ci]`; existing release workflow configuration remains
-untouched. Release signing, CI execution and APK generation remain explicit owner
-operations.
+Repository CI is part of this verification boundary. Pushes and pull requests
+to `main` run static analysis, the full Flutter regression suite and a debug
+Android compile. The release workflow repeats the safety gates before producing
+a release APK artifact. Physical-device QA, release signing and distribution
+remain explicit owner-controlled operations.
