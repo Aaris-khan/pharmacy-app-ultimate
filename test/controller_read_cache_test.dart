@@ -81,6 +81,45 @@ void main() {
     expect(controller.homeProjection.activeCount, 1);
   });
 
+  test('search dataset epoch changes only when medicine rows change', () async {
+    final medicine = Medicine(
+      id: 'search-cache-stock',
+      name: 'Search Cache Medicine',
+      strength: '500mg',
+      form: 'Tablet',
+      quantity: 10,
+      expiry: DateTime(2027, 1, 1),
+    );
+    final controller = PharmacyController(
+      MemoryInventoryStorage(
+        InventorySnapshot(
+          records: <String, Medicine>{medicine.id: medicine},
+        ),
+      ),
+      clock: () => DateTime(2026, 9, 20, 10),
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+
+    final initialEpoch = controller.debugSearchDatasetEpoch;
+
+    await controller.setShortWarningDays(5);
+    expect(
+      controller.debugSearchDatasetEpoch,
+      initialEpoch,
+      reason:
+          'Warning preferences change scope semantics, not the searchable medicine dataset.',
+    );
+
+    final live = controller.snapshot.records[medicine.id]!;
+    await controller.save(
+      live.patch(<String, dynamic>{'quantity': 9}),
+      expectedRevision: controller.snapshot.revision,
+    );
+    expect(controller.debugSearchDatasetEpoch, initialEpoch + 1);
+  });
+
   test('tracking read model is reused by range and invalidated safely', () async {
     var now = DateTime(2026, 9, 12, 10);
     final controller = PharmacyController(
