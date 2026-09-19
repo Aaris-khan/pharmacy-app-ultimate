@@ -362,14 +362,15 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
                         ChoiceChip(
                           label: Text('Return due · ${dueIds.length}'),
                           selected: _dueOnly,
                           onSelected: (_) => setState(() => _dueOnly = true),
                         ),
-                        const SizedBox(width: 8),
                         ChoiceChip(
                           label: Text('All stock · ${all.length}'),
                           selected: !_dueOnly,
