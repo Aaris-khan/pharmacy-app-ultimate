@@ -140,9 +140,17 @@ class SalesOverview {
   int salesValuePaise = 0;
   int unknownValueSales = 0;
   final Map<String, SoldMedicineDemand> _byMedicine = {};
+  SoldMedicineDemand? _topDemandCache;
+  bool _topDemandResolved = false;
   List<SoldMedicineDemand>? _rankedCache;
 
   int _positiveUnits(int? value) => value != null && value > 0 ? value : 1;
+
+  int _compareDemand(SoldMedicineDemand a, SoldMedicineDemand b) {
+    final units = b.unitsSold.compareTo(a.unitsSold);
+    if (units != 0) return units;
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
 
   bool _hasRecordedFinalSale(Medicine medicine, Set<String> saleWitnesses) {
     final soldAt = medicine.soldAt == null
@@ -183,17 +191,28 @@ class SalesOverview {
     }
   }
 
+  SoldMedicineDemand? get topDemand {
+    if (_topDemandResolved) return _topDemandCache;
+
+    SoldMedicineDemand? top;
+    for (final item in _byMedicine.values) {
+      if (item.unitsSold <= 0) continue;
+      if (top == null || _compareDemand(item, top) < 0) {
+        top = item;
+      }
+    }
+    _topDemandCache = top;
+    _topDemandResolved = true;
+    return top;
+  }
+
   List<SoldMedicineDemand> get ranked {
     final cached = _rankedCache;
     if (cached != null) return cached;
     final result = _byMedicine.values
         .where((item) => item.unitsSold > 0)
         .toList();
-    result.sort((a, b) {
-      final units = b.unitsSold.compareTo(a.unitsSold);
-      if (units != 0) return units;
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-    });
+    result.sort(_compareDemand);
     return _rankedCache = List<SoldMedicineDemand>.unmodifiable(result);
   }
 }

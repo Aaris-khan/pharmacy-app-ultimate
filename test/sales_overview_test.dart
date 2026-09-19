@@ -64,8 +64,13 @@ void main() {
       ),
     ]);
 
+    final top = overview.topDemand;
+    expect(top?.name, 'Paracetamol');
+    expect(top?.unitsSold, 10);
+
     final ranked = overview.ranked;
     expect(ranked.length, 2);
+    expect(ranked.first, same(top));
     expect(ranked.first.name, 'Paracetamol');
     expect(ranked.first.unitsSold, 10);
     expect(

@@ -17,8 +17,9 @@ class StatsScreen extends StatelessWidget {
     builder: (context, _) {
       final inventory = controller.stats;
       final sales = controller.salesOverview;
-      final ranked = sales.ranked;
-      final top = ranked.isEmpty ? null : ranked.first;
+      // The snapshot card needs only one winner. Avoid sorting the complete
+      // demand ranking until the pharmacist actually opens the tracker.
+      final top = sales.topDemand;
       final topShare = top?.demandShare(sales.totalUnitsSold) ?? 0;
       final cards = [
         _SnapshotMetric(
