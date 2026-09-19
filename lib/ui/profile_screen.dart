@@ -96,7 +96,13 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
-    rebuildToken: () => controller.snapshot,
+    // The profile landing page renders warning preferences and supplier
+    // count. Stock/sales/activity mutations are read lazily when their actions
+    // are opened and should not repaint this retained tab.
+    rebuildToken: () => (
+      controller.snapshot.settings,
+      controller.snapshot.suppliers,
+    ),
     builder: (context, _) => ListView(
       key: const PageStorageKey('profile-scroll'),
       padding: const EdgeInsets.fromLTRB(22, 26, 22, 30),
