@@ -150,6 +150,31 @@ void main() {
     );
 
     test(
+      'revision-only freshness updates keep unchanged operational UI quiet',
+      () {
+        final plan = PharmacyOperationsPlan.build(
+          items: const <AttentionItem>[],
+          medicines: const <Medicine>[],
+        );
+        final first = AarisAutopilotDigest.fromPlan(
+          inventoryRevision: 44,
+          items: const <AttentionItem>[],
+          plan: plan,
+          evaluatedAt: DateTime(2026, 9, 10, 9),
+        );
+        final second = AarisAutopilotDigest.fromPlan(
+          inventoryRevision: 45,
+          items: const <AttentionItem>[],
+          plan: plan,
+          evaluatedAt: DateTime(2026, 9, 10, 10),
+        );
+
+        expect(first.inventoryRevision, isNot(second.inventoryRevision));
+        expect(first.sameOperationalState(second), isTrue);
+      },
+    );
+
+    test(
       'worker result keeps exact next-task identity across isolate boundary',
       () {
         final digest = AarisAutopilotDigest.fromWorker(
@@ -251,6 +276,41 @@ void main() {
 
         expect(supervisor.digest.highCount, greaterThanOrEqualTo(1));
         expect(supervisor.digest.nextKind, AttentionKind.futureSaleHistory);
+      },
+    );
+
+    test(
+      'initial load wakes supervisor even when revision and day stay unchanged',
+      () async {
+        final controller = PharmacyController(
+          MemoryInventoryStorage(),
+          clock: () => DateTime(2026, 9, 10, 10),
+          backgroundSearch: false,
+        );
+        final supervisor = AarisAutopilotSupervisor(
+          controller,
+          debounce: Duration.zero,
+        );
+        addTearDown(() {
+          supervisor.dispose();
+          controller.dispose();
+        });
+
+        // Let the constructor's pre-initialization pass settle as waiting.
+        await Future<void>.delayed(Duration.zero);
+        expect(supervisor.digest.health, AarisAutopilotHealth.waiting);
+        expect(supervisor.digest.inventoryRevision, 0);
+
+        // Loading an empty revision-0 database changes readiness only. The
+        // supervisor must still schedule a fresh worker pass.
+        await controller.initialize();
+        for (var attempt = 0; attempt < 50; attempt++) {
+          if (supervisor.digest.isReady) break;
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+
+        expect(supervisor.digest.health, AarisAutopilotHealth.clear);
+        expect(supervisor.digest.inventoryRevision, 0);
       },
     );
 
