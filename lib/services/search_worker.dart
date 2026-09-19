@@ -5,6 +5,23 @@ import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import '../domain/search.dart';
 
+List<SearchHit> _browseActiveRecords(
+  List<Medicine> records,
+  SearchScope scope,
+  WarningSettings settings,
+  DateTime today,
+  int limit,
+) {
+  final visible = records
+      .where((medicine) => inScope(medicine, scope, settings, today))
+      .toList(growable: false)
+    ..sort((a, b) => expiryOrder(a, b, today));
+  return visible
+      .take(limit)
+      .map((medicine) => SearchHit(medicine.id, 1, 'Inventory', ''))
+      .toList(growable: false);
+}
+
 void _searchEntry(SendPort main) {
   final receive = ReceivePort();
   main.send(receive.sendPort);
@@ -19,24 +36,29 @@ void _searchEntry(SendPort main) {
       final kind = message['kind'] as String;
       if (kind == 'index') {
         indexedRecords = (message['records'] as List).cast<Medicine>();
-        engine = MedicineSearch(indexedRecords!);
-        // Removed history is intentionally indexed lazily. Normal medicine
-        // search stays as small and hot as before even when years of archived
-        // stock are retained for recovery/audit.
+        // Opening Stock with an empty query is a browse operation, not a fuzzy
+        // search. Keep authoritative records ready in the worker but defer the
+        // expensive token/trigram/delete indexes until a real query arrives.
+        engine = null;
         archivedEngine = null;
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
       } else if (kind == 'reuseIndex') {
-        if (engine == null || indexedRecords == null) {
-          throw StateError('Search index changed. Retry this search.');
+        if (indexedRecords == null) {
+          throw StateError('Search dataset changed. Retry this search.');
         }
         // Stock-only facts (quantity, price, row revision) do not participate
-        // in the expensive token/fuzzy projection. The main isolate already
-        // proved every searchable/status field is unchanged; rebind only the
-        // dataset revision so subsequent requests keep the actor protocol exact
-        // without rebuilding an identical index.
+        // in search/status projection. The main isolate already proved those
+        // fields are unchanged, so any existing fuzzy index stays valid.
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
+      } else if (kind == 'ensureSearchIndex') {
+        if (indexedRecords == null || revision != message['revision']) {
+          throw StateError('Search dataset changed. Retry this search.');
+        }
+        final built = engine == null;
+        engine ??= MedicineSearch(indexedRecords!);
+        main.send({'id': id, 'result': built});
       } else {
         if (engine == null ||
             indexedRecords == null ||
@@ -57,16 +79,37 @@ void _searchEntry(SendPort main) {
             ),
           });
         } else if (kind == 'search') {
-          main.send({
-            'id': id,
-            'result': engine!.search(
-              message['query'] as String,
-              message['scope'] as SearchScope,
-              message['settings'] as WarningSettings,
-              message['today'] as DateTime,
-              limit: message['limit'] as int,
-            ),
-          });
+          final query = message['query'] as String;
+          final scope = message['scope'] as SearchScope;
+          final settings = message['settings'] as WarningSettings;
+          final today = message['today'] as DateTime;
+          final limit = message['limit'] as int;
+          if (query.trim().isEmpty) {
+            main.send({
+              'id': id,
+              'result': _browseActiveRecords(
+                indexedRecords!,
+                scope,
+                settings,
+                today,
+                limit,
+              ),
+            });
+          } else {
+            if (engine == null) {
+              throw StateError('Search index is not ready. Retry this search.');
+            }
+            main.send({
+              'id': id,
+              'result': engine!.search(
+                query,
+                scope,
+                settings,
+                today,
+                limit: limit,
+              ),
+            });
+          }
         } else {
           throw StateError('Unknown search operation.');
         }
@@ -252,8 +295,8 @@ class SearchWorker {
   bool _closed = false;
   Future<void> _queue = Future.value();
 
-  /// Diagnostic only. Useful for regression tests and future performance
-  /// telemetry; it does not participate in search decisions.
+  /// Number of expensive fuzzy-index builds, not ordinary empty-query browse
+  /// passes. Diagnostic only; it never participates in search decisions.
   int get debugIndexBuilds => _indexBuilds;
 
   Future<_SearchWorkerSession> _worker() {
@@ -350,8 +393,23 @@ class SearchWorker {
     _indexedRecordRefs
       ..clear()
       ..addEntries(records.map((record) => MapEntry(record.id, record)));
-    _indexBuilds++;
     return session;
+  }
+
+  Future<void> _ensureSearchIndex(
+    _SearchWorkerSession session,
+    int revision,
+  ) async {
+    final built = await session.request({
+      'kind': 'ensureSearchIndex',
+      'revision': revision,
+    });
+    if (!session.alive) {
+      throw const _SearchWorkerTransportFailure(
+        'Background search stopped while preparing its fuzzy index.',
+      );
+    }
+    if (built == true) _indexBuilds++;
   }
 
   Future<T> _withTransportRecovery<T>(Future<T> Function() operation) async {
@@ -378,6 +436,9 @@ class SearchWorker {
     final result = _queue.then(
       (_) => _withTransportRecovery(() async {
         final session = await _ensureIndex(records, revision);
+        if (query.trim().isNotEmpty) {
+          await _ensureSearchIndex(session, revision);
+        }
         final response = await session.request({
           'kind': 'search',
           'revision': revision,
