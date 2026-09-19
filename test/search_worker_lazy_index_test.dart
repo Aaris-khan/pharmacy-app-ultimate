@@ -40,4 +40,49 @@ void main() {
     expect(typed.single.id, record.id);
     expect(worker.debugIndexBuilds, 1);
   });
+
+  test('empty browse transfers only the requested ordered window', () async {
+    final worker = SearchWorker();
+    addTearDown(worker.close);
+
+    final records = List<Medicine>.generate(
+      260,
+      (index) => Medicine(
+        id: 'browse-$index',
+        name: 'Medicine $index',
+        expiry: DateTime.utc(2027, 1, 1).add(Duration(days: index)),
+        quantity: 10,
+      ),
+      growable: false,
+    );
+    const settings = WarningSettings();
+    final today = DateTime.utc(2026, 9, 10);
+
+    final first = await worker.search(
+      records,
+      1,
+      '',
+      SearchScope.all,
+      settings,
+      today,
+      resultLimit: 120,
+    );
+    final expanded = await worker.search(
+      records,
+      1,
+      '',
+      SearchScope.all,
+      settings,
+      today,
+      resultLimit: 240,
+    );
+
+    expect(first, hasLength(120));
+    expect(expanded, hasLength(240));
+    expect(
+      expanded.take(first.length).map((hit) => hit.id),
+      first.map((hit) => hit.id),
+    );
+    expect(worker.debugIndexBuilds, 0);
+  });
 }
