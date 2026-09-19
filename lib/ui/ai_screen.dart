@@ -958,70 +958,105 @@ class _AiScreenState extends State<AiScreen> {
                 }
                 return false;
               },
-              child: ListView(
+              child: CustomScrollView(
                 controller: _scroll,
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                children: [
-                  for (final message in _messages)
-                    _AiMessageBubble(message: message),
-                  if (_journey == _AiJourneyState.thinking)
-                    _AiThinkingBubble(
-                      detail:
-                          _configuration.localBrainEnabled && _local.hasSelection
-                          ? _local.status
-                          : 'AI route connected · preparing answer',
-                    ),
-                  if (_journey == _AiJourneyState.streaming &&
-                      _streamingText.isEmpty)
-                    const _AiThinkingBubble(
-                      detail: 'Receiving and validating streamed response…',
-                    ),
-                  if (_journey == _AiJourneyState.streaming &&
-                      _streamingText.isNotEmpty)
-                    _AiMessageBubble(
-                      message: _AiChatMessage(_streamingText, false),
-                    ),
-                  if (_journey == _AiJourneyState.stopping)
-                    const _AiThinkingBubble(
-                      detail: 'Stopping local inference safely · next Send unlocks when the native lease is free',
-                    ),
-                  if (_error.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
-                      child: Surface(
-                        color: errorSoft,
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(
-                              Icons.error_outline_rounded,
-                              color: red,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 9),
-                            Expanded(
-                              child: SelectableText(
-                                _error,
-                                style: const TextStyle(color: red, fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                slivers: [
+                  // Historical chat can grow for the whole screen session while
+                  // streamed replies update every few milliseconds. Materialize
+                  // only rows near the viewport instead of rebuilding every old
+                  // bubble on each preview tick.
+                  if (_messages.isNotEmpty)
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      sliver: SliverList.builder(
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) =>
+                            _AiMessageBubble(message: _messages[index]),
                       ),
                     ),
-                  if (_plan != null) _reviewPanel(context),
-                  MedicineIntakePanel(
-                    controller: widget.controller,
-                    onAsk: (evidence) {
-                      _request.text =
-                          'Explain only the captured identity, salt and expiry and check existing stock; do not add stock or give treatment advice. OCR DATA: '
-                          '${evidence.length > 2200 ? evidence.substring(0, 2200) : evidence}';
-                      unawaited(_ask());
-                    },
+                  // Keep the operational tail as its own eagerly-mounted sliver.
+                  // MedicineIntakePanel owns live queue UI/state and must not be
+                  // recycled merely because the pharmacist scrolls chat history.
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      _messages.isEmpty ? 4 : 0,
+                      16,
+                      14,
+                    ),
+                    sliver: SliverToBoxAdapter(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_journey == _AiJourneyState.thinking)
+                            _AiThinkingBubble(
+                              detail:
+                                  _configuration.localBrainEnabled &&
+                                      _local.hasSelection
+                                  ? _local.status
+                                  : 'AI route connected · preparing answer',
+                            ),
+                          if (_journey == _AiJourneyState.streaming &&
+                              _streamingText.isEmpty)
+                            const _AiThinkingBubble(
+                              detail:
+                                  'Receiving and validating streamed response…',
+                            ),
+                          if (_journey == _AiJourneyState.streaming &&
+                              _streamingText.isNotEmpty)
+                            _AiMessageBubble(
+                              message: _AiChatMessage(_streamingText, false),
+                            ),
+                          if (_journey == _AiJourneyState.stopping)
+                            const _AiThinkingBubble(
+                              detail:
+                                  'Stopping local inference safely · next Send unlocks when the native lease is free',
+                            ),
+                          if (_error.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+                              child: Surface(
+                                color: errorSoft,
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(
+                                      Icons.error_outline_rounded,
+                                      color: red,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 9),
+                                    Expanded(
+                                      child: SelectableText(
+                                        _error,
+                                        style: const TextStyle(
+                                          color: red,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (_plan != null) _reviewPanel(context),
+                          MedicineIntakePanel(
+                            controller: widget.controller,
+                            onAsk: (evidence) {
+                              _request.text =
+                                  'Explain only the captured identity, salt and expiry and check existing stock; do not add stock or give treatment advice. OCR DATA: '
+                                  '${evidence.length > 2200 ? evidence.substring(0, 2200) : evidence}';
+                              unawaited(_ask());
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
                 ],
               ),
             ),
