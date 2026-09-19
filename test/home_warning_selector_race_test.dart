@@ -7,12 +7,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _BlockingStorage implements InventoryStorage {
+  _BlockingStorage({
+    this.failFirstCommit = false,
+    this.blockSecondCommit = false,
+  });
+
   final MemoryInventoryStorage _inner = MemoryInventoryStorage();
   final Completer<void> _firstCommitGate = Completer<void>();
+  final Completer<void> _secondCommitGate = Completer<void>();
+  final bool failFirstCommit;
+  final bool blockSecondCommit;
   int commits = 0;
 
   void releaseFirstCommit() {
     if (!_firstCommitGate.isCompleted) _firstCommitGate.complete();
+  }
+
+  void releaseSecondCommit() {
+    if (!_secondCommitGate.isCompleted) _secondCommitGate.complete();
   }
 
   @override
@@ -21,12 +33,34 @@ class _BlockingStorage implements InventoryStorage {
   @override
   Future<InventorySnapshot> commit(InventoryMutation mutation) async {
     commits++;
-    if (commits == 1) await _firstCommitGate.future;
+    if (commits == 1) {
+      await _firstCommitGate.future;
+      if (failFirstCommit) throw StateError('planned first write failure');
+    }
+    if (commits == 2 && blockSecondCommit) {
+      await _secondCommitGate.future;
+    }
     return _inner.commit(mutation);
   }
 
   @override
   Future<void> close() => _inner.close();
+}
+
+Future<void> _disposeHarness(
+  WidgetTester tester,
+  PharmacyController controller,
+) async {
+  controller.dispose();
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
+}
+
+Future<void> _chooseShortDays(WidgetTester tester, String label) async {
+  await tester.tap(find.byType(PopupMenuButton<int>).first);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label));
+  await tester.pump(const Duration(milliseconds: 300));
 }
 
 void main() {
@@ -40,43 +74,88 @@ void main() {
         backgroundSearch: false,
       );
       await controller.initialize();
-      addTearDown(controller.dispose);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: HomeScreen(controller: controller, onDatabase: () {}),
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(controller: controller, onDatabase: () {}),
+            ),
           ),
-        ),
-      );
+        );
 
-      Future<void> chooseShortDays(String label) async {
-        await tester.tap(find.byType(PopupMenuButton<int>).first);
+        expect(controller.settings.shortDays, 8);
+        await _chooseShortDays(tester, '5 Days');
+
+        // The first write is still blocked. Choosing the originally committed
+        // value is therefore a real second intent, not a no-op.
+        expect(controller.settings.shortDays, 8);
+        await _chooseShortDays(tester, '8 Days');
+
+        storage.releaseFirstCommit();
         await tester.pumpAndSettle();
-        await tester.tap(find.text(label));
-        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(storage.commits, 2);
+        expect(controller.settings.shortDays, 8);
+        expect(controller.settings.months, 2);
+        expect(controller.snapshot.revision, 2);
+      } finally {
+        await _disposeHarness(tester, controller);
       }
+    },
+  );
 
-      expect(controller.settings.shortDays, 8);
-      await chooseShortDays('5 Days');
+  testWidgets(
+    'failed older equal-valued request cannot retire the latest intent',
+    (tester) async {
+      final storage = _BlockingStorage(
+        failFirstCommit: true,
+        blockSecondCommit: true,
+      );
+      final controller = PharmacyController(
+        storage,
+        clock: () => DateTime(2026, 9, 20, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
 
-      // The first write is still blocked. Choosing the originally committed
-      // value is therefore a real second intent, not a no-op.
-      expect(controller.settings.shortDays, 8);
-      await chooseShortDays('8 Days');
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(controller: controller, onDatabase: () {}),
+            ),
+          ),
+        );
 
-      storage.releaseFirstCommit();
-      await tester.pumpAndSettle();
+        // Queue 5 -> 8 -> 5 while the first 5 is blocked. The first request is
+        // deliberately failed after the newest pending value has returned to 5.
+        await _chooseShortDays(tester, '5 Days');
+        await _chooseShortDays(tester, '8 Days');
+        await _chooseShortDays(tester, '5 Days');
+        storage.releaseFirstCommit();
 
-      expect(storage.commits, 2);
-      expect(controller.settings.shortDays, 8);
-      expect(controller.settings.months, 2);
-      expect(controller.snapshot.revision, 2);
+        // Let the failed first request settle and hold the second write. The
+        // authoritative snapshot is still 8, while the latest pending intent is
+        // 5. A final tap back to 8 must therefore enqueue a fourth request.
+        for (var attempt = 0; attempt < 20 && storage.commits < 2; attempt++) {
+          await tester.pump(const Duration(milliseconds: 10));
+        }
+        expect(storage.commits, 2);
+        expect(controller.settings.shortDays, 8);
+        await _chooseShortDays(tester, '8 Days');
 
-      // PharmacyController owns a civil-day timer. Unmount the Home screen and
-      // cancel that timer before Flutter verifies widget-test invariants.
-      await tester.pumpWidget(const SizedBox.shrink());
-      controller.dispose();
+        storage.releaseSecondCommit();
+        await tester.pumpAndSettle();
+
+        expect(storage.commits, 4);
+        expect(controller.settings.shortDays, 8);
+        expect(controller.snapshot.revision, 3);
+      } finally {
+        storage.releaseFirstCommit();
+        storage.releaseSecondCommit();
+        await _disposeHarness(tester, controller);
+      }
     },
   );
 }
