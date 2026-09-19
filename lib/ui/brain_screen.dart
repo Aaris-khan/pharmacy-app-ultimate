@@ -1562,7 +1562,8 @@ class _BrainScreenState extends State<BrainScreen> {
       return;
     }
 
-    final item = step.item;
+    final selectedStep = step;
+    final item = selectedStep.item;
     if (item.isReorder) {
       await _reorderReview();
       return;
@@ -1592,7 +1593,7 @@ class _BrainScreenState extends State<BrainScreen> {
     widget.onOpenSection(AppSection.stock);
     setState(
       () => _reply =
-          'Starting the next safe task: ${item.title}. ${step.actionLabel} Aaris has selected only this exact stock ID; no inventory change happens without the existing review/confirmation boundary.',
+          'Starting the next safe task: ${item.title}. ${selectedStep.actionLabel} Aaris has selected only this exact stock ID; no inventory change happens without the existing review/confirmation boundary.',
     );
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
