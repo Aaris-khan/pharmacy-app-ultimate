@@ -867,8 +867,8 @@ class PharmacyController extends ChangeNotifier {
 
       var committedRecord = record;
       SaleEvent? soldDepletion;
-      if (record.sold && live?.sold != true) {
-        final soldQuantity = record.soldQuantity ?? live?.quantity;
+      if (record.sold && live != null && !live.sold) {
+        final soldQuantity = record.soldQuantity ?? live.quantity;
         final soldUnitPrice =
             record.soldUnitPricePaise ?? live?.unitPricePaise;
         committedRecord = Medicine.fromJson(<String, dynamic>{
