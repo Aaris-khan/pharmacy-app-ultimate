@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../services/aaris_default_ai_service.dart';
 import '../services/local_ai_service.dart';
 
+import 'design.dart';
+
 /// The single Local AI setup surface inside the existing AI connections sheet.
 /// LocalAiService remains the only source of truth for download/activation state.
 class LocalModelsPanel extends StatefulWidget {
