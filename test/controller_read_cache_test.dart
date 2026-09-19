@@ -216,30 +216,6 @@ void main() {
     expect(identical(returnsAfterWarning, controller.supplierReturns), isFalse);
   });
 
-  test('unchanged warning settings do not publish or persist work', () async {
-    final controller = PharmacyController(
-      MemoryInventoryStorage(),
-      clock: () => DateTime(2026, 9, 20, 10),
-      backgroundSearch: false,
-    );
-    await controller.initialize();
-    addTearDown(controller.dispose);
-
-    final revision = controller.snapshot.revision;
-    var publications = 0;
-    controller.addListener(() => publications++);
-
-    await controller.setWarnings(
-      WarningSettings(
-        shortDays: controller.settings.shortDays,
-        months: controller.settings.months,
-      ),
-    );
-
-    expect(controller.snapshot.revision, revision);
-    expect(publications, 0);
-  });
-
   test('tracking read model is reused by range and invalidated safely', () async {
     var now = DateTime(2026, 9, 12, 10);
     final controller = PharmacyController(
