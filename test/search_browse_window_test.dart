@@ -107,6 +107,11 @@ void main() {
             'typed search is cancelled before its debounce fires.',
       );
       expect(tester.takeException(), isNull);
+
+      // Dispose the controller before widget-test invariants inspect pending
+      // timers; addTearDown remains a fallback for earlier assertion failures.
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
     },
   );
 }
