@@ -849,11 +849,11 @@ class _AiScreenState extends State<AiScreen> {
               LinearProgressIndicator(
                 value:
                     widget.controller.preparedActions /
-                    (plan.changes.isEmpty ? 1 : plan.changes.length),
+                    (_selected.isEmpty ? 1 : _selected.length),
               ),
               const SizedBox(height: 8),
               Text(
-                'Prepared ${widget.controller.preparedActions} of ${plan.changes.length}. Saving is atomic.',
+                'Prepared ${widget.controller.preparedActions} of ${_selected.length} selected changes. Saving is atomic.',
                 style: const TextStyle(fontSize: 11, color: muted),
               ),
               TextButton(
