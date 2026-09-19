@@ -7,6 +7,7 @@ import '../lib/app.dart';
 import '../lib/data/inventory_database.dart';
 import '../lib/domain/inventory.dart';
 import '../lib/domain/search.dart';
+import '../lib/domain/supplier.dart';
 import '../lib/state/pharmacy_controller.dart';
 import '../lib/ui/design.dart';
 import '../lib/ui/search_screen.dart';
@@ -47,6 +48,7 @@ class _RefreshGatedController extends PharmacyController {
       );
 
   Completer<void>? _nextSearchGate;
+  int searchRequests = 0;
 
   Completer<void> gateNextSearch() {
     if (_nextSearchGate != null) {
@@ -59,6 +61,7 @@ class _RefreshGatedController extends PharmacyController {
 
   @override
   Future<List<SearchHit>> search(String raw, SearchScope scope) async {
+    if (raw.trim().isNotEmpty) searchRequests++;
     final gate = _nextSearchGate;
     if (raw.trim().isNotEmpty && gate != null) {
       _nextSearchGate = null;
@@ -150,6 +153,72 @@ void main() {
       controller.dispose();
     },
   );
+  testWidgets(
+    'metadata-only snapshot changes do not restart an active stock query',
+    (tester) async {
+      final record = stock(
+        'metadata-search-target',
+        name: 'Drotaverine',
+        strength: '80mg',
+        expiry: '2027-01-01',
+        quantity: 10,
+      );
+      final controller = _RefreshGatedController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {record.id: record}),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: SearchScreen(
+            controller: controller,
+            scope: SearchScope.all,
+            database: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pumpAndSettle();
+      expect(controller.searchRequests, 1);
+
+      await controller.saveSupplier(
+        const Supplier(
+          id: 'supplier_search_metadata',
+          name: 'Metadata Supplier',
+          returnBeforeExpiryDays: 30,
+        ),
+        expectedRevision: controller.snapshot.revision,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        controller.searchRequests,
+        1,
+        reason:
+            'Supplier metadata does not change medicine search membership or ordering.',
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is MedicineCard && widget.record.id == record.id,
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
   testWidgets(
     'same-query refresh keeps stock-only hits but retires stale searchable hits',
     (tester) async {
