@@ -151,6 +151,8 @@ class _SearchScreenState extends State<SearchScreen> {
     unawaited(_search(preserveResults: true));
   }
 
+  void _maybeLoadMore() {}
+
   Future<void> _search({bool preserveResults = false}) {
     final generation = ++_generation;
     final typedQuery = _query.text;
