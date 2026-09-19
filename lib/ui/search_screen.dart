@@ -852,12 +852,29 @@ class _SearchScreenState extends State<SearchScreen> {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(22, 12, 22, 30),
-            child: Text(
-              _hits.length == 150 && _query.text.isNotEmpty
-                  ? 'Showing the best 150 matches. Refine your search for more.'
-                  : '${_hits.length} stock ${_hits.length == 1 ? 'entry' : 'entries'}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: muted),
+            child: Column(
+              children: [
+                Text(
+                  _hits.length == 150 && _query.text.isNotEmpty
+                      ? 'Showing the best 150 matches. Refine your search for more.'
+                      : _query.text.trim().isEmpty &&
+                            !_browseExhausted &&
+                            _hits.isNotEmpty
+                      ? 'Showing ${_hits.length} stock entries'
+                      : '${_hits.length} stock ${_hits.length == 1 ? 'entry' : 'entries'}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12, color: muted),
+                ),
+                if (_query.text.trim().isEmpty &&
+                    !_browseExhausted &&
+                    _hits.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: _loading ? null : _expandBrowse,
+                    child: Text(_loading ? 'Loading more…' : 'Load more'),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
