@@ -60,10 +60,8 @@ void _searchEntry(SendPort main) {
         engine ??= MedicineSearch(indexedRecords!);
         main.send({'id': id, 'result': built});
       } else {
-        if (engine == null ||
-            indexedRecords == null ||
-            revision != message['revision']) {
-          throw StateError('Search index changed. Retry this search.');
+        if (indexedRecords == null || revision != message['revision']) {
+          throw StateError('Search dataset changed. Retry this search.');
         }
         if (kind == 'searchArchived') {
           archivedEngine ??= MedicineSearch(
