@@ -29,9 +29,8 @@ Future<String?> voiceSearch(
             _OfflineVoiceSheet(title: title, actionLabel: actionLabel),
       );
       if (result is String) return result;
-      if (result != _OfflineVoiceDecision.usePhoneSpeech || !context.mounted) {
-        return null;
-      }
+      if (result != _OfflineVoiceDecision.usePhoneSpeech) return null;
+      if (!context.mounted) return null;
     }
 
     final systemController = VoiceSearchController();
