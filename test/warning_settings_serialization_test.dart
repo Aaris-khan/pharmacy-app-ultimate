@@ -94,4 +94,25 @@ void main() {
     expect(exported.content, contains('queued-export'));
   });
 
+  test('settled read waits for an already queued inventory write', () async {
+    final c = controller();
+    await c.initialize();
+    addTearDown(c.dispose);
+
+    final save = c.save(
+      Medicine.fromJson(<String, dynamic>{
+        'id': 'queued-order-stock',
+        'name': 'Cefixime',
+        'quantity': 10,
+      }),
+      expectedRevision: c.snapshot.revision,
+    );
+
+    await c.settlePendingWrites();
+    await save;
+
+    expect(c.snapshot.revision, 1);
+    expect(c.snapshot.records['queued-order-stock']?.quantity, 10);
+  });
+
 }
