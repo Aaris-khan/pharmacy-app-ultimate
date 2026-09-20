@@ -50,7 +50,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
   late final TextEditingController _gstin;
   late final TextEditingController _drugLicenceNo;
   final List<_CustomFieldDraft> _custom = <_CustomFieldDraft>[];
-  bool _busy = false;
+  bool _busy = false, _dirty = false, _allowPop = false;
 
   @override
   void initState() {
@@ -88,6 +88,33 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
     }
     super.dispose();
   }
+
+  void _markDirty() {
+    if (_dirty || _busy) return;
+    setState(() => _dirty = true);
+  }
+
+  Future<bool> _confirmDiscard() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Discard unsaved supplier changes?'),
+          content: const Text(
+            'Your saved supplier details will remain as they were.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Discard'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Future<void> _addMore() async {
     if (_busy) return;
@@ -148,6 +175,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
           value: TextEditingController(),
         ),
       );
+      _dirty = true;
     });
   }
 
@@ -187,6 +215,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       if (!mounted) return;
       final messenger = ScaffoldMessenger.maybeOf(context);
       completed = true;
+      setState(() => _allowPop = true);
       Navigator.pop(context, supplier.id);
       showSavedWithMessenger(
         messenger,
@@ -218,6 +247,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
         keyboardType: keyboardType,
         maxLines: maxLines,
         validator: validator,
+        onChanged: (_) => _markDirty(),
         textInputAction:
             maxLines > 1 ? TextInputAction.newline : TextInputAction.next,
         decoration: InputDecoration(
@@ -233,7 +263,16 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => PopScope(
+    canPop: _allowPop || (!_dirty && !_busy),
+    onPopInvokedWithResult: (didPop, result) async {
+      if (didPop || _busy || !_dirty) return;
+      if (await _confirmDiscard() && mounted) {
+        setState(() => _allowPop = true);
+        Navigator.pop(context);
+      }
+    },
+    child: Scaffold(
     appBar: AppBar(
       title: Text(widget.supplier == null ? 'Add supplier' : 'Supplier details'),
     ),
@@ -321,6 +360,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                                         _supplierCustomFieldLabelError(
                                           value ?? '',
                                         ),
+                                    onChanged: (_) => _markDirty(),
                                     decoration: const InputDecoration(
                                       labelText: 'Field name',
                                       filled: false,
@@ -337,7 +377,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                                       : () {
                                           final removed = _custom.removeAt(index);
                                           removed.dispose();
-                                          setState(() {});
+                                          setState(() => _dirty = true);
                                         },
                                   icon: const Icon(Icons.close_rounded),
                                 ),
@@ -347,6 +387,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                               controller: _custom[index].value,
                               enabled: !_busy,
                               maxLines: 2,
+                              onChanged: (_) => _markDirty(),
                               decoration: const InputDecoration(
                                 labelText: 'Value',
                                 filled: false,
@@ -373,6 +414,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
           ],
         ),
       ),
+    ),
     ),
   );
 }

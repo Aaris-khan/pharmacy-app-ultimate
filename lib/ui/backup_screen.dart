@@ -60,14 +60,16 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() {
       _reading = true;
       _error = '';
-      _review = null;
-      _pickedFile = null;
     });
     try {
       final picked = await _service.pickBackupFile();
       if (!mounted || picked == null) return;
-      setState(() => _pickedFile = picked);
-      await _reviewFile(picked);
+      final review = await _reviewFile(picked);
+      if (!mounted || review == null) return;
+      setState(() {
+        _pickedFile = picked;
+        _review = review;
+      });
     } on MissingPluginException {
       if (mounted) {
         setState(
@@ -89,9 +91,9 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
-  Future<void> _reviewFile(BackupFileReference picked) async {
+  Future<BackupReview?> _reviewFile(BackupFileReference picked) async {
     final backup = await _service.readBackupFile(picked);
-    if (!mounted || _pickedFile?.path != picked.path) return;
+    if (!mounted) return null;
 
     final current = widget.controller.snapshot;
     final revision = current.revision;
@@ -104,21 +106,19 @@ class _BackupScreenState extends State<BackupScreen> {
       currentSoldValue: current.soldValue,
       currentUnknownSold: current.unknownSold,
     );
-    if (!mounted || _pickedFile?.path != picked.path) return;
+    if (!mounted) return null;
     if (widget.controller.snapshot.revision != revision) {
       setState(
         () => _error =
             'Inventory changed while this backup was being reviewed. Choose the file again to compare it with the latest master stock.',
       );
-      return;
+      return null;
     }
 
-    setState(
-      () => _review = BackupReview(
-        backup: backup,
-        currentRevision: revision,
-        impact: impact,
-      ),
+    return BackupReview(
+      backup: backup,
+      currentRevision: revision,
+      impact: impact,
     );
   }
 

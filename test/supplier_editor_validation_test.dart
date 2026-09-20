@@ -113,4 +113,67 @@ void main() {
       await tester.pump();
     }
   });
+  testWidgets('supplier editor protects unsaved changes from back navigation', (
+    tester,
+  ) async {
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      clock: () => DateTime(2026, 9, 20, 10),
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SupplierEditorScreen(
+                        controller: controller,
+                      ),
+                    ),
+                  ),
+                  child: const Text('Open supplier editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open supplier editor'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextFormField);
+      await tester.enterText(fields.first, 'Draft Supplier');
+      await tester.pump();
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Discard unsaved supplier changes?'), findsOneWidget);
+      expect(find.text('Draft Supplier'), findsOneWidget);
+
+      await tester.tap(find.text('Keep editing'));
+      await tester.pumpAndSettle();
+      expect(find.text('Save supplier'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Open supplier editor'), findsOneWidget);
+      expect(controller.snapshot.revision, 0);
+    } finally {
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
+  });
+
 }
