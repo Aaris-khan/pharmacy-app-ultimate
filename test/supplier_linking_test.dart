@@ -81,6 +81,36 @@ void main() {
     expect(afterWrite.single.medicine.quantity, 19);
   });
 
+  test(
+    'supplier return share review waits for already submitted stock writes',
+    () async {
+      final controller = PharmacyController(
+        MemoryInventoryStorage(),
+        clock: () => today,
+        backgroundSearch: false,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.saveSupplier(_supplierA, expectedRevision: 0);
+      await controller.save(_stock('stock-a'), expectedRevision: 1);
+
+      final live = controller.snapshot.records['stock-a']!;
+      final pendingSave = controller.save(
+        live.patch(<String, dynamic>{'quantity': 19}),
+        expectedRevision: controller.snapshot.revision,
+      );
+      final review = await controller.reviewSupplierReturnAfterPendingWrites(
+        _supplierA.id,
+        const <String>['stock-a'],
+      );
+      await pendingSave;
+
+      expect(review.baseRevision, controller.snapshot.revision);
+      expect(review.lines.single.record.id, 'stock-a');
+      expect(review.lines.single.quantity, 19);
+    },
+  );
+
   test('supplier return confirmation is skipped when sharing is dismissed', () {
     expect(
       SupplierReturnService.shouldOfferHandoverConfirmation(
