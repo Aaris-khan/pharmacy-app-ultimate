@@ -158,6 +158,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       return;
     }
 
+    var completed = false;
     setState(() => _busy = true);
     try {
       final old = widget.supplier;
@@ -183,12 +184,17 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
         expectedRevision: widget.controller.snapshot.revision,
       );
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      completed = true;
       Navigator.pop(context, supplier.id);
-      showSaved(context, old == null ? 'Supplier added.' : 'Supplier updated.');
+      showSavedWithMessenger(
+        messenger,
+        old == null ? 'Supplier added.' : 'Supplier updated.',
+      );
     } catch (error) {
       if (mounted) showError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (!completed && mounted) setState(() => _busy = false);
     }
   }
 
