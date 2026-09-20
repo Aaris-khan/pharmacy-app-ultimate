@@ -71,6 +71,7 @@ class _EditorScreenState extends State<EditorScreen> {
   String _form = '', _supplierId = '', _error = '';
   bool _busy = false, _restocking = false, _dirty = false, _allowPop = false;
   bool _supplierOpening = false;
+  bool _historyOpening = false;
 
   @override
   void initState() {
@@ -907,18 +908,23 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> _history() async {
     final record = widget.record;
-    if (record == null || _busy) return;
-    final restored = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VersionHistoryScreen(
-          controller: widget.controller,
-          medicineId: record.id,
+    if (record == null || _busy || _historyOpening || !mounted) return;
+    setState(() => _historyOpening = true);
+    try {
+      final restored = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VersionHistoryScreen(
+            controller: widget.controller,
+            medicineId: record.id,
+          ),
         ),
-      ),
-    );
-    if (restored == true && mounted) {
-      _finishAndPop('Previous version restored.');
+      );
+      if (restored == true && mounted) {
+        _finishAndPop('Previous version restored.');
+      }
+    } finally {
+      if (mounted && !_allowPop) setState(() => _historyOpening = false);
     }
   }
 
@@ -1106,7 +1112,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _history,
+                      onPressed: _busy || _historyOpening ? null : _history,
                       icon: const Icon(Icons.history_rounded),
                       label: const Text('Version history'),
                     ),
