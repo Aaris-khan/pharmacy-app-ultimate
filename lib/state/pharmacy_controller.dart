@@ -1810,10 +1810,19 @@ class PharmacyController extends ChangeNotifier {
 
   Future<void> undo() => applyUndo(reviewUndo());
 
-  Future<T> _readAfterPendingWrites<T>(T Function() read) async {
+  /// Waits for inventory writes that were already queued when this call began.
+  ///
+  /// External read outputs such as exports, backups and purchase orders use
+  /// this barrier so they cannot publish a snapshot older than an action the
+  /// pharmacist already submitted. Writes queued later keep their normal turn.
+  Future<void> settlePendingWrites() async {
     final barrier = _writes;
     await barrier;
     if (_disposed) throw StateError('App is closed.');
+  }
+
+  Future<T> _readAfterPendingWrites<T>(T Function() read) async {
+    await settlePendingWrites();
     return read();
   }
 
