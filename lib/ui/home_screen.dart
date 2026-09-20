@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../state/pharmacy_controller.dart';
@@ -26,16 +28,48 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _pendingMonths;
   int _shortIntentGeneration = 0;
   int _monthIntentGeneration = 0;
+  bool _routeOpening = false;
 
   PharmacyController get controller => widget.controller;
   VoidCallback get onDatabase => widget.onDatabase;
 
-  void _open(BuildContext context, SearchScope scope) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => SearchScreen(controller: controller, scope: scope),
+  Future<void> _runExclusiveRoute(Future<void> Function() action) async {
+    if (_routeOpening || !mounted) return;
+    _routeOpening = true;
+    try {
+      await action();
+    } finally {
+      _routeOpening = false;
+    }
+  }
+
+  void _open(BuildContext context, SearchScope scope) {
+    unawaited(
+      _runExclusiveRoute(
+        () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => SearchScreen(controller: controller, scope: scope),
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  void _edit([Medicine? record]) {
+    unawaited(
+      _runExclusiveRoute(
+        () => openEditor(context, controller, record: record),
+      ),
+    );
+  }
+
+  void _openWarningSettings(WarningSettings initial) {
+    unawaited(
+      _runExclusiveRoute(
+        () => showWarningSettings(context, controller, initial: initial),
+      ),
+    );
+  }
 
   Future<void> _setShortDays(BuildContext context, int value) async {
     final effective = _pendingShortDays ?? controller.settings.shortDays;
@@ -189,11 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Day' : 'Days'}',
                     onSelected: (value) => _setShortDays(context, value),
-                    onCustom: () => showWarningSettings(
-                      context,
-                      controller,
-                      initial: visibleSettings,
-                    ),
+                    onCustom: () => _openWarningSettings(visibleSettings),
                   ),
                   onTap: () => _open(context, SearchScope.shortExpiry),
                 ),
@@ -212,11 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Month' : 'Months'}',
                     onSelected: (value) => _setMonths(context, value),
-                    onCustom: () => showWarningSettings(
-                      context,
-                      controller,
-                      initial: visibleSettings,
-                    ),
+                    onCustom: () => _openWarningSettings(visibleSettings),
                   ),
                   onTap: () => _open(context, SearchScope.monthExpiry),
                 ),
@@ -315,7 +341,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 GlassIconButton(
                   tooltip: 'Add medicine',
-                  onPressed: () => openEditor(context, controller),
+                  onPressed: _edit,
                   icon: Icons.add_circle_outline_rounded,
                   size: 48,
                 ),
@@ -337,7 +363,7 @@ class _HomeScreenState extends State<HomeScreen> {
               action: RaisedActionButton(
                 icon: Icons.add_rounded,
                 label: 'Add medicine',
-                onPressed: () => openEditor(context, controller),
+                onPressed: _edit,
               ),
             )
           else if (attention.isEmpty)
@@ -365,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   // a stale revision merely because Home avoided a repaint.
                   final live = controller.snapshot.records[m.id];
                   if (live != null) {
-                    openEditor(context, controller, record: live);
+                    _edit(live);
                   }
                 },
               ),
