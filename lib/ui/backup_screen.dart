@@ -230,8 +230,12 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       await widget.controller.restoreBackup(review);
       if (mounted) {
+        final messenger = ScaffoldMessenger.maybeOf(context);
         Navigator.pop(context);
-        showSaved(context, 'Backup restored. All live views are updated.');
+        showSavedWithMessenger(
+          messenger,
+          'Backup restored. All live views are updated.',
+        );
       }
     } catch (error) {
       if (mounted) showError(context, error);
