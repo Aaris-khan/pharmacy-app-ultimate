@@ -35,7 +35,7 @@ class _BackupScreenState extends State<BackupScreen> {
     });
     try {
       final result = await _service.exportAndShare(
-        widget.controller.createBackup(),
+        await widget.controller.createBackupAfterPendingWrites(),
       );
       if (!mounted) return;
       setState(() => _lastExport = result);
