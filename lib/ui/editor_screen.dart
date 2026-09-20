@@ -212,6 +212,14 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _dirty = true);
   }
 
+  void _finishAndPop(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() => _allowPop = true);
+    Navigator.pop(context);
+    showSavedWithMessenger(messenger, message);
+  }
+
   void _addSalt() {
     if (_busy) return;
     setState(() {
@@ -571,10 +579,7 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       widget.controller.rememberOperationalTarget(draft.id);
       if (mounted) {
-        setState(() => _allowPop = true);
-        Navigator.pop(context);
-        showSaved(
-          context,
+        _finishAndPop(
           sold
               ? 'Marked sold. Your reorder list is updated.'
               : 'Medicine saved. All views are up to date.',
@@ -881,10 +886,7 @@ class _EditorScreenState extends State<EditorScreen> {
       );
       await widget.controller.applySale(review);
       if (mounted) {
-        setState(() => _allowPop = true);
-        Navigator.pop(context);
-        showSaved(
-          context,
+        _finishAndPop(
           result.markSoldOut
               ? 'Sale recorded and stock added to reorder.'
               : 'Sale recorded. Tracking and stock are updated.',
@@ -910,9 +912,7 @@ class _EditorScreenState extends State<EditorScreen> {
       ),
     );
     if (restored == true && mounted) {
-      setState(() => _allowPop = true);
-      Navigator.pop(context);
-      showSaved(context, 'Previous version restored.');
+      _finishAndPop('Previous version restored.');
     }
   }
 
@@ -1189,26 +1189,41 @@ class _EditorScreenState extends State<EditorScreen> {
                           controller: _extraSaltControllers[i],
                           extraIndex: i,
                         ),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _dateField(
-                              controller: fields['mfg']!,
-                              label: 'MFG date',
-                              monthOnly: _mfgMonthOnly,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _dateField(
-                              key: ValueKey('expiry-$_expiryMonthOnly'),
-                              controller: fields['expiry']!,
-                              label: 'EXP date',
-                              monthOnly: _expiryMonthOnly,
-                            ),
-                          ),
-                        ],
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final textScaler = MediaQuery.textScalerOf(context);
+                          final stackDates =
+                              constraints.maxWidth < 350 ||
+                              textScaler.scale(16) > 20;
+                          final mfgField = _dateField(
+                            controller: fields['mfg']!,
+                            label: 'MFG date',
+                            monthOnly: _mfgMonthOnly,
+                          );
+                          final expiryField = _dateField(
+                            key: ValueKey('expiry-$_expiryMonthOnly'),
+                            controller: fields['expiry']!,
+                            label: 'EXP date',
+                            monthOnly: _expiryMonthOnly,
+                          );
+                          if (stackDates) {
+                            return Column(
+                              children: [
+                                mfgField,
+                                const SizedBox(height: 10),
+                                expiryField,
+                              ],
+                            );
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: mfgField),
+                              const SizedBox(width: 10),
+                              Expanded(child: expiryField),
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 10),
                       Row(
