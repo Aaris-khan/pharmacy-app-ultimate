@@ -69,6 +69,8 @@ class _AiScreenState extends State<AiScreen> {
   int _configurationGeneration = 0;
   bool _connectionsOpen = false;
   Timer? _streamPreviewTimer;
+  StringBuffer? _activeStreamBuffer;
+  bool _screenActive = false;
   bool _scrollScheduled = false;
   bool _followResponse = true;
 
@@ -88,6 +90,24 @@ class _AiScreenState extends State<AiScreen> {
     super.initState();
     _screenListenable = Listenable.merge([widget.controller, _local]);
     unawaited(_load());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = TickerMode.valuesOf(context).enabled;
+    if (active == _screenActive) return;
+    _screenActive = active;
+    if (!active) {
+      // Keep inference/network work alive, but make the retained offstage tab
+      // frame-quiet. The raw stream buffer continues collecting text and one
+      // preview is published when this tab becomes visible again.
+      _clearStreamPreview();
+      return;
+    }
+    if (_activeStreamBuffer != null && _cancellableRequest) {
+      _scheduleStreamPreview(_generation);
+    }
   }
 
   @override
@@ -121,6 +141,7 @@ class _AiScreenState extends State<AiScreen> {
   void dispose() {
     ++_generation;
     _clearStreamPreview();
+    _activeStreamBuffer = null;
     _service.cancel();
     if (widget.controller.aiPreparing) widget.controller.cancelAi();
     _input.dispose();
@@ -132,6 +153,28 @@ class _AiScreenState extends State<AiScreen> {
   void _clearStreamPreview() {
     _streamPreviewTimer?.cancel();
     _streamPreviewTimer = null;
+  }
+
+  void _scheduleStreamPreview(int generation) {
+    if (!_screenActive || _streamPreviewTimer != null) return;
+    final buffer = _activeStreamBuffer;
+    if (buffer == null) return;
+    _streamPreviewTimer = Timer(const Duration(milliseconds: 32), () {
+      _streamPreviewTimer = null;
+      if (!mounted ||
+          !_screenActive ||
+          generation != _generation ||
+          !identical(buffer, _activeStreamBuffer)) {
+        return;
+      }
+      final visible = aiConversationPreview(buffer.toString());
+      if (_streamingText == visible) return;
+      setState(() {
+        _journey = _AiJourneyState.streaming;
+        _streamingText = visible;
+      });
+      _scrollToEnd();
+    });
   }
 
   Object _screenRebuildToken() {
@@ -149,11 +192,16 @@ class _AiScreenState extends State<AiScreen> {
 
   void _scrollToEnd({bool force = false}) {
     if (force) _followResponse = true;
-    if (!_followResponse || _scrollScheduled) return;
+    if (!_screenActive || !_followResponse || _scrollScheduled) return;
     _scrollScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollScheduled = false;
-      if (!mounted || !_scroll.hasClients || !_followResponse) return;
+      if (!mounted ||
+          !_screenActive ||
+          !_scroll.hasClients ||
+          !_followResponse) {
+        return;
+      }
       final target = _scroll.position.maxScrollExtent;
       if ((_scroll.offset - target).abs() > .5) {
         _scroll.jumpTo(target);
@@ -362,6 +410,7 @@ class _AiScreenState extends State<AiScreen> {
     final generation = ++_generation;
     final ownerMessageIndex = _messages.length;
     final rawStream = StringBuffer();
+    _activeStreamBuffer = rawStream;
     setState(() {
       _journey = _AiJourneyState.thinking;
       _streamingText = '';
@@ -422,19 +471,10 @@ class _AiScreenState extends State<AiScreen> {
         onDelta: (delta) {
           if (!mounted || generation != _generation || delta.isEmpty) return;
           rawStream.write(delta);
-          // Batch provider/native token bursts into one preview update. Parsing
-          // and rebuilding the conversation for every tiny token causes jank.
-          _streamPreviewTimer ??= Timer(const Duration(milliseconds: 32), () {
-            _streamPreviewTimer = null;
-            if (!mounted || generation != _generation) return;
-            final visible = aiConversationPreview(rawStream.toString());
-            if (_streamingText == visible) return;
-            setState(() {
-              _journey = _AiJourneyState.streaming;
-              _streamingText = visible;
-            });
-            _scrollToEnd();
-          });
+          // Batch provider/native token bursts into one visible preview update.
+          // When this retained tab is offstage, inference continues but no
+          // timer/build/scroll work is scheduled on the UI isolate.
+          _scheduleStreamPreview(generation);
         },
       );
       if (!mounted || generation != _generation) return;
@@ -476,7 +516,12 @@ class _AiScreenState extends State<AiScreen> {
         });
       }
     } finally {
-      if (generation == _generation) _clearStreamPreview();
+      if (generation == _generation) {
+        _clearStreamPreview();
+        if (identical(_activeStreamBuffer, rawStream)) {
+          _activeStreamBuffer = null;
+        }
+      }
       if (mounted &&
           generation == _generation &&
           (_journey == _AiJourneyState.thinking ||
@@ -659,6 +704,7 @@ class _AiScreenState extends State<AiScreen> {
     if (!_cancellableRequest) return;
     final cancellationGeneration = ++_generation;
     _clearStreamPreview();
+    _activeStreamBuffer = null;
     final drainingLocal = _service.cancel();
     setState(() {
       _journey = drainingLocal
