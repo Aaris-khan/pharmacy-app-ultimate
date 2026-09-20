@@ -15,6 +15,8 @@ void main() {
 
     expect(ui, contains("'Import backup file'"));
     expect(ui, contains("'Next'"));
+    expect(ui, contains('bool _restorePromptOpen = false;'));
+    expect(ui, contains('setState(() => _restorePromptOpen = true);'));
     expect(ui, isNot(contains('content_paste_rounded')));
     expect(ui, isNot(contains('Aaris Pharmacy backup JSON')));
     expect(ui, isNot(contains('TextEditingController')));
