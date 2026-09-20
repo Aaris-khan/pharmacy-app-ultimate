@@ -42,7 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _shareInventory() async {
     try {
-      await sharePharmacy(controller.export());
+      await sharePharmacy(await controller.exportAfterPendingWrites());
     } catch (e) {
       if (mounted) showError(context, e);
     }
