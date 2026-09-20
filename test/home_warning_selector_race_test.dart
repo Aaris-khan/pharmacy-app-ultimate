@@ -166,4 +166,91 @@ void main() {
       }
     },
   );
+  testWidgets(
+    'custom warning dialog preserves a newer untouched field',
+    (tester) async {
+      final controller = PharmacyController(
+        MemoryInventoryStorage(),
+        clock: () => DateTime(2026, 9, 20, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(controller: controller, onDatabase: () {}),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(PopupMenuButton<int>).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Custom…'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField).first, '5');
+        await tester.pump();
+
+        // Simulate another settings surface committing while this dialog still
+        // contains its older, untouched month value.
+        await controller.setWarningMonths(3);
+        await tester.pump();
+        expect(controller.settings.months, 3);
+
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(controller.settings.shortDays, 5);
+        expect(controller.settings.months, 3);
+      } finally {
+        await _disposeHarness(tester, controller);
+      }
+    },
+  );
+
+  testWidgets(
+    'custom warning dialog keeps an explicit stale-field user intent',
+    (tester) async {
+      final controller = PharmacyController(
+        MemoryInventoryStorage(),
+        clock: () => DateTime(2026, 9, 20, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(controller: controller, onDatabase: () {}),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(PopupMenuButton<int>).first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Custom…'));
+        await tester.pumpAndSettle();
+
+        await controller.setWarningMonths(3);
+        await tester.pump();
+
+        // The visible dialog still shows the reviewed value 2. Tapping that
+        // selected chip is an explicit request to restore 2, not an untouched
+        // stale value that should be merged away.
+        await tester.tap(find.text('2 months'));
+        await tester.pump();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(controller.settings.shortDays, 8);
+        expect(controller.settings.months, 2);
+      } finally {
+        await _disposeHarness(tester, controller);
+      }
+    },
+  );
+
 }

@@ -189,7 +189,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Day' : 'Days'}',
                     onSelected: (value) => _setShortDays(context, value),
-                    onCustom: () => showWarningSettings(context, controller),
+                    onCustom: () => showWarningSettings(
+                      context,
+                      controller,
+                      initial: visibleSettings,
+                    ),
                   ),
                   onTap: () => _open(context, SearchScope.shortExpiry),
                 ),
@@ -208,7 +212,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     valueLabel: (value) =>
                         '$value ${value == 1 ? 'Month' : 'Months'}',
                     onSelected: (value) => _setMonths(context, value),
-                    onCustom: () => showWarningSettings(context, controller),
+                    onCustom: () => showWarningSettings(
+                      context,
+                      controller,
+                      initial: visibleSettings,
+                    ),
                   ),
                   onTap: () => _open(context, SearchScope.monthExpiry),
                 ),
@@ -612,17 +620,34 @@ class _ScanBanner extends StatelessWidget {
   );
 }
 
+class _WarningSettingsEdit {
+  const _WarningSettingsEdit({
+    required this.settings,
+    required this.shortDaysChanged,
+    required this.monthsChanged,
+  });
+
+  final WarningSettings settings;
+  final bool shortDaysChanged;
+  final bool monthsChanged;
+}
+
 Future<void> showWarningSettings(
   BuildContext context,
-  PharmacyController controller,
-) async {
-  final settings = await showDialog<WarningSettings>(
+  PharmacyController controller, {
+  WarningSettings? initial,
+}) async {
+  final baseline = initial ?? controller.settings;
+  final edit = await showDialog<_WarningSettingsEdit>(
     context: context,
-    builder: (_) => _WarningSettingsDialog(initial: controller.settings),
+    builder: (_) => _WarningSettingsDialog(initial: baseline),
   );
-  if (settings != null) {
+  if (edit != null) {
     try {
-      await controller.setWarnings(settings);
+      await controller.updateWarningFields(
+        shortDays: edit.shortDaysChanged ? edit.settings.shortDays : null,
+        months: edit.monthsChanged ? edit.settings.months : null,
+      );
     } catch (e) {
       if (context.mounted) showError(context, e);
     }
@@ -643,6 +668,8 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
   late final TextEditingController _months;
   late int? _selectedDays;
   late int? _selectedMonths;
+  bool _shortDaysChanged = false;
+  bool _monthsChanged = false;
   String? _error;
 
   @override
@@ -686,6 +713,7 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
                   label: Text('$value days'),
                   selected: _selectedDays == value,
                   onSelected: (_) => setState(() {
+                    _shortDaysChanged = true;
                     _selectedDays = value;
                     _days.text = '$value';
                   }),
@@ -695,7 +723,10 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _days,
-            onChanged: (_) => setState(() => _selectedDays = null),
+            onChanged: (_) => setState(() {
+              _shortDaysChanged = true;
+              _selectedDays = null;
+            }),
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'Custom short warning · days',
@@ -715,6 +746,7 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
                   label: Text('$value ${value == 1 ? 'month' : 'months'}'),
                   selected: _selectedMonths == value,
                   onSelected: (_) => setState(() {
+                    _monthsChanged = true;
                     _selectedMonths = value;
                     _months.text = '$value';
                   }),
@@ -724,7 +756,10 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _months,
-            onChanged: (_) => setState(() => _selectedMonths = null),
+            onChanged: (_) => setState(() {
+              _monthsChanged = true;
+              _selectedMonths = null;
+            }),
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'Custom month warning · months',
@@ -757,7 +792,14 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
               'shortDays': shortDays,
               'months': months,
             });
-            Navigator.pop(context, value);
+            Navigator.pop(
+              context,
+              _WarningSettingsEdit(
+                settings: value,
+                shortDaysChanged: _shortDaysChanged,
+                monthsChanged: _monthsChanged,
+              ),
+            );
           } catch (e) {
             setState(
               () => _error = e.toString().replaceFirst(

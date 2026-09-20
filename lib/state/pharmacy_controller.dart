@@ -1138,19 +1138,26 @@ class PharmacyController extends ChangeNotifier {
     ).withOperationTime(clock());
   });
 
-  Future<void> setShortWarningDays(int shortDays) => _updateWarnings(
-    (current) => WarningSettings.fromJson(<String, dynamic>{
-      'shortDays': shortDays,
-      'months': current.months,
-    }),
-  );
+  /// Applies only the warning fields the user explicitly changed.
+  ///
+  /// Custom-setting dialogs can stay open while another warning preference is
+  /// committed elsewhere. Derive omitted fields from the latest serialized
+  /// snapshot so an untouched stale form value can never overwrite newer data.
+  Future<void> updateWarningFields({int? shortDays, int? months}) {
+    if (shortDays == null && months == null) return Future<void>.value();
+    return _updateWarnings(
+      (current) => WarningSettings.fromJson(<String, dynamic>{
+        'shortDays': shortDays ?? current.shortDays,
+        'months': months ?? current.months,
+      }),
+    );
+  }
 
-  Future<void> setWarningMonths(int months) => _updateWarnings(
-    (current) => WarningSettings.fromJson(<String, dynamic>{
-      'shortDays': current.shortDays,
-      'months': months,
-    }),
-  );
+  Future<void> setShortWarningDays(int shortDays) =>
+      updateWarningFields(shortDays: shortDays);
+
+  Future<void> setWarningMonths(int months) =>
+      updateWarningFields(months: months);
 
   Future<void> setWarnings(WarningSettings value) =>
       _updateWarnings((_) => value);

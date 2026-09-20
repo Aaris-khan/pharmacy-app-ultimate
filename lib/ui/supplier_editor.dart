@@ -8,6 +8,7 @@ import 'design.dart';
 String? _supplierCustomFieldLabelError(String value) {
   final clean = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (clean.isEmpty) return 'Enter a field name.';
+  if (clean.length > 100) return 'Use 100 characters or fewer.';
   if (isReservedSupplierCustomFieldLabel(clean)) {
     return 'This is already a built-in supplier or stock field.';
   }
@@ -316,6 +317,10 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                                   child: TextFormField(
                                     controller: _custom[index].label,
                                     enabled: !_busy,
+                                    validator: (value) =>
+                                        _supplierCustomFieldLabelError(
+                                          value ?? '',
+                                        ),
                                     decoration: const InputDecoration(
                                       labelText: 'Field name',
                                       filled: false,
