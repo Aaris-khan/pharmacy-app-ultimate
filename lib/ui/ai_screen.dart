@@ -1716,15 +1716,24 @@ class _AiComposer extends StatelessWidget {
   );
 }
 
-class _AiQuickActions extends StatelessWidget {
+class _AiQuickActions extends StatefulWidget {
   const _AiQuickActions({required this.busy, required this.onTap});
 
   final bool busy;
   final ValueChanged<AiHubQuickAction> onTap;
 
-  Future<void> _showMore(BuildContext context) async {
-    if (busy) return;
-    final action = await showModalBottomSheet<AiHubQuickAction>(
+  @override
+  State<_AiQuickActions> createState() => _AiQuickActionsState();
+}
+
+class _AiQuickActionsState extends State<_AiQuickActions> {
+  bool _moreOpening = false;
+
+  Future<void> _showMore() async {
+    if (widget.busy || _moreOpening || !mounted) return;
+    setState(() => _moreOpening = true);
+    try {
+      final action = await showModalBottomSheet<AiHubQuickAction>(
       context: context,
       useSafeArea: true,
       showDragHandle: true,
@@ -1781,7 +1790,10 @@ class _AiQuickActions extends StatelessWidget {
         ),
       ),
     );
-    if (action != null) onTap(action);
+      if (action != null && mounted) widget.onTap(action);
+    } finally {
+      if (mounted) setState(() => _moreOpening = false);
+    }
   }
 
   @override
@@ -1796,28 +1808,30 @@ class _AiQuickActions extends StatelessWidget {
             label: 'Add',
             icon: Icons.add_rounded,
             color: green,
-            onTap: busy ? null : () => onTap(AiHubQuickAction.add),
+            onTap: widget.busy ? null : () => widget.onTap(AiHubQuickAction.add),
           ),
           const SizedBox(width: 8),
           _AiQuickActionChip(
             label: 'Sold',
             icon: Icons.shopping_cart_checkout_rounded,
             color: amber,
-            onTap: busy ? null : () => onTap(AiHubQuickAction.sold),
+            onTap: widget.busy ? null : () => widget.onTap(AiHubQuickAction.sold),
           ),
           const SizedBox(width: 8),
           _AiQuickActionChip(
             label: 'Stock',
             icon: Icons.bar_chart_rounded,
             color: primary,
-            onTap: busy ? null : () => onTap(AiHubQuickAction.stockSummary),
+            onTap: widget.busy ? null : () => widget.onTap(AiHubQuickAction.stockSummary),
           ),
           const SizedBox(width: 8),
           _AiQuickActionChip(
             label: 'More',
             icon: Icons.more_horiz_rounded,
             color: _aiPurple,
-            onTap: busy ? null : () => _showMore(context),
+            onTap: widget.busy || _moreOpening
+                ? null
+                : () => unawaited(_showMore()),
           ),
         ],
       ),
