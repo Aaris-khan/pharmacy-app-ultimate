@@ -101,6 +101,7 @@ class _SearchScreenState extends State<SearchScreen> {
     widget.controller.addListener(_changed);
     _controllerListening = true;
     final currentSnapshot = widget.controller.snapshot;
+    final currentSearchEpoch = widget.controller.searchProjectionEpoch;
     final currentDay = widget.controller.today;
     if (_refreshWhenActive ||
         !identical(currentSnapshot, _observedSnapshot) ||
@@ -112,7 +113,7 @@ class _SearchScreenState extends State<SearchScreen> {
       final searchInputsUnchanged =
           currentDay == _observedDay &&
           currentWarnings == _observedWarnings &&
-          identical(currentSnapshot.records, _observedRecords);
+          currentSearchEpoch == _observedSearchEpoch;
       final preserveResults =
           searchInputsUnchanged ||
           (currentDay == _observedDay &&
@@ -121,6 +122,7 @@ class _SearchScreenState extends State<SearchScreen> {
       final refreshWasPending = _refreshWhenActive;
       _observedSnapshot = currentSnapshot;
       _observedRecords = currentSnapshot.records;
+      _observedSearchEpoch = currentSearchEpoch;
       _observedDay = currentDay;
       _observedWarnings = currentWarnings;
       _refreshWhenActive = false;
