@@ -19,6 +19,18 @@ void main() {
     expect(search, contains('onPressed: _routeOpening ? null : _scanner'));
     expect(search, contains('onPressed: _routeOpening ? null : _mic'));
     expect(search, contains('onPressed: _routeOpening ? null : _bulk'));
+    expect(
+      '_runExclusiveRoute('.allMatches(search).length,
+      greaterThanOrEqualTo(10),
+    );
+    expect(
+      search,
+      isNot(contains('onPressed: () => openEditor(\n')),
+    );
+    expect(
+      search,
+      isNot(contains('onPressed: () => Navigator.push(\n')),
+    );
 
     expect(importCenter, contains('bool _flowOpening = false;'));
     expect(

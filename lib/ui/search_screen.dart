@@ -851,12 +851,18 @@ class _SearchScreenState extends State<SearchScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: OutlinedButton.icon(
-                      onPressed: () => openEditor(
-                        context,
-                        controller,
-                        barcode: _scan!.barcode,
-                        ocrText: _scan!.text,
-                      ),
+                      onPressed: _routeOpening
+                          ? null
+                          : () => unawaited(
+                              _runExclusiveRoute(
+                                () => openEditor(
+                                  context,
+                                  controller,
+                                  barcode: _scan!.barcode,
+                                  ocrText: _scan!.text,
+                                ),
+                              ),
+                            ),
                       icon: const Icon(Icons.add),
                       label: const Text('Add manually from this scan'),
                     ),
@@ -980,25 +986,37 @@ class _SearchScreenState extends State<SearchScreen> {
                         label: 'Add medicine',
                         height: 56,
                         radius: 20,
-                        onPressed: () => openEditor(
-                          context,
-                          controller,
-                          barcode: _scan?.barcode ?? '',
-                          ocrText: _scan?.text ?? '',
-                        ),
+                        onPressed: _routeOpening
+                            ? null
+                            : () => unawaited(
+                                _runExclusiveRoute(
+                                  () => openEditor(
+                                    context,
+                                    controller,
+                                    barcode: _scan?.barcode ?? '',
+                                    ocrText: _scan?.text ?? '',
+                                  ),
+                                ),
+                              ),
                       ),
                     )
                   : widget.scope != SearchScope.all
                   ? OutlinedButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => SearchScreen(
-                            controller: controller,
-                            scope: SearchScope.all,
-                          ),
-                        ),
-                      ),
+                      onPressed: _routeOpening
+                          ? null
+                          : () => unawaited(
+                              _runExclusiveRoute(
+                                () => Navigator.push<void>(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => SearchScreen(
+                                      controller: controller,
+                                      scope: SearchScope.all,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                       child: const Text('Search all medicines'),
                     )
                   : null,
