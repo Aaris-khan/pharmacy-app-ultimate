@@ -7,7 +7,7 @@ import '../domain/date_input.dart';
 import '../state/pharmacy_controller.dart';
 import 'design.dart';
 
-class VersionHistoryScreen extends StatelessWidget {
+class VersionHistoryScreen extends StatefulWidget {
   const VersionHistoryScreen({
     super.key,
     required this.controller,
@@ -17,7 +17,19 @@ class VersionHistoryScreen extends StatelessWidget {
   final PharmacyController controller;
   final String medicineId;
 
-  Future<void> _restore(BuildContext context, MedicineVersion version) async {
+  @override
+  State<VersionHistoryScreen> createState() => _VersionHistoryScreenState();
+}
+
+class _VersionHistoryScreenState extends State<VersionHistoryScreen> {
+  PharmacyController get controller => widget.controller;
+  String get medicineId => widget.medicineId;
+
+  bool _restoring = false;
+
+  Future<void> _restore(MedicineVersion version) async {
+    if (_restoring || !mounted) return;
+    setState(() => _restoring = true);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -37,12 +49,16 @@ class VersionHistoryScreen extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed != true || !mounted) {
+      if (mounted) setState(() => _restoring = false);
+      return;
+    }
     try {
       await controller.restoreVersion(version);
-      if (context.mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, true);
     } catch (error) {
-      if (context.mounted) showError(context, error);
+      if (mounted) showError(context, error);
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -131,9 +147,19 @@ class VersionHistoryScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
                   OutlinedButton.icon(
-                    onPressed: () => unawaited(_restore(context, version)),
-                    icon: const Icon(Icons.restore_rounded),
-                    label: const Text('Restore this version'),
+                    onPressed: _restoring
+                        ? null
+                        : () => unawaited(_restore(version)),
+                    icon: _restoring
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.restore_rounded),
+                    label: Text(
+                      _restoring ? 'Restoring version…' : 'Restore this version',
+                    ),
                   ),
                 ],
               ),
