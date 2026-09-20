@@ -89,9 +89,14 @@ Future<void> openMedicineCapture(
       await Navigator.push<void>(
         context,
         MaterialPageRoute(
-          builder: (_) => ScannerScreen(
-            onCaptureQueued: (path) =>
-                queue.addFile(path, kind: 'photo', title: 'Rapid capture'),
+          builder: (scannerContext) => ScannerScreen(
+            onCaptureQueued: (path) => queue.addFile(
+              path,
+              kind: 'photo',
+              title: 'Rapid capture',
+              cancelled: () =>
+                  !scannerContext.mounted || !context.mounted,
+            ),
           ),
         ),
       );
