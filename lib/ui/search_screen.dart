@@ -49,6 +49,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   late Object _observedSnapshot;
   late Object _observedRecords;
+  late int _observedSearchEpoch;
   late DateTime _observedDay;
   late (int, int) _observedWarnings;
   bool _controllerListening = false;
@@ -62,6 +63,7 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _observedSnapshot = widget.controller.snapshot;
     _observedRecords = widget.controller.snapshot.records;
+    _observedSearchEpoch = widget.controller.searchProjectionEpoch;
     _observedDay = widget.controller.today;
     _observedWarnings = (
       widget.controller.settings.shortDays,
@@ -149,6 +151,7 @@ class _SearchScreenState extends State<SearchScreen> {
       }
       _observedSnapshot = widget.controller.snapshot;
       _observedRecords = widget.controller.snapshot.records;
+      _observedSearchEpoch = widget.controller.searchProjectionEpoch;
       _observedDay = widget.controller.today;
       _observedWarnings = (
         widget.controller.settings.shortDays,
