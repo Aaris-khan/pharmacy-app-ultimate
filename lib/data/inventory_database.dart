@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/automation_guard.dart';
@@ -723,12 +724,76 @@ Map<String, dynamic>? decodeStoredInventoryEvent(Map<String, Object?> row) {
   }
 }
 
+const _backgroundInventoryDecodeRowThreshold = 96;
+const _backgroundInventoryDecodeTextThreshold = 192 * 1024;
+
+int _persistedTextCharacters(Iterable<Map<String, Object?>> rows, String column) {
+  var total = 0;
+  for (final row in rows) {
+    final value = row[column];
+    if (value is! String) continue;
+    total += value.length;
+    if (total >= _backgroundInventoryDecodeTextThreshold) return total;
+  }
+  return total;
+}
+
+bool _shouldDecodeInventoryInBackground({
+  required Map<String, Object?> meta,
+  required List<Map<String, Object?>> records,
+  required List<Map<String, Object?>> suppliers,
+  required List<Map<String, Object?>> sales,
+  required List<Map<String, Object?>> eventRows,
+  required List<Map<String, Object?>> receipts,
+}) {
+  final rowCount = records.length + suppliers.length + sales.length + eventRows.length + receipts.length;
+  if (rowCount >= _backgroundInventoryDecodeRowThreshold) return true;
+  var textCharacters = (meta['settings'] as String?)?.length ?? 0;
+  textCharacters += _persistedTextCharacters(records, 'facts');
+  if (textCharacters >= _backgroundInventoryDecodeTextThreshold) return true;
+  textCharacters += _persistedTextCharacters(suppliers, 'facts');
+  if (textCharacters >= _backgroundInventoryDecodeTextThreshold) return true;
+  textCharacters += _persistedTextCharacters(sales, 'facts');
+  if (textCharacters >= _backgroundInventoryDecodeTextThreshold) return true;
+  textCharacters += _persistedTextCharacters(eventRows, 'detail');
+  return textCharacters >= _backgroundInventoryDecodeTextThreshold;
+}
+
+InventorySnapshot _decodePersistedInventoryRows(Map<String, Object?> payload) {
+  final meta = (payload['meta'] as Map).cast<String, Object?>();
+  final records = (payload['records'] as List).cast<Map<String, Object?>>();
+  final suppliers = (payload['suppliers'] as List).cast<Map<String, Object?>>();
+  final sales = (payload['sales'] as List).cast<Map<String, Object?>>();
+  final eventRows = (payload['eventRows'] as List).cast<Map<String, Object?>>();
+  final receipts = (payload['receipts'] as List).cast<Map<String, Object?>>();
+  final events = <Map<String, dynamic>>[];
+  for (final row in eventRows) {
+    final event = decodeStoredInventoryEvent(row);
+    if (event != null) events.add(event);
+  }
+  return InventorySnapshot(
+    revision: meta['revision'] as int,
+    settings: WarningSettings.fromJson(jsonDecode(meta['settings'] as String) as Map<String, dynamic>),
+    records: {for (final row in records) row['id'] as String: Medicine.fromJson(jsonDecode(row['facts'] as String) as Map<String, dynamic>)},
+    suppliers: {for (final row in suppliers) row['id'] as String: Supplier.fromJson(jsonDecode(row['facts'] as String) as Map<String, dynamic>)},
+    sales: {for (final row in sales) row['id'] as String: SaleEvent.fromJson(jsonDecode(row['facts'] as String) as Map<String, dynamic>)},
+    receipts: receipts.map((row) => row['request_id'] as String).toSet(),
+    events: events,
+    soldValue: meta['sold_value'] as int,
+    unknownSold: meta['unknown_sold'] as int,
+  );
+}
+
 class SqliteInventoryStorage implements InventoryStorage {
   SqliteInventoryStorage({this.path, this.factory});
   final String? path;
   final DatabaseFactory? factory;
   Database? _db;
   InventorySnapshot? _cached;
+  int _backgroundDecodeCount = 0;
+
+  @visibleForTesting
+  int get debugBackgroundDecodeCount => _backgroundDecodeCount;
   Future<Database> _open() async {
     if (_db != null) return _db!;
     final provider = factory ?? databaseFactory;
@@ -805,45 +870,32 @@ class SqliteInventoryStorage implements InventoryStorage {
     final records = await db.query('medicines');
     final suppliers = await db.query('suppliers');
     final sales = await db.query('sales');
-    final eventRows = await db.query(
-      'events',
-      orderBy: 'revision DESC',
-      limit: 200,
-    );
+    final eventRows = await db.query('events', orderBy: 'revision DESC', limit: 200);
     final receipts = await db.query('receipts');
-    final events = <Map<String, dynamic>>[];
-    for (final row in eventRows) {
-      final event = decodeStoredInventoryEvent(row);
-      if (event != null) events.add(event);
+    final payload = <String, Object?>{
+      'meta': meta,
+      'records': records,
+      'suppliers': suppliers,
+      'sales': sales,
+      'eventRows': eventRows,
+      'receipts': receipts,
+    };
+    // SQLite I/O is asynchronous, but decoding every JSON row, rebuilding the
+    // immutable domain graph and calculating inventory totals are synchronous
+    // Dart work. Large snapshots move off the UI isolate; small ones stay on the
+    // zero-spawn fast path so startup does not pay unnecessary isolate overhead.
+    if (_shouldDecodeInventoryInBackground(
+      meta: meta,
+      records: records,
+      suppliers: suppliers,
+      sales: sales,
+      eventRows: eventRows,
+      receipts: receipts,
+    )) {
+      _backgroundDecodeCount++;
+      return compute(_decodePersistedInventoryRows, payload, debugLabel: 'Aaris inventory decode');
     }
-    return InventorySnapshot(
-      revision: meta['revision'] as int,
-      settings: WarningSettings.fromJson(
-        jsonDecode(meta['settings'] as String) as Map<String, dynamic>,
-      ),
-      records: {
-        for (final row in records)
-          row['id'] as String: Medicine.fromJson(
-            jsonDecode(row['facts'] as String) as Map<String, dynamic>,
-          ),
-      },
-      suppliers: {
-        for (final row in suppliers)
-          row['id'] as String: Supplier.fromJson(
-            jsonDecode(row['facts'] as String) as Map<String, dynamic>,
-          ),
-      },
-      sales: {
-        for (final row in sales)
-          row['id'] as String: SaleEvent.fromJson(
-            jsonDecode(row['facts'] as String) as Map<String, dynamic>,
-          ),
-      },
-      receipts: receipts.map((r) => r['request_id'] as String).toSet(),
-      events: events,
-      soldValue: meta['sold_value'] as int,
-      unknownSold: meta['unknown_sold'] as int,
-    );
+    return _decodePersistedInventoryRows(payload);
   }
 
   @override
