@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'domain/app_brain.dart';
@@ -122,6 +120,7 @@ class _Shell extends StatefulWidget {
 class _ShellState extends State<_Shell> {
   int tab = 0;
   final _visited = <int, Widget>{};
+  bool _attentionOpening = false;
 
   void _selectTab(int next) {
     if (next == tab) return;
@@ -141,23 +140,23 @@ class _ShellState extends State<_Shell> {
     _selectTab(next);
   }
 
-  void _openAutopilotQueue() {
-    if (!mounted) return;
+  Future<void> _openAutopilotQueue() async {
+    if (!mounted || _attentionOpening) return;
+    _attentionOpening = true;
     widget.autopilot.refreshNow();
-    unawaited(
-      Navigator.of(context)
-          .push<void>(
-            MaterialPageRoute(
-              builder: (_) => AttentionScreen(
-                controller: widget.controller,
-                autopilot: widget.autopilot,
-              ),
-            ),
-          )
-          .whenComplete(() {
-            if (mounted) widget.autopilot.refreshNow();
-          }),
-    );
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => AttentionScreen(
+            controller: widget.controller,
+            autopilot: widget.autopilot,
+          ),
+        ),
+      );
+    } finally {
+      _attentionOpening = false;
+      if (mounted) widget.autopilot.refreshNow();
+    }
   }
 
   @override
