@@ -1373,16 +1373,14 @@ class _BrainScreenState extends State<BrainScreen> {
       return;
     }
 
-    // Bind the confirmation copy to the exact newest audited event. The
-    // controller still rechecks canUndo/revision when committing, so this is an
-    // explainability improvement rather than a second authority over recovery.
+    // Capture the exact audited event before showing confirmation. A different
+    // write can complete while this dialog is open, so committing a freshly
+    // created "latest" Undo token afterwards could reverse a change the owner
+    // never reviewed.
+    final review = widget.controller.reviewUndo();
     final event = widget.controller.snapshot.events.first;
-    final label = event['label'] is String
-        ? event['label'] as String
-        : 'Latest inventory change';
-    final revision = event['revision'] is int
-        ? event['revision'] as int
-        : widget.controller.snapshot.revision;
+    final label = review.label;
+    final revision = review.eventRevision;
     final businessDay = event['businessDay'] is String
         ? event['businessDay'] as String
         : '';
@@ -1413,7 +1411,7 @@ class _BrainScreenState extends State<BrainScreen> {
       _updateCommandState(() => _reply = 'Undo cancelled. Nothing changed.');
       return;
     }
-    await widget.controller.undo();
+    await widget.controller.applyUndo(review);
     if (mounted) {
       _updateCommandState(() => _reply = 'Last reviewed inventory change was undone.');
     }
