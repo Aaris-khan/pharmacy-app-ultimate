@@ -73,4 +73,25 @@ void main() {
     expect(c.settings.months, 3);
     expect(c.snapshot.revision, 2);
   });
+
+  test('export waits for an already queued inventory write', () async {
+    final c = controller();
+    await c.initialize();
+    addTearDown(c.dispose);
+
+    final save = c.save(
+      Medicine.fromJson(<String, dynamic>{
+        'id': 'queued-export',
+        'name': 'Cefixime',
+        'quantity': 10,
+      }),
+      expectedRevision: c.snapshot.revision,
+    );
+    final exported = await c.exportAfterPendingWrites();
+    await save;
+
+    expect(exported.revision, 1);
+    expect(exported.content, contains('queued-export'));
+  });
+
 }
