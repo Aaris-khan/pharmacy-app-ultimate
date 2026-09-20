@@ -98,6 +98,15 @@ void main() {
       editor,
       contains('onTap: _busy || _supplierOpening ? null : _selectSupplier'),
     );
+    expect(editor, contains('bool _historyOpening = false;'));
+    expect(
+      editor,
+      contains('if (record == null || _busy || _historyOpening || !mounted) return;'),
+    );
+    expect(
+      editor,
+      contains('onPressed: _busy || _historyOpening ? null : _history'),
+    );
 
     expect(
       versions,
