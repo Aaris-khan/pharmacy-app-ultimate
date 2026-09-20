@@ -294,6 +294,12 @@ class _OrderScreenState extends State<OrderScreen> {
     if (_sharing) return;
     setState(() => _sharing = true);
     try {
+      // A tap may follow immediately after a stock/sale edit whose SQLite turn
+      // is still queued. Settle that already-submitted work before deriving the
+      // externally shared order; _lines() then revalidates the live suggestions
+      // and fails closed if the owner's selection is no longer valid.
+      await widget.controller.settlePendingWrites();
+      if (!mounted) return;
       await _service.share(lines: _lines(), date: widget.controller.today);
     } catch (error) {
       if (mounted) showError(context, error);
