@@ -577,12 +577,16 @@ class _SearchScreenState extends State<SearchScreen> {
   void _openCatalogCandidate(MedicineCatalogCandidate candidate) {
     final scan = _scan;
     final seed = candidate.seed.withScanBarcode(scan?.barcode ?? '');
-    openEditor(
-      context,
-      widget.controller,
-      seed: seed,
-      barcode: scan?.barcode ?? '',
-      ocrText: scan?.text ?? '',
+    unawaited(
+      _runExclusiveRoute(
+        () => openEditor(
+          context,
+          widget.controller,
+          seed: seed,
+          barcode: scan?.barcode ?? '',
+          ocrText: scan?.text ?? '',
+        ),
+      ),
     );
   }
 
@@ -1021,7 +1025,11 @@ class _SearchScreenState extends State<SearchScreen> {
                   record: record,
                   settings: settings,
                   today: today,
-                  onTap: () => openEditor(context, controller, record: record),
+                  onTap: () => unawaited(
+                    _runExclusiveRoute(
+                      () => openEditor(context, controller, record: record),
+                    ),
+                  ),
                   matchLabel: hit.uncertain
                       ? '${hit.confidence} confidence · ${hit.reason} · check name & strength'
                       : activeQuery.isEmpty
