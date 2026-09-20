@@ -1012,6 +1012,12 @@ class _AiScreenState extends State<AiScreen> {
           _reviewing ||
           _toolOpening ||
           widget.controller.aiPreparing;
+      final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+      // The composer lives outside the chat scroll view. When Android resizes
+      // this route for the IME, the chat's maxScrollExtent grows without a user
+      // scroll event. Preserve the live-tail contract after that viewport
+      // change, unless the pharmacist deliberately scrolled away.
+      if (keyboardOpen && _followResponse) _scrollToEnd();
       return Column(
         children: [
           _AiHubHeader(configured: _hasAiRoute, onSettings: _openConnections),
@@ -1185,10 +1191,13 @@ class _AiScreenState extends State<AiScreen> {
               ),
             ),
           ),
-          _AiQuickActions(
-            busy: busy || widget.onQuickAction == null,
-            onTap: _runQuickAction,
-          ),
+          // While typing, keep scarce phone-height for the conversation and
+          // composer. These shortcuts return as soon as the keyboard closes.
+          if (!keyboardOpen)
+            _AiQuickActions(
+              busy: busy || widget.onQuickAction == null,
+              onTap: _runQuickAction,
+            ),
           _AiComposer(
             controller: _request,
             busy: busy,
