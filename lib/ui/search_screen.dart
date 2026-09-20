@@ -204,6 +204,7 @@ class _SearchScreenState extends State<SearchScreen> {
             _publishedHits.canPreserveAgainst(currentSnapshot.records));
     _observedSnapshot = currentSnapshot;
     _observedRecords = currentSnapshot.records;
+    _observedSearchEpoch = widget.controller.searchProjectionEpoch;
     _observedDay = currentDay;
     _observedWarnings = currentWarnings;
     if (searchInputsUnchanged) return;
