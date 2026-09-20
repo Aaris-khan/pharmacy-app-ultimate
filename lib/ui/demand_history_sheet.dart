@@ -50,12 +50,17 @@ class _DemandHistoryState extends State<_DemandHistory> {
     if (!identical(_records, snapshot.records) ||
         !identical(_sales, snapshot.sales) ||
         _day != controller.today) {
+      final productKey = widget.productKey;
       _demand =
           dailyDemandByProduct(
-            medicines: controller.records,
-            sales: controller.sales,
+            medicines: controller.records.where(
+              (medicine) => medicine.identity == productKey,
+            ),
+            sales: controller.sales.where(
+              (sale) => sale.productKey == productKey,
+            ),
             today: controller.today,
-          )[widget.productKey] ??
+          )[productKey] ??
           DailyDemandAccumulator(controller.today).build();
       _records = snapshot.records;
       _sales = snapshot.sales;
