@@ -492,38 +492,45 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _scanner() async {
-    ScanResult? result;
-    await _runExclusiveRoute(() async {
-      result = await Navigator.push<ScanResult>(
+    if (_routeOpening || !mounted) return;
+    // Keep the interaction lease until the returned scan has finished its local
+    // search and optional catalog discovery. Releasing it when the Scanner route
+    // merely pops lets a rapid second tap open another route while the first
+    // scan is still publishing asynchronous results behind it.
+    setState(() => _routeOpening = true);
+    try {
+      final result = await Navigator.push<ScanResult>(
         context,
         MaterialPageRoute(builder: (_) => const ScannerScreen()),
       );
-    });
-    if (result == null || !mounted) return;
-    final captured = result!;
-    _debounce?.cancel();
-    _onlineDebounce?.cancel();
-    ++_catalogGeneration;
-    _resetBrowseWindow();
-    setState(() {
-      _scan = captured;
-      _bulkQuery = null;
-      _query.text = captured.barcode.isNotEmpty
-          ? captured.barcode
-          : captured.text;
-      _catalogHits = [];
-      _catalogError = '';
-      _catalogLoading = false;
-    });
-    await _search();
-    if (!mounted ||
-        !identical(_scan, captured) ||
-        !widget.database ||
-        !_onlineMode ||
-        _scanHasConfidentLocalMatch()) {
-      return;
+      if (result == null || !mounted) return;
+      final captured = result;
+      _debounce?.cancel();
+      _onlineDebounce?.cancel();
+      ++_catalogGeneration;
+      _resetBrowseWindow();
+      setState(() {
+        _scan = captured;
+        _bulkQuery = null;
+        _query.text = captured.barcode.isNotEmpty
+            ? captured.barcode
+            : captured.text;
+        _catalogHits = [];
+        _catalogError = '';
+        _catalogLoading = false;
+      });
+      await _search();
+      if (!mounted ||
+          !identical(_scan, captured) ||
+          !widget.database ||
+          !_onlineMode ||
+          _scanHasConfidentLocalMatch()) {
+        return;
+      }
+      await _discoverOnline(captured);
+    } finally {
+      if (mounted) setState(() => _routeOpening = false);
     }
-    await _discoverOnline(captured);
   }
 
   Future<void> _mic() async {
