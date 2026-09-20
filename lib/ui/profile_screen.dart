@@ -283,12 +283,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   );
 }
 
-class ActivityScreen extends StatelessWidget {
+class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key, required this.controller});
   final PharmacyController controller;
 
-  Future<void> _undoLast(BuildContext context) async {
-    if (!controller.canUndo || controller.snapshot.events.isEmpty) return;
+  @override
+  State<ActivityScreen> createState() => _ActivityScreenState();
+}
+
+class _ActivityScreenState extends State<ActivityScreen> {
+  PharmacyController get controller => widget.controller;
+
+  bool _undoing = false;
+
+  Future<void> _undoLast() async {
+    if (_undoing || !controller.canUndo || controller.snapshot.events.isEmpty) {
+      return;
+    }
+    setState(() => _undoing = true);
     final event = controller.snapshot.events.first;
     final label = '${event['label']}';
     final revision = event['revision'];
@@ -313,12 +325,17 @@ class ActivityScreen extends StatelessWidget {
           ),
         ) ??
         false;
-    if (!confirmed || !context.mounted) return;
+    if (!confirmed || !mounted) {
+      if (mounted) setState(() => _undoing = false);
+      return;
+    }
     try {
       await controller.undo();
-      if (context.mounted) showSaved(context, 'The last change was undone.');
+      if (mounted) showSaved(context, 'The last change was undone.');
     } catch (e) {
-      if (context.mounted) showError(context, e);
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _undoing = false);
     }
   }
 
@@ -345,9 +362,19 @@ class ActivityScreen extends StatelessWidget {
             }
             if (index == 1) {
               return FilledButton.icon(
-                onPressed: controller.canUndo ? () => _undoLast(context) : null,
-                icon: const Icon(Icons.undo_rounded),
-                label: const Text('Review & undo last change'),
+                onPressed: controller.canUndo && !_undoing
+                    ? () => unawaited(_undoLast())
+                    : null,
+                icon: _undoing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.undo_rounded),
+                label: Text(
+                  _undoing ? 'Undoing latest change…' : 'Review & undo last change',
+                ),
               );
             }
             if (index == 2) return const SizedBox(height: 22);
