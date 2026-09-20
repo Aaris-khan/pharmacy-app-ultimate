@@ -34,6 +34,9 @@ void main() {
       expect(ai, contains("title: const Text('Modify medicine')"));
       expect(ai, isNot(contains('GridView.count(')));
       expect(ai, contains('status: true'));
+      expect(ai, contains('class _AiEmptyConversation'));
+      expect(ai, contains('if (_messages.isEmpty &&'));
+      expect(ai, contains("'Ask Aaris naturally'"));
 
       final buildStart = ai.indexOf(
         'Widget build(BuildContext context) => ActiveListenableBuilder(',
