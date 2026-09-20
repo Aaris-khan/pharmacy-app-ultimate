@@ -260,7 +260,7 @@ void main() {
       );
       expect(targetCard(), findsOneWidget);
 
-      final quantityRefresh = controller.gateNextSearch();
+      expect(controller.searchRequests, 1);
       var live = controller.snapshot.records[record.id]!;
       await controller.save(
         live.patch({'quantity': 9}),
@@ -268,14 +268,20 @@ void main() {
       );
       await tester.pump();
       expect(
-        targetCard(),
-        findsOneWidget,
+        controller.searchRequests,
+        1,
         reason:
-            'Quantity-only edits do not change search membership, so the valid '
-            'card should stay visible while the same query refreshes.',
+            'Quantity-only edits must repaint the live card without rerunning '
+            'the unchanged fuzzy query.',
       );
-      quantityRefresh.complete();
-      await tester.pumpAndSettle();
+      expect(targetCard(), findsOneWidget);
+      expect(
+        tester.widget<MedicineCard>(targetCard()).record.quantity,
+        9,
+        reason:
+            'The retained hit must bind the latest immutable stock row so a '
+            'subsequent tap cannot open stale stock facts.',
+      );
 
       final searchableRefresh = controller.gateNextSearch();
       live = controller.snapshot.records[record.id]!;
