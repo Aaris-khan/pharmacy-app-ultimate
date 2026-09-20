@@ -654,7 +654,13 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: blueAction(
                           icon: Icons.add_rounded,
                           label: 'Add medicine',
-                          onPressed: () => openEditor(context, controller),
+                          onPressed: _routeOpening
+                              ? null
+                              : () => unawaited(
+                                  _runExclusiveRoute(
+                                    () => openEditor(context, controller),
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 10),
