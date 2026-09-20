@@ -44,6 +44,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   late int _observedSearchEpoch;
   bool _controllerListening = false;
   bool _refreshWhenActive = false;
+  bool _restoring = false;
   bool _browseExhausted = false;
   int _browseLimit = _browsePageSize;
   Future<void> _searchTail = Future<void>.value();
@@ -307,7 +308,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     unawaited(_search(preserveResults: true));
   }
 
-  Future<void> _reviewRestore(Medicine record) async {
+  Future<void> _reviewRestore(Medicine record) => _runRestoreFlow(() async {
     late final ReviewedArchivedRestore review;
     try {
       review = widget.controller.reviewArchivedRestore(record.id);
@@ -395,6 +396,16 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       );
     } catch (error) {
       if (mounted) showError(context, error);
+    }
+  });
+
+  Future<void> _runRestoreFlow(Future<void> Function() action) async {
+    if (_restoring || !mounted) return;
+    setState(() => _restoring = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -534,7 +545,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
               hit: entry.$1,
               record: entry.$2,
               showConfidence: query.isNotEmpty,
-              onRestore: () => _reviewRestore(entry.$2),
+              onRestore: _restoring
+                  ? null
+                  : () => unawaited(_reviewRestore(entry.$2)),
             ),
           );
         },
@@ -554,7 +567,7 @@ class _RemovedStockCard extends StatelessWidget {
   final SearchHit hit;
   final Medicine record;
   final bool showConfidence;
-  final VoidCallback onRestore;
+  final VoidCallback? onRestore;
 
   @override
   Widget build(BuildContext context) {
