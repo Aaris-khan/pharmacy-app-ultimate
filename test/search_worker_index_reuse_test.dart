@@ -228,16 +228,16 @@ void main() {
   test(
     'removed search index ignores searchable edits to active stock',
     () async {
-      final removed = archiveMedicine(
-        stock(
-          'removed-projection',
-          name: 'Drotaverine',
-          strength: '80mg',
-          quantity: 4,
-        ),
-        reason: 'Removed for return',
-        at: DateTime.utc(2026, 9, 19, 10),
-      );
+      final removed = stock(
+        'removed-projection',
+        name: 'Drotaverine',
+        strength: '80mg',
+        quantity: 4,
+      ).patch(<String, dynamic>{
+        'archived': true,
+        'archivedAt': DateTime.utc(2026, 9, 19, 10).toIso8601String(),
+        'archiveReason': 'Removed for return',
+      });
       final active = stock(
         'active-projection',
         name: 'Paracetamol',
