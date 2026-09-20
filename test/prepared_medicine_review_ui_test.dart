@@ -36,6 +36,27 @@ void main() {
     expect(review, isNot(contains('Possible existing stock — verify carefully')));
     expect(review, isNot(contains('Review scanned facts manually')));
 
+    final inventorySave = review.indexOf('await widget.controller.save(');
+    final optionalLearning = review.indexOf(
+      'OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(',
+    );
+    expect(inventorySave, greaterThanOrEqualTo(0));
+    expect(optionalLearning, greaterThan(inventorySave));
+    expect(
+      review,
+      isNot(
+        contains(
+          'await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(',
+        ),
+      ),
+      reason:
+          'Optional recognition learning must not hold the pharmacist on the save path after inventory is durable.',
+    );
+    expect(
+      review.substring(inventorySave, optionalLearning),
+      contains('unawaited('),
+    );
+
     expect(pipeline, contains('MedicineReviewInputKind.prepared'));
     expect(pipeline, contains('MedicineReviewInputKind.localEvidence'));
     expect(pipeline, contains('MedicineReviewInputKind.cloudEvidence'));
