@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/data/inventory_database.dart';
 import '../lib/domain/inventory.dart';
 import '../lib/state/pharmacy_controller.dart';
+import '../lib/ui/design.dart';
 import '../lib/ui/search_screen.dart';
 import 'domain_contract.dart';
 
@@ -70,7 +71,33 @@ void main() {
         find.text('Pasted medicine list active · local inventory search'),
         findsOneWidget,
       );
-      expect(find.text('1 stock entry'), findsOneWidget);
+
+      // Assert the actual bulk-search publication rather than inferring it from
+      // a footer that lives below a lazy sliver viewport. The exact medicine
+      // must survive while the unrelated pasted line contributes no weak fuzzy
+      // result.
+      final expectedCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is MedicineCard && widget.record.id == first.id,
+      );
+      final unrelatedCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is MedicineCard && widget.record.id == second.id,
+      );
+      expect(expectedCard, findsOneWidget);
+      expect(unrelatedCard, findsNothing);
+
+      // The count/footer is intentionally lazy. Scroll it into the viewport
+      // before asserting presentation text so this remains a UI contract test,
+      // not an accidental eager-sliver requirement.
+      final count = find.text('1 stock entry');
+      await tester.scrollUntilVisible(
+        count,
+        300,
+        scrollable: find.byType(CustomScrollView),
+      );
+      await tester.pumpAndSettle();
+      expect(count, findsOneWidget);
       expect(find.text('Load more'), findsNothing);
 
       await tester.tap(find.text('Paste list'));
