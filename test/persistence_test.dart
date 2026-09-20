@@ -52,6 +52,33 @@ void main() {
     controller.dispose();
     await Future<void>.delayed(Duration.zero);
   });
+  test('large persisted inventory decodes away from the UI isolate', () async {
+    final seeded = <Medicine>[
+      for (var i = 0; i < 100; i++)
+        Medicine(
+          id: 'decode-row-$i',
+          name: 'Decode Medicine $i',
+          quantity: i + 1,
+          expiry: DateTime(2027, 1, 1).add(Duration(days: i)),
+        ),
+    ];
+
+    await storage.commit(
+      InventoryMutation(
+        expectedRevision: 0,
+        label: 'Seed large persisted inventory',
+        upserts: seeded,
+        undoable: false,
+      ),
+    );
+    expect(storage.debugBackgroundDecodeCount, 0);
+
+    final loaded = await storage.load();
+
+    expect(loaded.records.length, seeded.length);
+    expect(storage.debugBackgroundDecodeCount, 1);
+  });
+
   test(
     'independent concurrent medicine writes serialize without false conflicts',
     () async {
