@@ -60,4 +60,42 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'medicine date fields stay readable at phone width',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final controller = PharmacyController(
+        MemoryInventoryStorage(InventorySnapshot()),
+        clock: () => DateTime(2026, 9, 20, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: EditorScreen(controller: controller),
+        ),
+      );
+      await tester.pump();
+
+      final expirySurface = find.byKey(const ValueKey('expiry-true'));
+      expect(expirySurface, findsOneWidget);
+      expect(
+        tester.getSize(expirySurface).width,
+        greaterThan(280),
+        reason:
+            'Full dates plus the calendar action need a full-width field on a phone-sized editor.',
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
