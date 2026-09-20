@@ -1313,9 +1313,13 @@ class _AiEmptyConversation extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(4, 12, 4, 18),
     child: Align(
       alignment: Alignment.centerLeft,
-      child: Surface(
-        color: _aiPurple.withAlpha(8),
+      child: Container(
         padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(238),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _aiPurple.withAlpha(35)),
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
