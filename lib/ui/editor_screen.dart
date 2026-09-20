@@ -596,7 +596,7 @@ class _EditorScreenState extends State<EditorScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_allowPop) setState(() => _busy = false);
     }
   }
 
@@ -657,7 +657,7 @@ class _EditorScreenState extends State<EditorScreen> {
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_allowPop) setState(() => _busy = false);
     }
   }
 
@@ -895,7 +895,7 @@ class _EditorScreenState extends State<EditorScreen> {
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_allowPop) setState(() => _busy = false);
     }
   }
 
