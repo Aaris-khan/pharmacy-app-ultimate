@@ -9,6 +9,7 @@ void main() {
     final backup = File('lib/ui/backup_screen.dart').readAsStringSync();
     final supplier = File('lib/ui/supplier_editor.dart').readAsStringSync();
     final scanner = File('lib/ui/scanner_screen.dart').readAsStringSync();
+    final review = File('lib/ui/medicine_review_screen.dart').readAsStringSync();
 
     expect(design, contains('void showSavedWithMessenger('));
     expect(
@@ -24,7 +25,22 @@ void main() {
     expect(backup, contains('var completed = false;'));
     expect(backup, contains('completed = true;'));
     expect(backup, contains('if (!completed && mounted)'));
-    expect(backup, contains('if (_sharing || _restoring) return;'));
+    expect(
+      backup,
+      contains('if (_sharing || _reading || _restoring) return;'),
+    );
+    expect(
+      backup,
+      contains('if (_reading || _sharing || _restoring) return;'),
+    );
+    expect(
+      backup,
+      contains('onPressed: _sharing || _reading || _restoring'),
+    );
+    expect(
+      backup,
+      contains('onPressed: _reading || _sharing || _restoring'),
+    );
     expect(
       backup,
       contains('if (review == null || _restoring || _sharing || _reading) return;'),
@@ -42,6 +58,17 @@ void main() {
     expect(
       scanner,
       isNot(contains('if (mounted && !_closed) setState(() => _capturing = false);')),
+    );
+    expect(review, contains('bool _leaving = false;'));
+    expect(review, contains('void _finishReview()'));
+    expect(
+      review,
+      contains('if (mounted && !_leaving) setState(() => _busy = false);'),
+    );
+    expect(
+      RegExp(r'Navigator\.pop\(context, true\);').allMatches(review).length,
+      1,
+      reason: 'Medicine review completion must pop only through _finishReview.',
     );
 
     expect(
