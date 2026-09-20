@@ -318,6 +318,52 @@ void main() {
     await tester.pump();
 
     expect(tester.widget<Text>(title), isNot(same(before)));
+    final afterStock = tester.widget<Text>(title);
+    final statsBeforeMetadata = controller.stats;
+    final salesBeforeMetadata = controller.salesOverview;
+    final statsEpochBeforeMetadata = controller.statsProjectionEpoch;
+    final salesEpochBeforeMetadata = controller.salesOverviewEpoch;
+
+    var live = controller.snapshot.records['stats-visible-stock']!;
+    await controller.save(
+      live.patch(<String, dynamic>{
+        'notes': 'Counted during morning round',
+        'location': 'Shelf B',
+      }),
+      expectedRevision: controller.snapshot.revision,
+    );
+    await tester.pump();
+
+    expect(
+      tester.widget<Text>(title),
+      same(afterStock),
+      reason:
+          'Notes and location do not participate in snapshot or sales metrics.',
+    );
+    expect(controller.statsProjectionEpoch, statsEpochBeforeMetadata);
+    expect(controller.salesOverviewEpoch, salesEpochBeforeMetadata);
+    expect(controller.stats, same(statsBeforeMetadata));
+    expect(controller.salesOverview, same(salesBeforeMetadata));
+
+    live = controller.snapshot.records['stats-visible-stock']!;
+    await controller.save(
+      live.patch(<String, dynamic>{'quantity': 5}),
+      expectedRevision: controller.snapshot.revision,
+    );
+    await tester.pump();
+
+    expect(
+      tester.widget<Text>(title),
+      isNot(same(afterStock)),
+      reason: 'Quantity changes the snapshot metrics and must rebuild Stats.',
+    );
+    expect(
+      controller.statsProjectionEpoch,
+      greaterThan(statsEpochBeforeMetadata),
+    );
+    expect(controller.salesOverviewEpoch, salesEpochBeforeMetadata);
+    expect(controller.stats, isNot(same(statsBeforeMetadata)));
+    expect(controller.salesOverview, same(salesBeforeMetadata));
 
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

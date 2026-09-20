@@ -107,6 +107,33 @@ class ReviewedSale {
 bool _sameReviewedMedicine(Medicine live, Medicine reviewed) =>
     mapEquals(live.toJson(), reviewed.toJson());
 
+bool _sameStatsMedicineProjection(Medicine before, Medicine after) {
+  if (before.archived != after.archived) return false;
+  if (before.archived) return true;
+  if (before.identity != after.identity ||
+      normalize(before.name) != normalize(after.name) ||
+      before.salt.isEmpty != after.salt.isEmpty ||
+      normalize(before.salt) != normalize(after.salt) ||
+      before.unitPricePaise != after.unitPricePaise ||
+      before.sold != after.sold) {
+    return false;
+  }
+  if (before.sold) return true;
+  return before.form == after.form &&
+      before.quantity == after.quantity &&
+      before.expiry == after.expiry;
+}
+
+bool _sameSalesOverviewMedicineProjection(Medicine before, Medicine after) {
+  if (before.sold != after.sold) return false;
+  if (!before.sold) return true;
+  return before.name == after.name &&
+      before.soldQuantity == after.soldQuantity &&
+      before.soldAt == after.soldAt &&
+      before.soldUnitPricePaise == after.soldUnitPricePaise &&
+      before.unitPricePaise == after.unitPricePaise;
+}
+
 SaleEvent? _knownSoldDepletion(
   Medicine medicine, {
   required int? quantity,
@@ -223,6 +250,7 @@ class PharmacyController extends ChangeNotifier {
   List<Medicine>? _readRecords;
   InventoryStats? _statsCache;
   String _statsDayKey = '';
+  int _statsProjectionEpoch = 0;
   HomeInventoryProjection? _homeProjectionCache;
   String _homeProjectionDayKey = '';
   int _homeProjectionEpoch = 0, _homeProjectionCacheEpoch = -1;
@@ -292,15 +320,11 @@ class PharmacyController extends ChangeNotifier {
       _readRecords = List<Medicine>.unmodifiable(snapshot.records.values);
     }
 
-    if (recordsChanged) {
-      _statsCache = null;
-      _statsDayKey = '';
-    }
     if (settingsChanged) {
       _homeProjectionCache = null;
       _homeProjectionDayKey = '';
     }
-    if (recordsChanged || salesChanged || salesOverviewEventsChanged) {
+    if (salesChanged || salesOverviewEventsChanged) {
       _salesOverviewCache = null;
       _salesOverviewEpoch++;
     }
@@ -327,6 +351,13 @@ class PharmacyController extends ChangeNotifier {
 
   @visibleForTesting
   int get debugSearchDatasetEpoch => searchProjectionEpoch;
+
+  /// Monotonic token for the exact medicine facts consumed by [stats].
+  ///
+  /// Notes, shelf location, barcode and other operational metadata do not
+  /// advance this token, so the snapshot dashboard can stay frame-quiet while
+  /// those unrelated fields are edited.
+  int get statsProjectionEpoch => _statsProjectionEpoch;
 
   /// Monotonic token for search and ordering facts of removed stock only.
   ///
@@ -453,6 +484,11 @@ class PharmacyController extends ChangeNotifier {
     final loaded = await storage.load();
     if (_disposed) return;
     snapshot = loaded;
+    _statsCache = null;
+    _statsDayKey = '';
+    _salesOverviewCache = null;
+    _statsProjectionEpoch++;
+    _salesOverviewEpoch++;
     _searchDatasetEpoch++;
     _archivedSearchDatasetEpoch++;
     _homeProjectionEpoch++;
@@ -687,6 +723,50 @@ class PharmacyController extends ChangeNotifier {
     return false;
   }
 
+  bool _mutationChangesStatsProjection(
+    InventorySnapshot before,
+    InventorySnapshot after,
+    InventoryMutation mutation,
+  ) {
+    bool changed(String id) {
+      final previous = before.records[id];
+      final current = after.records[id];
+      if (previous == null || current == null) return previous != current;
+      return !_sameStatsMedicineProjection(previous, current);
+    }
+
+    for (final record in mutation.upserts) {
+      if (changed(record.id)) return true;
+    }
+    for (final id in mutation.removeIds) {
+      if (changed(id)) return true;
+    }
+    return false;
+  }
+
+  bool _mutationChangesSalesOverviewMedicineProjection(
+    InventorySnapshot before,
+    InventorySnapshot after,
+    InventoryMutation mutation,
+  ) {
+    bool changed(String id) {
+      final previous = before.records[id];
+      final current = after.records[id];
+      if (previous == null || current == null) {
+        return (previous?.sold ?? false) || (current?.sold ?? false);
+      }
+      return !_sameSalesOverviewMedicineProjection(previous, current);
+    }
+
+    for (final record in mutation.upserts) {
+      if (changed(record.id)) return true;
+    }
+    for (final id in mutation.removeIds) {
+      if (changed(id)) return true;
+    }
+    return false;
+  }
+
   bool _mutationChangesHomeProjection(
     InventorySnapshot before,
     InventorySnapshot after,
@@ -732,6 +812,19 @@ class PharmacyController extends ChangeNotifier {
       }
       if (_mutationChangesHomeProjection(before, committed, mutation)) {
         _homeProjectionEpoch++;
+      }
+      if (_mutationChangesStatsProjection(before, committed, mutation)) {
+        _statsCache = null;
+        _statsDayKey = '';
+        _statsProjectionEpoch++;
+      }
+      if (_mutationChangesSalesOverviewMedicineProjection(
+        before,
+        committed,
+        mutation,
+      )) {
+        _salesOverviewCache = null;
+        _salesOverviewEpoch++;
       }
       snapshot = committed;
       _emit();

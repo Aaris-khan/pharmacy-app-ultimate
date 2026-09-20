@@ -14,7 +14,11 @@ class StatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
-    rebuildToken: () => (controller.salesOverviewEpoch, controller.today),
+    rebuildToken: () => (
+      controller.statsProjectionEpoch,
+      controller.salesOverviewEpoch,
+      controller.today,
+    ),
     builder: (context, _) {
       final inventory = controller.stats;
       final sales = controller.salesOverview;
