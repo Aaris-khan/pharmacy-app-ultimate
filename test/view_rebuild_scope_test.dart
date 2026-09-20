@@ -68,6 +68,64 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Home ignores counter-only writes but rebuilds visible stock facts', (
+    tester,
+  ) async {
+    final medicine = Medicine(
+      id: 'home-counter-quiet',
+      name: 'Home Counter Quiet',
+      quantity: 10,
+      unitPricePaise: 1200,
+      location: 'Shelf A',
+      expiry: DateTime(2026, 9, 24),
+    );
+    final controller = controllerWith(
+      InventorySnapshot(records: <String, Medicine>{medicine.id: medicine}),
+    );
+    await controller.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: Scaffold(
+          body: HomeScreen(controller: controller, onDatabase: () {}),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final title = find.text('Aaris Pharmacy');
+    final before = tester.widget<Text>(title);
+    var live = controller.snapshot.records[medicine.id]!;
+    await controller.save(
+      live.patch(<String, dynamic>{
+        'quantity': 9,
+        'unitPricePaise': 1300,
+      }),
+      expectedRevision: controller.snapshot.revision,
+    );
+    await tester.pump();
+
+    expect(
+      tester.widget<Text>(title),
+      same(before),
+      reason: 'Home does not render quantity or price.',
+    );
+
+    live = controller.snapshot.records[medicine.id]!;
+    await controller.save(
+      live.patch(<String, dynamic>{'location': 'Shelf B'}),
+      expectedRevision: controller.snapshot.revision,
+    );
+    await tester.pump();
+
+    expect(tester.widget<Text>(title), isNot(same(before)));
+    expect(find.text('Shelf B'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets('Supplier directory ignores warning-only publications', (
     tester,
   ) async {

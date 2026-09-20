@@ -220,6 +220,62 @@ void main() {
     expect(identical(returnsAfterWarning, controller.supplierReturns), isFalse);
   });
 
+  test(
+    'Home projection cache ignores stock-only counters but not visible facts',
+    () async {
+      final medicine = Medicine(
+        id: 'home-cache-stock',
+        name: 'Home Cache Medicine',
+        strength: '500mg',
+        form: 'Tablet',
+        quantity: 10,
+        unitPricePaise: 1250,
+        location: 'Shelf A',
+        expiry: DateTime(2026, 9, 24),
+      );
+      final controller = PharmacyController(
+        MemoryInventoryStorage(
+          InventorySnapshot(
+            records: <String, Medicine>{medicine.id: medicine},
+          ),
+        ),
+        clock: () => DateTime(2026, 9, 20, 10),
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      final initialEpoch = controller.homeProjectionEpoch;
+      final initialProjection = controller.homeProjection;
+      var live = controller.snapshot.records[medicine.id]!;
+      await controller.save(
+        live.patch(<String, dynamic>{
+          'quantity': 9,
+          'unitPricePaise': 1300,
+        }),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(controller.homeProjectionEpoch, initialEpoch);
+      expect(
+        identical(initialProjection, controller.homeProjection),
+        isTrue,
+        reason:
+            'Counters that Home never renders must not trigger another full-inventory projection.',
+      );
+
+      live = controller.snapshot.records[medicine.id]!;
+      await controller.save(
+        live.patch(<String, dynamic>{'location': 'Shelf B'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(controller.homeProjectionEpoch, initialEpoch + 1);
+      expect(identical(initialProjection, controller.homeProjection), isFalse);
+      expect(controller.homeProjection.attention.single.address, 'Shelf B');
+    },
+  );
+
   test('tracking read model is reused by range and invalidated safely', () async {
     var now = DateTime(2026, 9, 12, 10);
     final controller = PharmacyController(

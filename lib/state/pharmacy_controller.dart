@@ -220,6 +220,7 @@ class PharmacyController extends ChangeNotifier {
   String _statsDayKey = '';
   HomeInventoryProjection? _homeProjectionCache;
   String _homeProjectionDayKey = '';
+  int _homeProjectionEpoch = 0, _homeProjectionCacheEpoch = -1;
   SalesOverview? _salesOverviewCache;
   int _salesOverviewEpoch = 0;
   final Map<String, TrackingStats> _trackingCache = <String, TrackingStats>{};
@@ -289,7 +290,7 @@ class PharmacyController extends ChangeNotifier {
       _statsCache = null;
       _statsDayKey = '';
     }
-    if (recordsChanged || settingsChanged) {
+    if (settingsChanged) {
       _homeProjectionCache = null;
       _homeProjectionDayKey = '';
     }
@@ -318,6 +319,14 @@ class PharmacyController extends ChangeNotifier {
 
   @visibleForTesting
   int get debugWebArchivedSearchIndexBuilds => _webArchivedSearchIndexBuilds;
+
+  /// Monotonic version for the exact medicine/settings inputs consumed by
+  /// [homeProjection]. The civil day remains a separate token because expiry
+  /// status changes at midnight without any inventory write.
+  int get homeProjectionEpoch {
+    _syncReadSnapshot();
+    return _homeProjectionEpoch;
+  }
 
   /// Monotonic version for the exact inputs consumed by [salesOverview].
   ///
@@ -349,13 +358,16 @@ class PharmacyController extends ChangeNotifier {
     final date = today;
     final dayKey = dateText(date);
     _syncReadSnapshot();
-    if (_homeProjectionCache == null || _homeProjectionDayKey != dayKey) {
+    if (_homeProjectionCache == null ||
+        _homeProjectionDayKey != dayKey ||
+        _homeProjectionCacheEpoch != _homeProjectionEpoch) {
       _homeProjectionCache = HomeInventoryProjection.build(
         medicines: _stableRecords,
         settings: settings,
         today: date,
       );
       _homeProjectionDayKey = dayKey;
+      _homeProjectionCacheEpoch = _homeProjectionEpoch;
     }
     return _homeProjectionCache!;
   }
@@ -419,6 +431,7 @@ class PharmacyController extends ChangeNotifier {
     if (_disposed) return;
     snapshot = loaded;
     _searchDatasetEpoch++;
+    _homeProjectionEpoch++;
     ready = true;
     _scheduleMidnight();
     _emit();
@@ -626,6 +639,32 @@ class PharmacyController extends ChangeNotifier {
     return false;
   }
 
+  bool _mutationChangesHomeProjection(
+    InventorySnapshot before,
+    InventorySnapshot after,
+    InventoryMutation mutation,
+  ) {
+    if (before.settings.shortDays != after.settings.shortDays ||
+        before.settings.months != after.settings.months) {
+      return true;
+    }
+
+    bool changed(String id) {
+      final previous = before.records[id];
+      final current = after.records[id];
+      if (previous == null || current == null) return previous != current;
+      return !sameHomeProjectionInput(previous, current);
+    }
+
+    for (final record in mutation.upserts) {
+      if (changed(record.id)) return true;
+    }
+    for (final id in mutation.removeIds) {
+      if (changed(id)) return true;
+    }
+    return false;
+  }
+
   Future<void> _queueCommit(InventoryMutation? Function() buildMutation) {
     final result = _writes.then((_) async {
       if (_disposed) throw StateError('App is closed.');
@@ -635,6 +674,9 @@ class PharmacyController extends ChangeNotifier {
       final committed = await storage.commit(mutation);
       if (_mutationChangesSearchProjection(before, committed, mutation)) {
         _searchDatasetEpoch++;
+      }
+      if (_mutationChangesHomeProjection(before, committed, mutation)) {
+        _homeProjectionEpoch++;
       }
       snapshot = committed;
       _emit();

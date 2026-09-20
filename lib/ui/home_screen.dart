@@ -101,16 +101,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
     listenable: controller,
-    // Home renders medicine facts, warning settings and the civil day only.
-    // Supplier/activity/sale-only snapshots must stay frame-quiet here.
-    rebuildToken: () => (
-      controller.snapshot.records,
-      controller.snapshot.settings,
-      controller.today,
-    ),
+    // Home listens to the exact presentation dependency epoch rather than
+    // every medicine-map identity. Quantity/price-only writes can therefore
+    // stay frame-quiet while visible facts, warning policy and the civil day
+    // still repaint immediately.
+    rebuildToken: () => (controller.homeProjectionEpoch, controller.today),
     builder: (context, _) {
-      // Rebuild only for a new inventory snapshot or civil day. The controller
-      // memoizes the authoritative projection. While a warning-window write is
+      // Rebuild only when Home-visible inventory meaning or the civil day
+      // changes. The controller memoizes the authoritative projection. While a
+      // warning-window write is
       // pending, derive one transient projection from that same snapshot so the
       // title, counts, attention rows and row styling all acknowledge the tap
       // together instead of mixing new controls with old persisted semantics.
@@ -351,7 +350,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 record: m,
                 settings: visibleSettings,
                 today: controller.today,
-                onTap: () => openEditor(context, controller, record: m),
+                onTap: () {
+                  // A cached Home projection may intentionally retain its row
+                  // object across quantity/price-only writes. Resolve the exact
+                  // live stock ID at interaction time so the editor never opens
+                  // a stale revision merely because Home avoided a repaint.
+                  final live = controller.snapshot.records[m.id];
+                  if (live != null) {
+                    openEditor(context, controller, record: live);
+                  }
+                },
               ),
             ),
         ],

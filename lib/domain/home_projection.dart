@@ -1,6 +1,27 @@
 import 'inventory.dart';
 import 'medicine.dart';
 
+/// Whether a medicine row still means exactly the same thing to Home.
+///
+/// Quantity, price, batch, supplier, barcode, notes, OCR and manufacturing
+/// facts are intentionally absent: Home neither renders nor ranks by them.
+/// Keeping this dependency contract explicit lets frequent stock-counter writes
+/// stay off the dashboard's O(N) projection/rebuild path without hiding any
+/// field that the dashboard actually presents.
+bool sameHomeProjectionInput(Medicine before, Medicine after) =>
+    before.id == after.id &&
+    before.name == after.name &&
+    before.brand == after.brand &&
+    before.manufacturer == after.manufacturer &&
+    before.salt == after.salt &&
+    before.strength == after.strength &&
+    before.form == after.form &&
+    before.expiry == after.expiry &&
+    before.expiryMonthOnly == after.expiryMonthOnly &&
+    before.sold == after.sold &&
+    before.archived == after.archived &&
+    before.address == after.address;
+
 /// Read-only, presentation-sized snapshot for the Home dashboard.
 ///
 /// Home previously asked the controller for five independently filtered/sorted

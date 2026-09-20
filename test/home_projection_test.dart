@@ -43,6 +43,52 @@ void main() {
     ]);
   });
 
+  test('home dependency equality ignores hidden stock counters only', () {
+    final base = Medicine(
+      id: 'projection-input',
+      name: 'Projection Input',
+      brand: 'Brand',
+      manufacturer: 'Maker',
+      salt: 'Salt',
+      strength: '500mg',
+      form: 'Tablet',
+      quantity: 10,
+      unitPricePaise: 1200,
+      location: 'Shelf A',
+      expiry: DateTime(2026, 9, 14),
+    );
+
+    expect(
+      sameHomeProjectionInput(
+        base,
+        base.patch(<String, dynamic>{
+          'quantity': 9,
+          'unitPricePaise': 1500,
+          'barcode': '8901234567890',
+          'notes': 'Counted today',
+          'ocrText': 'updated source text',
+        }),
+      ),
+      isTrue,
+    );
+    expect(
+      sameHomeProjectionInput(
+        base,
+        base.patch(<String, dynamic>{'location': 'Shelf B'}),
+      ),
+      isFalse,
+      reason: 'Home renders the stock address.',
+    );
+    expect(
+      sameHomeProjectionInput(
+        base,
+        base.patch(<String, dynamic>{'expiry': '2026-09-13'}),
+      ),
+      isFalse,
+      reason: 'Expiry drives Home status, ordering and card text.',
+    );
+  });
+
   test('home attention remains bounded and prioritizes expired before warnings', () {
     final records = [
       stock('month-a', name: 'Month A', expiry: '2026-10-01'),
