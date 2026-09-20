@@ -203,7 +203,12 @@ class PharmacyController extends ChangeNotifier {
   Timer? _midnight;
   Future<void>? _initializing;
   Future<void> _writes = Future.value();
+  // Active and Removed Stock search projections advance independently. Keep
+  // their lazy isolate sessions independent too; otherwise switching surfaces
+  // makes one projection's revision invalidate the other's cached dataset and
+  // fuzzy index even when none of its own searchable rows changed.
   final _searchWorker = SearchWorker();
+  final _archivedSearchWorker = SearchWorker();
   MedicineSearch? _webSearch, _webArchivedSearch;
   int _webSearchDatasetEpoch = -1, _webArchivedSearchDatasetEpoch = -1;
   int _webSearchIndexBuilds = 0, _webArchivedSearchIndexBuilds = 0;
@@ -2007,7 +2012,7 @@ class PharmacyController extends ChangeNotifier {
         ? 100000
         : limit;
     final data = _stableRecords;
-    final datasetRevision = _searchDatasetEpoch;
+    final datasetRevision = _archivedSearchDatasetEpoch;
     if (kIsWeb || !backgroundSearch) {
       final visible = data
           .where((medicine) => medicine.archived)
@@ -2018,7 +2023,7 @@ class PharmacyController extends ChangeNotifier {
           .map((medicine) => SearchHit(medicine.id, 1, 'Removed stock', ''))
           .toList(growable: false);
     }
-    return _searchWorker.browseArchived(
+    return _archivedSearchWorker.browseArchived(
       data,
       datasetRevision,
       limit: boundedLimit,
@@ -2034,7 +2039,7 @@ class PharmacyController extends ChangeNotifier {
       return browseArchived(limit: MedicineSearch.maxArchivedResults);
     }
     final data = _stableRecords;
-    final datasetRevision = _searchDatasetEpoch;
+    final datasetRevision = _archivedSearchDatasetEpoch;
     final date = today;
     if (kIsWeb || !backgroundSearch) {
       if (_webArchivedSearch == null ||
@@ -2052,7 +2057,12 @@ class PharmacyController extends ChangeNotifier {
         limit: 150,
       );
     }
-    return _searchWorker.searchArchived(data, datasetRevision, raw, date);
+    return _archivedSearchWorker.searchArchived(
+      data,
+      datasetRevision,
+      raw,
+      date,
+    );
   }
 
   @override
@@ -2061,6 +2071,7 @@ class PharmacyController extends ChangeNotifier {
     _disposed = true;
     final initializing = _initializing;
     _searchWorker.close();
+    _archivedSearchWorker.close();
     _midnight?.cancel();
     _cancelAi = true;
     unawaited(_closeWhenIdle(initializing));

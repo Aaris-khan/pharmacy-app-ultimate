@@ -242,7 +242,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       _error = '';
     });
 
-    // The shared search worker serializes expensive fuzzy work. Coalesce again
+    // The Removed Stock worker serializes expensive fuzzy work. Coalesce again
     // at this screen boundary so superseded removed-stock queries are discarded
     // before they can enter that queue. One already-running search may finish;
     // after it drains, only the newest queued generation performs real work.

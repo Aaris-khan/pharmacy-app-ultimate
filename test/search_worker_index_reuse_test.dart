@@ -226,6 +226,60 @@ void main() {
   );
 
   test(
+    'removed search index ignores searchable edits to active stock',
+    () async {
+      final removed = archiveMedicine(
+        stock(
+          'removed-projection',
+          name: 'Drotaverine',
+          strength: '80mg',
+          quantity: 4,
+        ),
+        reason: 'Removed for return',
+        at: DateTime.utc(2026, 9, 19, 10),
+      );
+      final active = stock(
+        'active-projection',
+        name: 'Paracetamol',
+        strength: '500mg',
+        quantity: 20,
+      );
+      final controller = PharmacyController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {removed.id: removed, active.id: active}),
+        ),
+        clock: () => contractToday,
+        backgroundSearch: false,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      final first = await controller.searchArchived('Drotaverine');
+      expect(first.single.id, removed.id);
+      expect(controller.debugWebArchivedSearchIndexBuilds, 1);
+      final archivedEpoch = controller.archivedSearchProjectionEpoch;
+      final activeEpoch = controller.debugSearchDatasetEpoch;
+
+      final live = controller.snapshot.records[active.id]!;
+      await controller.save(
+        live.patch(<String, dynamic>{'notes': 'Emergency counter'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+
+      expect(controller.debugSearchDatasetEpoch, activeEpoch + 1);
+      expect(controller.archivedSearchProjectionEpoch, archivedEpoch);
+      final afterActiveEdit = await controller.searchArchived('Drotaverine');
+      expect(afterActiveEdit.single.id, removed.id);
+      expect(
+        controller.debugWebArchivedSearchIndexBuilds,
+        1,
+        reason:
+            'An active-row search edit cannot invalidate the Removed Stock index.',
+      );
+    },
+  );
+
+  test(
     'queued writes cannot hide an earlier search projection change',
     () async {
       final searchable = stock(
