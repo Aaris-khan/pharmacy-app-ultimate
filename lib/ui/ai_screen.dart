@@ -320,7 +320,7 @@ class _AiScreenState extends State<AiScreen> {
       _error = '';
     });
     try {
-      final data = widget.controller.export();
+      final data = await widget.controller.exportAfterPendingWrites();
       await sharePharmacy(data);
       if (!mounted) return;
       setState(() {
