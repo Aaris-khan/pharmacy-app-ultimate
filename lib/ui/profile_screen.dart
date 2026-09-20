@@ -301,37 +301,32 @@ class _ActivityScreenState extends State<ActivityScreen> {
       return;
     }
     setState(() => _undoing = true);
-    final event = controller.snapshot.events.first;
-    final label = '${event['label']}';
-    final revision = event['revision'];
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Undo the latest change?'),
-            content: Text(
-              'Aaris will reverse the latest saved change only:\n\n$label\n\nRevision $revision is still current. If inventory changes before the commit, the undo is rejected instead of touching a newer state.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton.icon(
-                onPressed: () => Navigator.pop(ctx, true),
-                icon: const Icon(Icons.undo_rounded),
-                label: const Text('Undo latest change'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) {
-      if (mounted) setState(() => _undoing = false);
-      return;
-    }
     try {
-      await controller.undo();
-      if (mounted) showSaved(context, 'The last change was undone.');
+      final review = controller.reviewUndo();
+      final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Undo the latest change?'),
+              content: Text(
+                'Aaris will reverse the latest saved change only:\n\n${review.label}\n\nRevision ${review.eventRevision} must still be current. If activity changes before the commit, this Undo is rejected instead of touching a newer change.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  icon: const Icon(Icons.undo_rounded),
+                  label: const Text('Undo latest change'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!confirmed || !mounted) return;
+      await controller.applyUndo(review);
+      if (mounted) showSaved(context, 'The reviewed change was undone.');
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {

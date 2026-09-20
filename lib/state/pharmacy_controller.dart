@@ -79,6 +79,23 @@ class ReviewedMarkSold {
   String get stockId => record.id;
 }
 
+/// Immutable token binding an Undo confirmation to the exact latest audit
+/// event the owner reviewed. Undo is intentionally global: any newer commit
+/// changes what "latest" means, so a stale token must fail closed.
+class ReviewedUndo {
+  const ReviewedUndo({
+    required this.baseRevision,
+    required this.eventId,
+    required this.eventRevision,
+    required this.label,
+  });
+
+  final int baseRevision;
+  final String eventId;
+  final int eventRevision;
+  final String label;
+}
+
 /// Immutable single-stock sale review.
 ///
 /// The token binds the pharmacist's confirmation to the exact physical stock
@@ -1697,9 +1714,32 @@ class PharmacyController extends ChangeNotifier {
       snapshot.events.first['undoable'] == true &&
       snapshot.events.first['undone'] != true;
 
-  Future<void> undo() async {
+  ReviewedUndo reviewUndo() {
     if (!canUndo) throw StateError('No current change is available to undo.');
     final event = snapshot.events.first;
+    return ReviewedUndo(
+      baseRevision: snapshot.revision,
+      eventId: event['id'] as String,
+      eventRevision: event['revision'] as int,
+      label: '${event['label']}',
+    );
+  }
+
+  Future<void> applyUndo(ReviewedUndo review) => _queueCommit(() {
+    if (snapshot.revision != review.baseRevision || !canUndo) {
+      throw StateError(
+        'Activity changed after this Undo was reviewed. Review the latest change again.',
+      );
+    }
+    final event = snapshot.events.first;
+    if (event['id'] != review.eventId ||
+        event['revision'] != review.eventRevision ||
+        '${event['label']}' != review.label) {
+      throw StateError(
+        'The reviewed activity is no longer the latest change. Review Undo again.',
+      );
+    }
+
     final before = Map<String, dynamic>.from(event['before'] as Map);
     final supplierBefore = Map<String, dynamic>.from(
       event['supplierBefore'] as Map? ?? const {},
@@ -1751,24 +1791,24 @@ class PharmacyController extends ChangeNotifier {
         );
       }
     }
-    await _commit(
-      InventoryMutation(
-        expectedRevision: snapshot.revision,
-        label: 'Undo: ${event['label']}',
-        upserts: upserts,
-        upsertSuppliers: upsertSuppliers,
-        upsertSales: upsertSales,
-        removeIds: removes,
-        removeSupplierIds: removeSuppliers,
-        removeSaleIds: removeSales,
-        settings: WarningSettings.fromJson(
-          Map<String, dynamic>.from(event['settingsBefore'] as Map),
-        ),
-        undoEventId: event['id'] as String,
-        undoable: false,
+    return InventoryMutation(
+      expectedRevision: review.baseRevision,
+      label: 'Undo: ${event['label']}',
+      upserts: upserts,
+      upsertSuppliers: upsertSuppliers,
+      upsertSales: upsertSales,
+      removeIds: removes,
+      removeSupplierIds: removeSuppliers,
+      removeSaleIds: removeSales,
+      settings: WarningSettings.fromJson(
+        Map<String, dynamic>.from(event['settingsBefore'] as Map),
       ),
+      undoEventId: review.eventId,
+      undoable: false,
     );
-  }
+  });
+
+  Future<void> undo() => applyUndo(reviewUndo());
 
   PharmacyExport export() => PharmacyExport(
     revision: snapshot.revision,
