@@ -1734,62 +1734,62 @@ class _AiQuickActionsState extends State<_AiQuickActions> {
     setState(() => _moreOpening = true);
     try {
       final action = await showModalBottomSheet<AiHubQuickAction>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(8, 2, 8, 8),
-                  child: Text(
-                    'More pharmacy actions',
-                    style: TextStyle(
-                      color: ink,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w900,
+        context: context,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(8, 2, 8, 8),
+                    child: Text(
+                      'More pharmacy actions',
+                      style: TextStyle(
+                        color: ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.inventory_2_outlined, color: red),
-                title: const Text('Removed stock'),
-                subtitle: const Text('Review removed medicines'),
-                onTap: () => Navigator.pop(
-                  sheetContext,
-                  AiHubQuickAction.removed,
+                ListTile(
+                  leading: const Icon(Icons.inventory_2_outlined, color: red),
+                  title: const Text('Removed stock'),
+                  subtitle: const Text('Review removed medicines'),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    AiHubQuickAction.removed,
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline_rounded, color: red),
-                title: const Text('Delete medicine'),
-                subtitle: const Text('Choose the exact medicine first'),
-                onTap: () => Navigator.pop(
-                  sheetContext,
-                  AiHubQuickAction.delete,
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, color: red),
+                  title: const Text('Delete medicine'),
+                  subtitle: const Text('Choose the exact medicine first'),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    AiHubQuickAction.delete,
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit_rounded, color: _aiPurple),
-                title: const Text('Modify medicine'),
-                subtitle: const Text('Open exact-row edit flow'),
-                onTap: () => Navigator.pop(
-                  sheetContext,
-                  AiHubQuickAction.modify,
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded, color: _aiPurple),
+                  title: const Text('Modify medicine'),
+                  subtitle: const Text('Open exact-row edit flow'),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    AiHubQuickAction.modify,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
       if (action != null && mounted) widget.onTap(action);
     } finally {
       if (mounted) setState(() => _moreOpening = false);
