@@ -56,4 +56,28 @@ void main() {
     );
     expect(source, isNot(contains('final vision = MedicineVisionService();')));
   });
+
+  test('capture sheet retires local intake when its caller route disappears', () {
+    final capture = File('lib/ui/medicine_capture.dart').readAsStringSync();
+
+    expect(
+      capture,
+      contains(
+        "if (scan == null || !context.mounted) return;\n"
+        "      await queue.addEvidence(",
+      ),
+    );
+    expect(
+      capture,
+      contains(
+        "await queue.addFile(\n"
+        "          source.path,\n"
+        "          kind: choice,\n"
+        "          title: source.name,\n"
+        "          cancelled: () => !context.mounted,",
+      ),
+    );
+    expect(capture, contains('on MedicineIntakeEnqueueCancelled'));
+  });
+
 }
