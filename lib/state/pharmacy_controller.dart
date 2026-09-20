@@ -228,6 +228,7 @@ class PharmacyController extends ChangeNotifier {
   List<SupplierReturnCandidate>? _supplierReturnsCache;
   String _supplierReturnsDayKey = '';
   int _searchDatasetEpoch = 0;
+  int _archivedSearchDatasetEpoch = 0;
   String _publishedDayKey = '';
 
   DateTime get today => civilDay(clock());
@@ -321,6 +322,15 @@ class PharmacyController extends ChangeNotifier {
 
   @visibleForTesting
   int get debugSearchDatasetEpoch => searchProjectionEpoch;
+
+  /// Monotonic token for search and ordering facts of removed stock only.
+  ///
+  /// Active-stock edits, sales, suppliers and warning preferences cannot change
+  /// Removed Stock results, so that screen can stay idle for those publications.
+  int get archivedSearchProjectionEpoch {
+    _syncReadSnapshot();
+    return _archivedSearchDatasetEpoch;
+  }
 
   @visibleForTesting
   int get debugWebSearchIndexBuilds => _webSearchIndexBuilds;
@@ -439,6 +449,7 @@ class PharmacyController extends ChangeNotifier {
     if (_disposed) return;
     snapshot = loaded;
     _searchDatasetEpoch++;
+    _archivedSearchDatasetEpoch++;
     _homeProjectionEpoch++;
     ready = true;
     _scheduleMidnight();
@@ -647,6 +658,30 @@ class PharmacyController extends ChangeNotifier {
     return false;
   }
 
+  bool _mutationChangesArchivedSearchProjection(
+    InventorySnapshot before,
+    InventorySnapshot after,
+    InventoryMutation mutation,
+  ) {
+    bool changed(String id) {
+      final previous = before.records[id];
+      final current = after.records[id];
+      final previousArchived = previous?.archived ?? false;
+      final currentArchived = current?.archived ?? false;
+      if (!previousArchived && !currentArchived) return false;
+      if (previous == null || current == null) return previous != current;
+      return !sameSearchProjection(previous, current);
+    }
+
+    for (final record in mutation.upserts) {
+      if (changed(record.id)) return true;
+    }
+    for (final id in mutation.removeIds) {
+      if (changed(id)) return true;
+    }
+    return false;
+  }
+
   bool _mutationChangesHomeProjection(
     InventorySnapshot before,
     InventorySnapshot after,
@@ -682,6 +717,13 @@ class PharmacyController extends ChangeNotifier {
       final committed = await storage.commit(mutation);
       if (_mutationChangesSearchProjection(before, committed, mutation)) {
         _searchDatasetEpoch++;
+      }
+      if (_mutationChangesArchivedSearchProjection(
+        before,
+        committed,
+        mutation,
+      )) {
+        _archivedSearchDatasetEpoch++;
       }
       if (_mutationChangesHomeProjection(before, committed, mutation)) {
         _homeProjectionEpoch++;

@@ -219,6 +219,87 @@ void main() {
     },
   );
 
+
+  testWidgets(
+    'unrelated stock counters keep an active search surface frame-quiet',
+    (tester) async {
+      final target = stock(
+        'quiet-search-target',
+        name: 'Drotaverine',
+        strength: '80mg',
+        expiry: '2027-01-01',
+        quantity: 10,
+      );
+      final unrelated = stock(
+        'quiet-search-unrelated',
+        name: 'Paracetamol',
+        strength: '500mg',
+        expiry: '2027-02-01',
+        quantity: 20,
+      );
+      final controller = _RefreshGatedController(
+        MemoryInventoryStorage(
+          InventorySnapshot(
+            records: {
+              target.id: target,
+              unrelated.id: unrelated,
+            },
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: SearchScreen(
+            controller: controller,
+            scope: SearchScope.all,
+            database: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pumpAndSettle();
+      expect(controller.searchRequests, 1);
+
+      final scopeLabel = find.text('Searching: All medicines');
+      final before = tester.widget<Text>(scopeLabel);
+
+      final live = controller.snapshot.records[unrelated.id]!;
+      await controller.save(
+        live.patch({'quantity': 19}),
+        expectedRevision: controller.snapshot.revision,
+      );
+      await tester.pump();
+
+      expect(controller.searchRequests, 1);
+      expect(
+        tester.widget<Text>(scopeLabel),
+        same(before),
+        reason:
+            'An unrelated counter-only write must not rebuild the entire active '
+            'search surface when its published rows are unchanged.',
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is MedicineCard && widget.record.id == target.id,
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
   testWidgets(
     'same-query refresh keeps stock-only hits but retires stale searchable hits',
     (tester) async {

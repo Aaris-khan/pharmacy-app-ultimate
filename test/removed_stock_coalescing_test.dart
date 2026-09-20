@@ -161,6 +161,54 @@ void main() {
   );
 
   testWidgets(
+    'active stock edits do not restart removed-stock search',
+    (tester) async {
+      final removed = archiveMedicine(
+        stock('removed-quiet-target', name: 'Drotaverine', quantity: 10),
+        reason: 'Removed for return',
+        at: DateTime.utc(2026, 9, 19, 10),
+      );
+      final active = stock(
+        'active-quiet-unrelated',
+        name: 'Paracetamol',
+        quantity: 20,
+      );
+      final controller = _GatedRemovedStockController(
+        MemoryInventoryStorage(
+          InventorySnapshot(records: {
+            removed.id: removed,
+            active.id: active,
+          }),
+        ),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await tester.pumpWidget(_screen(controller));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'Drotaverine');
+      await tester.pump(const Duration(milliseconds: 160));
+      controller.firstSearchGate.complete();
+      await tester.pumpAndSettle();
+      expect(controller.requestedQueries, <String>['Drotaverine']);
+
+      final live = controller.snapshot.records[active.id]!;
+      await controller.save(
+        live.patch({'notes': 'Front counter'}),
+        expectedRevision: controller.snapshot.revision,
+      );
+      await tester.pump();
+
+      expect(controller.requestedQueries, <String>['Drotaverine']);
+      expect(find.text('Drotaverine'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
     'covered removed-stock screen cancels pending query work and resumes once',
     (tester) async {
       final controller = await _controller();

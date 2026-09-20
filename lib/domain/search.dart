@@ -478,6 +478,24 @@ class SearchHitPublication {
     }
     return true;
   }
+
+  /// Whether one of the rows currently rendered by this publication was
+  /// replaced in the authoritative immutable record map.
+  ///
+  /// Counter-only writes can preserve search membership/ranking while still
+  /// changing facts shown by a card or used by its tap callback. Screens can
+  /// repaint exactly for those visible replacements without rebuilding for an
+  /// unrelated stock row.
+  bool hasReplacedPublishedRow(Map<String, Medicine> records) {
+    for (final hit in hits) {
+      final before = _records[hit.id];
+      final after = records[hit.id];
+      if (before == null || after == null || !identical(before, after)) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 class MedicineSearch {

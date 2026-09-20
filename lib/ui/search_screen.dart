@@ -196,6 +196,9 @@ class _SearchScreenState extends State<SearchScreen> {
     );
     final recordsChanged =
         !identical(currentSnapshot.records, _observedRecords);
+    final publishedRowChanged =
+        recordsChanged &&
+        _publishedHits.hasReplacedPublishedRow(currentSnapshot.records);
     final searchInputsUnchanged =
         currentDay == _observedDay &&
         currentWarnings == _observedWarnings &&
@@ -214,7 +217,7 @@ class _SearchScreenState extends State<SearchScreen> {
       // Stock/accounting-only writes do not affect membership or ordering.
       // Rebuild the visible cards so callbacks bind the latest immutable row,
       // but keep the already-valid fuzzy/browse result publication.
-      if (recordsChanged) setState(() {});
+      if (publishedRowChanged) setState(() {});
       return;
     }
 

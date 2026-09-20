@@ -40,6 +40,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   String _error = '';
   int _generation = 0;
   late Object _observedSnapshot;
+  late Object _observedRecords;
+  late int _observedSearchEpoch;
   bool _controllerListening = false;
   bool _refreshWhenActive = false;
   bool _browseExhausted = false;
@@ -67,6 +69,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     );
 
     _observedSnapshot = widget.controller.snapshot;
+    _observedRecords = widget.controller.snapshot.records;
+    _observedSearchEpoch = widget.controller.archivedSearchProjectionEpoch;
     unawaited(_search());
     if (_initialContextRestoreId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -102,11 +106,32 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     final currentSnapshot = widget.controller.snapshot;
     if (_refreshWhenActive ||
         !identical(currentSnapshot, _observedSnapshot)) {
-      final preserveResults = _publishedHits.canPreserveAgainst(
-        currentSnapshot.records,
-      );
+      final refreshWasPending = _refreshWhenActive;
+      final currentSearchEpoch =
+          widget.controller.archivedSearchProjectionEpoch;
+      final recordsChanged =
+          !identical(currentSnapshot.records, _observedRecords);
+      final projectionUnchanged =
+          currentSearchEpoch == _observedSearchEpoch;
+      final publishedRowChanged =
+          recordsChanged &&
+          _publishedHits.hasReplacedPublishedRow(currentSnapshot.records);
+      final preserveResults =
+          projectionUnchanged ||
+          _publishedHits.canPreserveAgainst(currentSnapshot.records);
       _observedSnapshot = currentSnapshot;
+      _observedRecords = currentSnapshot.records;
+      _observedSearchEpoch = currentSearchEpoch;
       _refreshWhenActive = false;
+
+      // TickerMode reactivation already rebuilds this subtree. If no interrupted
+      // search needs replay and the removed-stock projection is unchanged, do
+      // not enqueue another worker pass for unrelated application activity.
+      if (projectionUnchanged && !refreshWasPending) {
+        if (publishedRowChanged) setState(() {});
+        return;
+      }
+
       _debounce?.cancel();
       unawaited(_search(preserveResults: preserveResults));
     }
@@ -122,6 +147,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
       widget.controller.addListener(_inventoryChanged);
     }
     _observedSnapshot = widget.controller.snapshot;
+    _observedRecords = widget.controller.snapshot.records;
+    _observedSearchEpoch = widget.controller.archivedSearchProjectionEpoch;
     _resetBrowseWindow();
     _publishedHits = SearchHitPublication.empty;
     ++_generation;
@@ -158,10 +185,28 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
   void _inventoryChanged() {
     final currentSnapshot = widget.controller.snapshot;
     if (identical(currentSnapshot, _observedSnapshot)) return;
-    final preserveResults = _publishedHits.canPreserveAgainst(
-      currentSnapshot.records,
-    );
+    final currentSearchEpoch = widget.controller.archivedSearchProjectionEpoch;
+    final recordsChanged =
+        !identical(currentSnapshot.records, _observedRecords);
+    final projectionUnchanged =
+        currentSearchEpoch == _observedSearchEpoch;
+    final publishedRowChanged =
+        recordsChanged &&
+        _publishedHits.hasReplacedPublishedRow(currentSnapshot.records);
+    final preserveResults =
+        projectionUnchanged ||
+        _publishedHits.canPreserveAgainst(currentSnapshot.records);
     _observedSnapshot = currentSnapshot;
+    _observedRecords = currentSnapshot.records;
+    _observedSearchEpoch = currentSearchEpoch;
+
+    if (projectionUnchanged) {
+      // Keep visible archived counters current, but do not rerun fuzzy search
+      // for active-stock edits, sales, suppliers or other unrelated snapshots.
+      if (publishedRowChanged && mounted) setState(() {});
+      return;
+    }
+
     _debounce?.cancel();
     if (mounted) {
       unawaited(_search(preserveResults: preserveResults));
