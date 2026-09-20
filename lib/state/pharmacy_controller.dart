@@ -308,11 +308,19 @@ class PharmacyController extends ChangeNotifier {
     }
   }
 
-  @visibleForTesting
-  int get debugSearchDatasetEpoch {
+  /// Monotonic token for the exact medicine facts consumed by local search,
+  /// scoped browse membership and result ordering.
+  ///
+  /// Stock counters such as quantity and price deliberately do not advance this
+  /// token. Search surfaces can therefore repaint live card values without
+  /// re-running the same fuzzy query or browse sort.
+  int get searchProjectionEpoch {
     _syncReadSnapshot();
     return _searchDatasetEpoch;
   }
+
+  @visibleForTesting
+  int get debugSearchDatasetEpoch => searchProjectionEpoch;
 
   @visibleForTesting
   int get debugWebSearchIndexBuilds => _webSearchIndexBuilds;
