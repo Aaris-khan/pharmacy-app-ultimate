@@ -43,7 +43,7 @@ void main() {
     );
     expect(
       backup,
-      contains('if (review == null || _restoring || _sharing || _reading) return;'),
+      contains('if (review == null || _restoring || _sharing || _reading || _restorePromptOpen) return;'),
     );
 
     // Cancelling the picker may preserve the currently reviewed backup. Once a
