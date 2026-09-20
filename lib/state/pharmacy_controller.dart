@@ -1810,6 +1810,19 @@ class PharmacyController extends ChangeNotifier {
 
   Future<void> undo() => applyUndo(reviewUndo());
 
+  Future<T> _readAfterPendingWrites<T>(T Function() read) async {
+    final barrier = _writes;
+    await barrier;
+    if (_disposed) throw StateError('App is closed.');
+    return read();
+  }
+
+  Future<PharmacyExport> exportAfterPendingWrites() =>
+      _readAfterPendingWrites(export);
+
+  Future<PharmacyBackup> createBackupAfterPendingWrites() =>
+      _readAfterPendingWrites(createBackup);
+
   PharmacyExport export() => PharmacyExport(
     revision: snapshot.revision,
     records: records,
