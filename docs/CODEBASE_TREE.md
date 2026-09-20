@@ -165,6 +165,7 @@ For conversational inventory control:
   bridge omitted text. `local_scan_turn.dart` only retries exact pre-inference
   context-budget failures, not invalid answers or cancelled work.
 - `PharmacyController` owns snapshot/day-scoped read-model caches (including tracking), while `ActiveListenableBuilder` is the UI lifecycle boundary for controller-backed routes: covered or retained screens detach, and read-only screens can bind a snapshot/day rebuild token so transient controller notifications do not repaint expensive projections.
+- `AarisAutopilotSupervisor` strips notes/OCR before background analytics and prepares that isolate handoff cooperatively in bounded chunks. Large inventories therefore yield to input/frame work between chunks, and generation/lifecycle checks abandon stale preparation before another worker is launched.
 - `CaptureQuality` reads at most 1024 camera pixels with validated strides.
   Android photo metrics reuse the video scoring function on a bounded decode;
   missing metrics cannot suppress OCR. The original image remains unchanged.

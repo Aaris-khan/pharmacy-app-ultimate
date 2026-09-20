@@ -492,6 +492,8 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
 /// At most one worker runs at a time; newer writes invalidate old output and
 /// collapse into a single fresh pass.
 class AarisAutopilotSupervisor extends ChangeNotifier {
+  static const int _handoffChunkSize = 256;
+
   AarisAutopilotSupervisor(
     this.controller, {
     this.debounce = const Duration(milliseconds: 120),
@@ -555,8 +557,12 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
   int _observedRevision = -1;
   String _observedDay = '';
   bool _observedReady = false;
+  int _handoffYieldCount = 0;
 
   bool get lifecycleActive => _lifecycleActive;
+
+  @visibleForTesting
+  int get debugHandoffYieldCount => _handoffYieldCount;
 
   /// Pauses read-only background planning outside the foreground lifecycle. Any
   /// in-flight result is generation-invalidated and therefore cannot publish a
@@ -629,6 +635,67 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
     );
   }
 
+  bool _handoffStillCurrent(Object source, int generation) =>
+      !_disposed &&
+      _lifecycleActive &&
+      generation == _generation &&
+      identical(controller.snapshot, source);
+
+  Future<bool> _yieldWorkerHandoff(Object source, int generation) async {
+    _handoffYieldCount++;
+    // A zero-delay event yields to Android input/frame work. A microtask would
+    // immediately resume this inventory walk and could still monopolize the UI
+    // isolate before the background analytics worker is even launched.
+    await Future<void>.delayed(Duration.zero);
+    return _handoffStillCurrent(source, generation);
+  }
+
+  Future<Map<String, dynamic>?> _prepareWorkerPayload({
+    required Object source,
+    required int generation,
+    required Iterable<Medicine> medicines,
+    required Iterable<SaleEvent> sales,
+    required Iterable<Supplier> suppliers,
+    required WarningSettings settings,
+    required DateTime today,
+  }) async {
+    final projectedRecords = <Medicine>[];
+    final saleRows = <SaleEvent>[];
+    final supplierRows = <String, Supplier>{};
+    var sinceYield = 0;
+
+    for (final medicine in medicines) {
+      projectedRecords.add(_operationalMedicineProjection(medicine));
+      if (++sinceYield >= _handoffChunkSize) {
+        sinceYield = 0;
+        if (!await _yieldWorkerHandoff(source, generation)) return null;
+      }
+    }
+    for (final sale in sales) {
+      saleRows.add(sale);
+      if (++sinceYield >= _handoffChunkSize) {
+        sinceYield = 0;
+        if (!await _yieldWorkerHandoff(source, generation)) return null;
+      }
+    }
+    for (final supplier in suppliers) {
+      supplierRows[supplier.id] = supplier;
+      if (++sinceYield >= _handoffChunkSize) {
+        sinceYield = 0;
+        if (!await _yieldWorkerHandoff(source, generation)) return null;
+      }
+    }
+
+    if (!_handoffStillCurrent(source, generation)) return null;
+    return <String, dynamic>{
+      'records': projectedRecords,
+      'sales': saleRows,
+      'suppliers': supplierRows,
+      'settings': settings,
+      'today': today,
+    };
+  }
+
   Future<void> _rebuild(int generation) async {
     if (_disposed || !_lifecycleActive || generation != _generation) return;
 
@@ -664,21 +731,22 @@ class AarisAutopilotSupervisor extends ChangeNotifier {
     }
 
     try {
-      // Build a lightweight immutable handoff from one authoritative snapshot.
-      // Notes/OCR can be very large and are irrelevant to deterministic
-      // operational planning, so they never cross this isolate boundary.
-      // The same worker now also builds the screen-ready work queue: opening
-      // "आज के काम" never repeats full inventory analytics on the UI isolate.
-      final payload = <String, dynamic>{
-        'records': <Medicine>[
-          for (final medicine in source.records.values)
-            _operationalMedicineProjection(medicine),
-        ],
-        'sales': source.sales.values.toList(growable: false),
-        'suppliers': Map<String, Supplier>.from(source.suppliers),
-        'settings': source.settings,
-        'today': today,
-      };
+      // Keep the isolate message lightweight: notes/OCR never cross this
+      // boundary. Preparing that stripped message still touches every medicine,
+      // sale and supplier, so do it cooperatively in bounded chunks instead of
+      // monopolizing the UI isolate immediately after startup or a large write.
+      // Generation/lifecycle checks at each yield abandon obsolete preparation
+      // before it can launch a worker for a stale snapshot.
+      final payload = await _prepareWorkerPayload(
+        source: source,
+        generation: generation,
+        medicines: source.records.values,
+        sales: source.sales.values,
+        suppliers: source.suppliers.values,
+        settings: source.settings,
+        today: today,
+      );
+      if (payload == null) return;
 
       final result = await compute(_evaluateAutopilot, payload);
       if (_disposed || !_lifecycleActive || generation != _generation) return;
