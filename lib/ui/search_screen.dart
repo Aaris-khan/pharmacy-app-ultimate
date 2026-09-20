@@ -39,7 +39,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<MedicineCatalogCandidate> _catalogHits = [];
   bool _loading = true,
       _catalogLoading = false,
-      _voiceOpening = false,
+      _routeOpening = false,
       _onlineMode = false;
   String _error = '', _catalogError = '';
   int _generation = 0, _catalogGeneration = 0;
@@ -481,81 +481,97 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  Future<void> _runExclusiveRoute(Future<void> Function() action) async {
+    if (_routeOpening || !mounted) return;
+    setState(() => _routeOpening = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _routeOpening = false);
+    }
+  }
+
   Future<void> _scanner() async {
-    final result = await Navigator.push<ScanResult>(
-      context,
-      MaterialPageRoute(builder: (_) => const ScannerScreen()),
-    );
+    ScanResult? result;
+    await _runExclusiveRoute(() async {
+      result = await Navigator.push<ScanResult>(
+        context,
+        MaterialPageRoute(builder: (_) => const ScannerScreen()),
+      );
+    });
     if (result == null || !mounted) return;
+    final captured = result!;
     _debounce?.cancel();
     _onlineDebounce?.cancel();
     ++_catalogGeneration;
     _resetBrowseWindow();
     setState(() {
-      _scan = result;
+      _scan = captured;
       _bulkQuery = null;
-      _query.text = result.barcode.isNotEmpty ? result.barcode : result.text;
+      _query.text = captured.barcode.isNotEmpty
+          ? captured.barcode
+          : captured.text;
       _catalogHits = [];
       _catalogError = '';
       _catalogLoading = false;
     });
     await _search();
     if (!mounted ||
-        !identical(_scan, result) ||
+        !identical(_scan, captured) ||
         !widget.database ||
         !_onlineMode ||
         _scanHasConfidentLocalMatch()) {
       return;
     }
-    await _discoverOnline(result);
+    await _discoverOnline(captured);
   }
 
   Future<void> _mic() async {
-    if (_voiceOpening) return;
-    setState(() => _voiceOpening = true);
-    try {
-      final result = await voiceSearch(context);
-      if (result != null && mounted) _setQuery(result);
-    } finally {
-      if (mounted) setState(() => _voiceOpening = false);
-    }
+    String? result;
+    await _runExclusiveRoute(() async {
+      result = await voiceSearch(context);
+    });
+    if (result != null && mounted) _setQuery(result!);
   }
 
   Future<void> _bulk() async {
     var draft = _query.text;
     final pastedList = _bulkQuery;
     if (pastedList != null) draft = pastedList;
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Search a medicine list'),
-        content: SizedBox(
-          width: 500,
-          child: TextFormField(
-            initialValue: draft,
-            onChanged: (value) => draft = value,
-            minLines: 6,
-            maxLines: 12,
-            maxLength: 30000,
-            decoration: const InputDecoration(
-              hintText:
-                  'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
+    String? result;
+    await _runExclusiveRoute(() async {
+      result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Search a medicine list'),
+          content: SizedBox(
+            width: 500,
+            child: TextFormField(
+              initialValue: draft,
+              onChanged: (value) => draft = value,
+              minLines: 6,
+              maxLines: 12,
+              maxLength: 30000,
+              decoration: const InputDecoration(
+                hintText:
+                    'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, draft),
+              child: const Text('Find medicines'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, draft),
-            child: const Text('Find medicines'),
-          ),
-        ],
-      ),
-    );
-    if (result != null && mounted) _setBulkQuery(result);
+      );
+    });
+    if (result != null && mounted) _setBulkQuery(result!);
   }
 
   void _openCatalogCandidate(MedicineCatalogCandidate candidate) {
@@ -749,7 +765,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: blueAction(
                         icon: Icons.qr_code_scanner_rounded,
                         label: 'Scan',
-                        onPressed: _scanner,
+                        onPressed: _routeOpening ? null : _scanner,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -757,7 +773,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: blueAction(
                         icon: Icons.mic_none_rounded,
                         label: 'Voice',
-                        onPressed: _voiceOpening ? null : _mic,
+                        onPressed: _routeOpening ? null : _mic,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -765,7 +781,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: blueAction(
                         icon: Icons.playlist_add_rounded,
                         label: 'Paste list',
-                        onPressed: _bulk,
+                        onPressed: _routeOpening ? null : _bulk,
                       ),
                     ),
                   ],

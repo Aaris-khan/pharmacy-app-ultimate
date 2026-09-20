@@ -33,6 +33,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
   final _media = MediaImportService();
   final _files = BackupService();
   bool _busy = false;
+  bool _flowOpening = false;
   int _generation = 0;
   bool _cancelRequested = false;
 
@@ -44,13 +45,25 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
     }
   }
 
+  bool get _actionsLocked => _busy || _flowOpening;
+
+  Future<void> _runFlow(Future<void> Function() action) async {
+    if (_actionsLocked || !mounted) return;
+    setState(() => _flowOpening = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _flowOpening = false);
+    }
+  }
+
   @override
   void dispose() {
     ++_generation;
     super.dispose();
   }
 
-  Future<void> _scan() async {
+  Future<void> _scan() => _runFlow(() async {
     final result = await Navigator.push<ScanResult>(
       context,
       MaterialPageRoute(builder: (_) => const ScannerScreen(autoSubmit: true)),
@@ -68,14 +81,14 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
             ],
       autoSaveReadyDrafts: true,
     );
-  }
+  });
 
   Future<void> _photo() => _queueMedia('photo');
 
   Future<void> _video() => _queueMedia('video');
 
   Future<void> _queueMedia(String kind) async {
-    if (_busy) return;
+    if (_actionsLocked) return;
     if (kind != 'photo' && kind != 'video') {
       throw const FormatException('Choose a photo or video import.');
     }
@@ -123,7 +136,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
   }
 
   Future<void> _textFile() async {
-    if (_busy) return;
+    if (_actionsLocked) return;
     final generation = ++_generation;
     setState(() {
       _busy = true;
@@ -155,7 +168,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
     }
   }
 
-  Future<void> _pasteList() async {
+  Future<void> _pasteList() => _runFlow(() async {
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       if (!mounted) return;
@@ -169,7 +182,7 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
     } catch (error) {
       if (mounted) showError(context, error);
     }
-  }
+  });
 
   Future<void> _openReview(
     List<ScanEvidence> evidence, {
@@ -212,50 +225,57 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
               title: 'Queued photo / video capture',
               detail:
                   'Rapid capture, resumable processing, selected local AI and saved drafts.',
-              onTap: _busy
+              onTap: _actionsLocked
                   ? null
-                  : () => openMedicineCapture(context, widget.controller),
+                  : () => unawaited(
+                      _runFlow(
+                        () => openMedicineCapture(context, widget.controller),
+                      ),
+                    ),
             ),
             MedicineIntakePanel(controller: widget.controller),
             _ImportAction(
               icon: Icons.edit_note_rounded,
               title: 'Add manually',
               detail: 'Only medicine name is required.',
-              onTap:
-                  _busy ? null : () => openEditor(context, widget.controller),
+              onTap: _actionsLocked
+                  ? null
+                  : () => unawaited(
+                      _runFlow(() => openEditor(context, widget.controller)),
+                    ),
             ),
             _ImportAction(
               icon: Icons.qr_code_scanner_rounded,
               title: 'Scan medicine',
               detail:
                   'Capture once · on-device OCR · Local AI when enabled · smart deterministic fallback.',
-              onTap: _busy ? null : _scan,
+              onTap: _actionsLocked ? null : _scan,
             ),
             _ImportAction(
               icon: Icons.add_photo_alternate_outlined,
               title: 'Upload photo',
               detail:
                   'Saved first, then read locally in the resumable intake queue.',
-              onTap: _busy ? null : _photo,
+              onTap: _actionsLocked ? null : _photo,
             ),
             _ImportAction(
               icon: Icons.video_library_outlined,
               title: 'Upload video',
               detail:
                   'Saved first, then sampled locally in resumable video windows.',
-              onTap: _busy ? null : _video,
+              onTap: _actionsLocked ? null : _video,
             ),
             _ImportAction(
               icon: Icons.upload_file_outlined,
               title: 'Upload text file',
               detail: 'Choose a medicine list, then review its matches.',
-              onTap: _busy ? null : _textFile,
+              onTap: _actionsLocked ? null : _textFile,
             ),
             _ImportAction(
               icon: Icons.content_paste_rounded,
               title: 'Paste medicine list',
               detail: 'Invoices and long lists can be matched in one pass.',
-              onTap: _busy ? null : _pasteList,
+              onTap: _actionsLocked ? null : _pasteList,
             ),
             if (_busy) ...[
               const SizedBox(height: 12),
