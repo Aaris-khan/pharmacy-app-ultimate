@@ -670,13 +670,20 @@ class _SearchScreenState extends State<SearchScreen> {
                           child: blueAction(
                             icon: Icons.file_upload_outlined,
                             label: 'Import stock',
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    ImportCenterScreen(controller: controller),
-                              ),
-                            ),
+                            onPressed: _routeOpening
+                                ? null
+                                : () => unawaited(
+                                    _runExclusiveRoute(
+                                      () => Navigator.push<void>(
+                                        context,
+                                        MaterialPageRoute<void>(
+                                          builder: (_) => ImportCenterScreen(
+                                            controller: controller,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
