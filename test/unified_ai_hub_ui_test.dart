@@ -135,4 +135,21 @@ void main() {
       );
     },
   );
+  test('AI More quick action serializes modal route opening', () {
+    final source = File('lib/ui/ai_screen.dart').readAsStringSync();
+
+    expect(source, contains('class _AiQuickActions extends StatefulWidget'));
+    expect(source, contains('bool _moreOpening = false;'));
+    expect(
+      source,
+      contains('if (widget.busy || _moreOpening || !mounted) return;'),
+    );
+    expect(source, contains('setState(() => _moreOpening = true);'));
+    expect(source, contains('onTap: widget.busy || _moreOpening'));
+    expect(
+      source,
+      contains('if (mounted) setState(() => _moreOpening = false);'),
+    );
+  });
+
 }
