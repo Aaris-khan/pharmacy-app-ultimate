@@ -37,6 +37,15 @@ void main() {
       expect(ai, contains('class _AiEmptyConversation'));
       expect(ai, contains('if (_messages.isEmpty &&'));
       expect(ai, contains("'Ask Aaris naturally'"));
+      expect(ai, contains('color: Colors.white.withAlpha(238)'));
+      expect(
+        ai,
+        isNot(
+          contains(
+            'child: Surface(\n        color: _aiPurple.withAlpha(8)',
+          ),
+        ),
+      );
 
       final buildStart = ai.indexOf(
         'Widget build(BuildContext context) => ActiveListenableBuilder(',
