@@ -2,6 +2,7 @@ import 'dart:collection';
 
 import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/automation_guard.dart';
+import 'package:aaris_pharmacy/domain/inventory_integrity.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -77,6 +78,21 @@ void main() {
       expect(conflicts.single.stockIds.toSet(), {'a', 'b'});
     });
 
+    test('scoped lot projection ignores unrelated conflict groups', () {
+      final a = _lot('a', expiry: '2027-01', barcode: '111', batch: 'TARGET');
+      final b = _lot('b', expiry: '2027-02', barcode: '111', batch: 'TARGET');
+      final c = _lot('c', expiry: '2028-01', barcode: '222', batch: 'OTHER');
+      final d = _lot('d', expiry: '2028-02', barcode: '222', batch: 'OTHER');
+
+      final issues = conflictingLotFactIssues(
+        medicines: [a, b, c, d],
+        relevantTo: [a],
+      );
+
+      expect(issues, hasLength(1));
+      expect(issues.single.stockIds.toSet(), {'a', 'b'});
+    });
+
     test('blocks quantity movement through an unresolved conflicting lot', () async {
       final a = _lot('a', expiry: '2027-01');
       final b = _lot('b', expiry: '2027-02');
@@ -101,6 +117,35 @@ void main() {
 
       expect((await storage.load()).revision, 0);
       expect((await storage.load()).records['a']!.quantity, 10);
+    });
+
+    test('unrelated lot conflicts do not block a safe stock movement', () async {
+      final a = _lot('a', expiry: '2027-01', barcode: '111', batch: 'BAD');
+      final b = _lot('b', expiry: '2027-02', barcode: '111', batch: 'BAD');
+      final safe = _lot(
+        'safe',
+        expiry: '2028-01',
+        barcode: '999',
+        batch: 'SAFE',
+      );
+      final storage = MemoryInventoryStorage(
+        InventorySnapshot(records: {
+          a.id: a,
+          b.id: b,
+          safe.id: safe,
+        }),
+      );
+
+      final result = await storage.commit(
+        InventoryMutation(
+          expectedRevision: 0,
+          label: 'Receive safe stock',
+          upserts: [safe.patch({'quantity': 11})],
+        ),
+      );
+
+      expect(result.revision, 1);
+      expect(result.records['safe']!.quantity, 11);
     });
 
     test('blocks a new contradictory duplicate before it reaches storage', () async {

@@ -12,20 +12,28 @@ class InventoryIntegrityMutationBlock {
 }
 
 List<InventoryIntegrityIssue> _lotConflicts(
-  Iterable<Medicine> records,
-  DateTime today,
-) => InventoryIntegrityReport.build(medicines: records, today: today)
-    .issues
-    .where((issue) => issue.kind == InventoryIntegrityKind.conflictingLotFacts)
-    .toList(growable: false);
+  Iterable<Medicine> records, {
+  Iterable<Medicine>? relevantTo,
+}) => conflictingLotFactIssues(
+  medicines: records,
+  relevantTo: relevantTo,
+);
 
 Map<String, Set<String>> _barcodeIdentityConflicts(
-  Iterable<Medicine> records,
-) {
+  Iterable<Medicine> records, {
+  Set<String>? onlyBarcodes,
+}) {
+  if (onlyBarcodes != null && onlyBarcodes.isEmpty) {
+    return const <String, Set<String>>{};
+  }
   final groups = <String, List<Medicine>>{};
-  for (final medicine in records.where((medicine) => !medicine.archived)) {
+  for (final medicine in records) {
+    if (medicine.archived) continue;
     final barcode = medicine.barcode.trim();
-    if (barcode.isEmpty) continue;
+    if (barcode.isEmpty ||
+        (onlyBarcodes != null && !onlyBarcodes.contains(barcode))) {
+      continue;
+    }
     groups.putIfAbsent(barcode, () => <Medicine>[]).add(medicine);
   }
 
@@ -39,22 +47,26 @@ Map<String, Set<String>> _barcodeIdentityConflicts(
   return conflicts;
 }
 
-Set<String> _futureManufactureIds(
-  Iterable<Medicine> records,
-  DateTime today,
-) {
-  final day = civilDay(today);
-  return records
-      .where(
-        (medicine) =>
-            !medicine.archived &&
-            !medicine.sold &&
-            medicine.mfg != null &&
-            civilDay(medicine.mfg!).isAfter(day),
-      )
-      .map((medicine) => medicine.id)
-      .toSet();
-}
+List<InventoryIntegrityIssue> _newLotConflictsFrom({
+  required Iterable<InventoryIntegrityIssue> existing,
+  required Iterable<InventoryIntegrityIssue> proposed,
+}) => proposed.where((issue) {
+  final proposedIds = issue.stockIds.toSet();
+  return !existing.any((old) {
+    final oldIds = old.stockIds.toSet();
+    return proposedIds.every(oldIds.contains);
+  });
+}).toList(growable: false);
+
+Map<String, Set<String>> _newBarcodeIdentityConflictsFrom({
+  required Map<String, Set<String>> existing,
+  required Map<String, Set<String>> proposed,
+}) => {
+  for (final entry in proposed.entries)
+    if (existing[entry.key] == null ||
+        !entry.value.every(existing[entry.key]!.contains))
+      entry.key: entry.value,
+};
 
 /// Returns only physical-lot contradictions that are genuinely introduced by
 /// the proposed state. A reduced subset of a conflict that already existed is
@@ -64,30 +76,11 @@ List<InventoryIntegrityIssue> newlyIntroducedLotConflicts({
   required Iterable<Medicine> before,
   required Iterable<Medicine> after,
   required DateTime today,
+  Iterable<Medicine>? relevantTo,
 }) {
-  final existing = _lotConflicts(before, today);
-  final proposed = _lotConflicts(after, today);
-  return proposed.where((issue) {
-    final proposedIds = issue.stockIds.toSet();
-    return !existing.any((old) {
-      final oldIds = old.stockIds.toSet();
-      return proposedIds.every(oldIds.contains);
-    });
-  }).toList(growable: false);
-}
-
-Map<String, Set<String>> _newBarcodeIdentityConflicts({
-  required Iterable<Medicine> before,
-  required Iterable<Medicine> after,
-}) {
-  final existing = _barcodeIdentityConflicts(before);
-  final proposed = _barcodeIdentityConflicts(after);
-  return {
-    for (final entry in proposed.entries)
-      if (existing[entry.key] == null ||
-          !entry.value.every(existing[entry.key]!.contains))
-        entry.key: entry.value,
-  };
+  final existing = _lotConflicts(before, relevantTo: relevantTo);
+  final proposed = _lotConflicts(after, relevantTo: relevantTo);
+  return _newLotConflictsFrom(existing: existing, proposed: proposed);
 }
 
 bool _introducesFutureManufactureDate({
@@ -166,8 +159,8 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
   // of rebuilding before/after integrity graphs several times.
   var stockOnly = true;
   var hasStockMovement = false;
-  var needsLotScan = false;
-  var needsBarcodeScan = false;
+  final stockMovementLotWitnesses = <Medicine>[];
+  final stockMovementBarcodes = <String>{};
   for (final id in touched) {
     final old = before[id];
     final next = after[id];
@@ -182,25 +175,28 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
     if (next.archived) continue;
     if (!_stockStateChanged(old, next)) continue;
     hasStockMovement = true;
-    needsLotScan = needsLotScan || _canParticipateInLotConflict(old);
-    needsBarcodeScan =
-        needsBarcodeScan || old.barcode.trim().isNotEmpty;
+    if (_canParticipateInLotConflict(old)) {
+      stockMovementLotWitnesses.add(old);
+    }
+    final barcode = old.barcode.trim();
+    if (barcode.isNotEmpty) stockMovementBarcodes.add(barcode);
   }
 
   if (stockOnly) {
     if (!hasStockMovement) return null;
 
-    final lotIds = needsLotScan
-        ? _lotConflicts(before.values, today)
-              .expand((issue) => issue.stockIds)
-              .toSet()
-        : const <String>{};
-    final barcodeIds = needsBarcodeScan
-        ? _barcodeIdentityConflicts(before.values)
-              .values
-              .expand((ids) => ids)
-              .toSet()
-        : const <String>{};
+    final lotIds = stockMovementLotWitnesses.isEmpty
+        ? const <String>{}
+        : _lotConflicts(
+            before.values,
+            relevantTo: stockMovementLotWitnesses,
+          ).expand((issue) => issue.stockIds).toSet();
+    final barcodeIds = stockMovementBarcodes.isEmpty
+        ? const <String>{}
+        : _barcodeIdentityConflicts(
+            before.values,
+            onlyBarcodes: stockMovementBarcodes,
+          ).values.expand((ids) => ids).toSet();
 
     for (final id in touched) {
       final old = before[id]!;
@@ -224,10 +220,38 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
     return null;
   }
 
-  final introducedLots = newlyIntroducedLotConflicts(
-    before: before.values,
-    after: after.values,
-    today: today,
+  final integrityWitnesses = <Medicine>[];
+  final relevantBarcodes = <String>{};
+  for (final id in touched) {
+    final old = before[id];
+    final next = after[id];
+    if (old != null) {
+      integrityWitnesses.add(old);
+      final barcode = old.barcode.trim();
+      if (barcode.isNotEmpty) relevantBarcodes.add(barcode);
+    }
+    if (next != null) {
+      integrityWitnesses.add(next);
+      final barcode = next.barcode.trim();
+      if (barcode.isNotEmpty) relevantBarcodes.add(barcode);
+    }
+  }
+
+  // Only touched rows can introduce or perpetuate a new unsafe relationship.
+  // Scan the before/after inventories once per rule, but materialize groups only
+  // for the touched rows' old/new lot anchors and barcodes. Unrelated historical
+  // conflicts remain visible in Needs Attention without taxing every edit.
+  final beforeLotIssues = _lotConflicts(
+    before.values,
+    relevantTo: integrityWitnesses,
+  );
+  final afterLotIssues = _lotConflicts(
+    after.values,
+    relevantTo: integrityWitnesses,
+  );
+  final introducedLots = _newLotConflictsFrom(
+    existing: beforeLotIssues,
+    proposed: afterLotIssues,
   );
   if (introducedLots.isNotEmpty) {
     final ids = introducedLots.expand((issue) => issue.stockIds).toSet().toList()
@@ -239,9 +263,17 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
     );
   }
 
-  final introducedBarcodes = _newBarcodeIdentityConflicts(
-    before: before.values,
-    after: after.values,
+  final beforeBarcodeGroups = _barcodeIdentityConflicts(
+    before.values,
+    onlyBarcodes: relevantBarcodes,
+  );
+  final afterBarcodeGroups = _barcodeIdentityConflicts(
+    after.values,
+    onlyBarcodes: relevantBarcodes,
+  );
+  final introducedBarcodes = _newBarcodeIdentityConflictsFrom(
+    existing: beforeBarcodeGroups,
+    proposed: afterBarcodeGroups,
   );
   if (introducedBarcodes.isNotEmpty) {
     final ids = introducedBarcodes.values.expand((ids) => ids).toSet().toList()
@@ -270,35 +302,32 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
     }
   }
 
-  final beforeLotIssues = _lotConflicts(before.values, today);
   final beforeLotIds = beforeLotIssues
       .expand((issue) => issue.stockIds)
       .toSet();
-  final afterLotIds = _lotConflicts(after.values, today)
+  final afterLotIds = afterLotIssues
       .expand((issue) => issue.stockIds)
       .toSet();
-  final beforeBarcodeGroups = _barcodeIdentityConflicts(before.values);
-  final afterBarcodeGroups = _barcodeIdentityConflicts(after.values);
   final beforeBarcodeIds = beforeBarcodeGroups.values.expand((ids) => ids).toSet();
   final afterBarcodeIds = afterBarcodeGroups.values.expand((ids) => ids).toSet();
-  final beforeFutureIds = _futureManufactureIds(before.values, today);
-  final afterFutureIds = _futureManufactureIds(after.values, today);
 
   for (final id in touched) {
     final old = before[id];
     final next = after[id];
     if (old == null || next == null || next.archived) continue;
 
+    final beforeFuture = _hasFutureManufactureDate(old, today);
     final blockedBefore =
         beforeLotIds.contains(id) ||
         beforeBarcodeIds.contains(id) ||
-        beforeFutureIds.contains(id);
+        beforeFuture;
     if (!blockedBefore) continue;
 
+    final afterFuture = _hasFutureManufactureDate(next, today);
     final blockedAfter =
         afterLotIds.contains(id) ||
         afterBarcodeIds.contains(id) ||
-        afterFutureIds.contains(id);
+        afterFuture;
     final stockStateChanged = _stockStateChanged(old, next);
     final identityFactsChanged = _identityFactsChanged(old, next);
 
@@ -307,7 +336,7 @@ InventoryIntegrityMutationBlock? inventoryIntegrityMutationBlock({
 
     final reason = beforeBarcodeIds.contains(id)
         ? 'a barcode identity conflict'
-        : beforeFutureIds.contains(id)
+        : beforeFuture
         ? 'a manufacturing date in the future'
         : 'conflicting saved batch facts';
     return InventoryIntegrityMutationBlock(

@@ -43,7 +43,7 @@ class InventoryIntegrityReport {
         .toList(growable: false);
     final issues = <InventoryIntegrityIssue>[];
 
-    _addConflictingLotFacts(records, issues);
+    issues.addAll(conflictingLotFactIssues(medicines: records));
     _addSaleAuditIssues(records, day, issues);
 
     issues.sort((a, b) {
@@ -60,36 +60,38 @@ class InventoryIntegrityReport {
   bool get isEmpty => issues.isEmpty;
 }
 
-void _addConflictingLotFacts(
-  List<Medicine> records,
-  List<InventoryIntegrityIssue> issues,
-) {
+/// Builds only strongly anchored physical-lot contradictions.
+///
+/// [relevantTo] narrows the scan to lot anchors owned by the supplied witness
+/// rows. A persistence mutation can therefore validate the touched rows without
+/// constructing integrity groups for unrelated stock. Omitting it preserves the
+/// complete report behavior used by Needs Attention.
+List<InventoryIntegrityIssue> conflictingLotFactIssues({
+  required Iterable<Medicine> medicines,
+  Iterable<Medicine>? relevantTo,
+}) {
+  Set<String>? relevantAnchors;
+  if (relevantTo != null) {
+    relevantAnchors = <String>{};
+    for (final medicine in relevantTo) {
+      final anchor = _physicalLotAnchor(medicine);
+      if (anchor != null) relevantAnchors.add(anchor);
+    }
+    if (relevantAnchors.isEmpty) return const <InventoryIntegrityIssue>[];
+  }
+
   final groups = <String, List<Medicine>>{};
-  for (final medicine in records.where((medicine) => !medicine.sold)) {
-    final batch = normalize(medicine.batchNumber);
-    if (batch.isEmpty) continue;
-
-    final barcode = normalize(medicine.barcode);
-    final manufacturer = normalize(medicine.manufacturer);
-    final brand = normalize(medicine.brand);
-
-    // Batch numbers are not globally unique. Compare only when another strong
-    // physical/source anchor exists, otherwise unrelated manufacturers can
-    // legitimately reuse the same batch text.
-    final String? anchor = barcode.isNotEmpty
-        ? 'barcode:$barcode|batch:$batch'
-        : manufacturer.isNotEmpty
-        ? 'product:${medicine.identity}|manufacturer:$manufacturer|batch:$batch'
-        : brand.isNotEmpty
-        ? 'product:${medicine.identity}|brand:$brand|batch:$batch'
-        : null;
+  for (final medicine in medicines) {
+    final anchor = _physicalLotAnchor(medicine);
     if (anchor == null) continue;
+    if (relevantAnchors != null && !relevantAnchors.contains(anchor)) continue;
     groups.putIfAbsent(anchor, () => <Medicine>[]).add(medicine);
   }
 
+  final issues = <InventoryIntegrityIssue>[];
   for (final group in groups.values.where((rows) => rows.length > 1)) {
     // A shared barcode with different product identities is handled by the
-    // stronger barcode-identity rule in the attention engine.
+    // stronger barcode-identity rule in the attention/automation engines.
     if (group.map((medicine) => medicine.identity).toSet().length != 1) {
       continue;
     }
@@ -135,8 +137,30 @@ void _addConflictingLotFacts(
       ),
     );
   }
+  return List<InventoryIntegrityIssue>.unmodifiable(issues);
 }
 
+String? _physicalLotAnchor(Medicine medicine) {
+  if (medicine.archived || medicine.sold) return null;
+  final batch = normalize(medicine.batchNumber);
+  if (batch.isEmpty) return null;
+
+  final barcode = normalize(medicine.barcode);
+  final manufacturer = normalize(medicine.manufacturer);
+  final brand = normalize(medicine.brand);
+
+  // Batch numbers are not globally unique. Compare only when another strong
+  // physical/source anchor exists, otherwise unrelated manufacturers can
+  // legitimately reuse the same batch text.
+  if (barcode.isNotEmpty) return 'barcode:$barcode|batch:$batch';
+  if (manufacturer.isNotEmpty) {
+    return 'product:${medicine.identity}|manufacturer:$manufacturer|batch:$batch';
+  }
+  if (brand.isNotEmpty) {
+    return 'product:${medicine.identity}|brand:$brand|batch:$batch';
+  }
+  return null;
+}
 void _addSaleAuditIssues(
   List<Medicine> records,
   DateTime day,
