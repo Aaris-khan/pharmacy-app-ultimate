@@ -360,15 +360,11 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  bool _scanHasConfidentLocalMatch(ScanResult scan) {
-    if (scan.barcode.isNotEmpty) {
-      final exactBarcode = widget.controller.records.any(
-        (medicine) =>
-            !medicine.archived &&
-            medicine.barcode.trim() == scan.barcode.trim(),
-      );
-      if (exactBarcode) return true;
-    }
+  bool _scanHasConfidentLocalMatch() {
+    // The completed local search is already authoritative for this exact scan.
+    // Barcode queries use the indexed/canonicalized exact-barcode path, while
+    // text queries use the same ranked result set shown on screen. Avoid a
+    // second O(N) inventory walk on the UI isolate before online fallback.
     return _hits.any((hit) => hit.score >= .90);
   }
 
@@ -464,7 +460,7 @@ class _SearchScreenState extends State<SearchScreen> {
         !identical(_scan, result) ||
         !widget.database ||
         !_onlineMode ||
-        _scanHasConfidentLocalMatch(result)) {
+        _scanHasConfidentLocalMatch()) {
       return;
     }
     await _discoverOnline(result);
