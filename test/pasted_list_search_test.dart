@@ -94,7 +94,10 @@ void main() {
       await tester.scrollUntilVisible(
         count,
         300,
-        scrollable: find.byType(CustomScrollView),
+        scrollable: find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        ),
       );
       await tester.pumpAndSettle();
       expect(count, findsOneWidget);
