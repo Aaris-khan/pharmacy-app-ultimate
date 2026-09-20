@@ -420,9 +420,16 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
         medicine,
         expectedRevision: expectedRevision,
       );
-      await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
-        draft,
-        medicine,
+      // Inventory is authoritative. Adaptive OCR memory is only a local
+      // accelerator, so it must never extend the Save/Next critical path after
+      // the durable stock commit has succeeded. The memory service is
+      // fail-closed and owns its own diagnostics; losing a late learning write
+      // cannot invalidate the medicine that was already saved.
+      unawaited(
+        OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
+          draft,
+          medicine,
+        ),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
