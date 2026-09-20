@@ -521,6 +521,7 @@ class _SearchScreenState extends State<SearchScreen> {
       });
       await _search();
       if (!mounted ||
+          !_controllerListening ||
           !identical(_scan, captured) ||
           !widget.database ||
           !_onlineMode ||
@@ -529,7 +530,16 @@ class _SearchScreenState extends State<SearchScreen> {
       }
       await _discoverOnline(captured);
     } finally {
-      if (mounted) setState(() => _routeOpening = false);
+      if (mounted) {
+        // A bottom-navigation switch can retire this embedded search surface
+        // while the scan search is still draining. Reset the lease without
+        // scheduling an offstage rebuild; the next active build sees the field.
+        if (_controllerListening) {
+          setState(() => _routeOpening = false);
+        } else {
+          _routeOpening = false;
+        }
+      }
     }
   }
 
