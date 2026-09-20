@@ -50,6 +50,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
   bool _sourceLoading = true;
   bool _matchLoading = false;
   bool _busy = false;
+  bool _leaving = false;
   bool _autoSaveAttempted = false;
   String _error = '';
   String _warning = '';
@@ -103,7 +104,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
   }
 
   void _inventoryChanged() {
-    if (!mounted) return;
+    if (!mounted || _leaving) return;
     final snapshot = widget.controller.snapshot;
     final day = widget.controller.today;
     final revision = snapshot.revision;
@@ -198,7 +199,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
           current.revision > beforeRevision &&
           widget.controller.operationalTargetId == record.id;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_leaving) setState(() => _busy = false);
     }
   }
 
@@ -235,12 +236,12 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       return expectedBarcode.isNotEmpty &&
           normalize(saved.barcode) == expectedBarcode;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_leaving) setState(() => _busy = false);
     }
   }
 
   Future<void> _prepareMatches() async {
-    if (_drafts.isEmpty || _index >= _drafts.length) return;
+    if (_leaving || _drafts.isEmpty || _index >= _drafts.length) return;
     final generation = ++_matchGeneration;
     setState(() {
       _matchLoading = true;
@@ -313,8 +314,16 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     }
   }
 
+  void _finishReview() {
+    if (!mounted || _leaving) return;
+    _leaving = true;
+    ++_sourceGeneration;
+    ++_matchGeneration;
+    Navigator.pop(context, true);
+  }
+
   Future<void> _attemptAutoSave() async {
-    if (!mounted || _busy || _review == null) return;
+    if (!mounted || _leaving || _busy || _review == null) return;
     final review = _review!;
     var resolution = _resolve(review.draft);
     var decision = scanAutoSaveDecision(
@@ -343,16 +352,16 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${medicine.title} saved.')),
       );
-      Navigator.pop(context, true);
+      _finishReview();
     } catch (_) {
       if (mounted) await _prepareMatches();
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_leaving) setState(() => _busy = false);
     }
   }
 
   Future<void> _next() async {
-    if (_busy || _sourceLoading || _matchLoading || _review == null) return;
+    if (_leaving || _busy || _sourceLoading || _matchLoading || _review == null) return;
     final review = _review!;
     final liveResolution = _resolve(review.draft);
 
@@ -394,7 +403,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     IntakeResolution resolution,
     ScanQuickAddDecision decision,
   ) async {
-    if (_busy) return;
+    if (_leaving || _busy) return;
     setState(() => _busy = true);
     try {
       final liveResolution = _resolve(draft);
@@ -429,7 +438,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     } catch (error) {
       if (mounted) showError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_leaving) setState(() => _busy = false);
     }
   }
 
@@ -446,7 +455,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
   Future<void> _advanceOrFinish() async {
     if (!mounted) return;
     if (_index + 1 >= _drafts.length) {
-      Navigator.pop(context, true);
+      _finishReview();
       return;
     }
     setState(() {
@@ -591,7 +600,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     } catch (error) {
       if (mounted) showError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_leaving) setState(() => _busy = false);
     }
   }
 
@@ -663,7 +672,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
                     SizedBox(
                       height: 54,
                       child: FilledButton.icon(
-                        onPressed: _busy || loading ? null : _next,
+                        onPressed: _leaving || _busy || loading ? null : _next,
                         icon: _busy
                             ? const SizedBox(
                                 width: 18,
