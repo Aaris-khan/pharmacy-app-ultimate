@@ -12,6 +12,7 @@ void main() {
     final review = File('lib/ui/medicine_review_screen.dart').readAsStringSync();
     final editor = File('lib/ui/editor_screen.dart').readAsStringSync();
     final versions = File('lib/ui/version_history_screen.dart').readAsStringSync();
+    final intake = File('lib/ui/medicine_intake_panel.dart').readAsStringSync();
 
     expect(
       profile,
@@ -105,5 +106,15 @@ void main() {
     expect(versions, contains('bool _restoring = false;'));
     expect(versions, contains('if (_restoring || !mounted) return;'));
     expect(versions, contains('onPressed: _restoring'));
+
+    expect(intake, contains('String? _activeJobAction;'));
+    expect(
+      intake,
+      contains(
+        'Future<void> _runJobAction(\n    MedicineIntakeJob job,\n    Future<void> Function() action,',
+      ),
+    );
+    expect(intake, contains('if (_activeJobAction != null || !mounted) return;'));
+    expect(intake, contains('onPressed: _activeJobAction != null'));
   });
 }
