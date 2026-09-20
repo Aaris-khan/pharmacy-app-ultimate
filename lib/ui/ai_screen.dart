@@ -1085,6 +1085,11 @@ class _AiScreenState extends State<AiScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (_messages.isEmpty &&
+                              _journey == _AiJourneyState.idle &&
+                              _error.isEmpty &&
+                              _plan == null)
+                            const _AiEmptyConversation(),
                           if (_journey == _AiJourneyState.thinking)
                             _AiThinkingBubble(
                               detail:
@@ -1298,6 +1303,57 @@ class _AiChatMessage {
   final String text;
   final bool user;
   final bool status;
+}
+
+class _AiEmptyConversation extends StatelessWidget {
+  const _AiEmptyConversation();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 12, 4, 18),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Surface(
+        color: _aiPurple.withAlpha(8),
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.chat_bubble_outline_rounded,
+              color: _aiPurple,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ask Aaris naturally',
+                    style: TextStyle(
+                      color: ink,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Try “Paracetamol stock kitna hai?”, “Cefixime kholo”, or “aaj kya dekhna hai”.',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _AiThinkingBubble extends StatelessWidget {
