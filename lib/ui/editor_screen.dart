@@ -70,6 +70,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _mfgMonthOnly = false, _expiryMonthOnly = true;
   String _form = '', _supplierId = '', _error = '';
   bool _busy = false, _restocking = false, _dirty = false, _allowPop = false;
+  bool _supplierOpening = false;
 
   @override
   void initState() {
@@ -301,8 +302,10 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _selectSupplier() async {
-    if (_busy) return;
-    final suppliers = widget.controller.suppliers.toList(growable: false)
+    if (_busy || _supplierOpening || !mounted) return;
+    setState(() => _supplierOpening = true);
+    try {
+      final suppliers = widget.controller.suppliers.toList(growable: false)
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -382,10 +385,13 @@ class _EditorScreenState extends State<EditorScreen> {
       });
       return;
     }
-    setState(() {
-      _supplierId = selected;
-      _dirty = true;
-    });
+      setState(() {
+        _supplierId = selected;
+        _dirty = true;
+      });
+    } finally {
+      if (mounted) setState(() => _supplierOpening = false);
+    }
   }
 
   Widget _supplierField() {
@@ -401,7 +407,7 @@ class _EditorScreenState extends State<EditorScreen> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: _busy ? null : _selectSupplier,
+            onTap: _busy || _supplierOpening ? null : _selectSupplier,
             borderRadius: BorderRadius.circular(18),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
