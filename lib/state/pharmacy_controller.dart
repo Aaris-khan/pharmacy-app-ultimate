@@ -1006,6 +1006,21 @@ class PharmacyController extends ChangeNotifier {
     );
   }
 
+  /// Builds an externally shareable supplier-return review only after stock
+  /// writes that were already submitted when this call began have settled.
+  ///
+  /// The selected IDs are frozen before the await so caller-owned collection
+  /// changes cannot silently alter which physical rows are reviewed.
+  Future<ReviewedSupplierReturn> reviewSupplierReturnAfterPendingWrites(
+    String supplierId,
+    Iterable<String> stockIds,
+  ) {
+    final reviewedIds = List<String>.unmodifiable(stockIds);
+    return _readAfterPendingWrites(
+      () => reviewSupplierReturn(supplierId, reviewedIds),
+    );
+  }
+
   Future<void> applySupplierReturn(ReviewedSupplierReturn review) async {
     await _queueReviewedCommit((returnedAt) {
       final liveSupplier = snapshot.suppliers[review.supplier.id];
