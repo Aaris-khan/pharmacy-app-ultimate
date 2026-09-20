@@ -47,6 +47,8 @@ class BrainScreen extends StatefulWidget {
 }
 
 class _BrainScreenState extends State<BrainScreen> {
+  static const int _matchPickerLimit = 12;
+
   Future<void> _openAttentionQueue() async {
     if (!mounted) return;
     widget.autopilot.refreshNow();
@@ -485,7 +487,10 @@ class _BrainScreenState extends State<BrainScreen> {
 
     final hits = await widget.controller.search(query, intent.scope);
     if (!mounted) return;
-    final viable = hits.where((hit) => hit.score >= .90).take(12).toList();
+    final viable = hits
+        .where((hit) => hit.score >= .90)
+        .take(_matchPickerLimit)
+        .toList();
 
     if (briefFocus != null) {
       if (viable.isEmpty) {
@@ -1163,7 +1168,7 @@ class _BrainScreenState extends State<BrainScreen> {
       if (record != null && !record.archived && seen.add(record.id)) {
         records.add(record);
       }
-      if (records.length >= 12) break;
+      if (records.length >= _matchPickerLimit) break;
     }
     if (records.isEmpty) {
       widget.onOpenSection(AppSection.stock);
@@ -1743,7 +1748,10 @@ class _BrainScreenState extends State<BrainScreen> {
       });
     }
     try {
-      final hits = await widget.controller.search('', SearchScope.all);
+      final hits = await widget.controller.browse(
+        SearchScope.all,
+        limit: _matchPickerLimit,
+      );
       if (!mounted) return null;
       if (hits.isEmpty) {
         _updateCommandState(

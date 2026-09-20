@@ -2,6 +2,7 @@ import 'package:aaris_pharmacy/data/inventory_database.dart';
 import 'package:aaris_pharmacy/domain/app_brain.dart';
 import 'package:aaris_pharmacy/domain/inventory.dart';
 import 'package:aaris_pharmacy/domain/medicine.dart';
+import 'package:aaris_pharmacy/domain/search.dart';
 import 'package:aaris_pharmacy/state/autopilot_supervisor.dart';
 import 'package:aaris_pharmacy/state/operational_context.dart';
 import 'package:aaris_pharmacy/state/pharmacy_controller.dart';
@@ -49,6 +50,29 @@ class _SummaryNoListController extends PharmacyController {
   @override
   List<Medicine> list(SearchScope scope) =>
       throw StateError('Stock summary must use cached read projections.');
+}
+
+class _QuickPickerWindowController extends PharmacyController {
+  _QuickPickerWindowController(InventoryStorage storage)
+    : super(storage, clock: () => _today, backgroundSearch: false);
+
+  final List<int> browseLimits = <int>[];
+  bool emptySearchCalled = false;
+
+  @override
+  Future<List<SearchHit>> browse(
+    SearchScope scope, {
+    required int limit,
+  }) {
+    browseLimits.add(limit);
+    return super.browse(scope, limit: limit);
+  }
+
+  @override
+  Future<List<SearchHit>> search(String raw, SearchScope scope) {
+    if (raw.trim().isEmpty) emptySearchCalled = true;
+    return super.search(raw, scope);
+  }
 }
 
 void main() {
@@ -388,6 +412,70 @@ void main() {
       await tester.pump();
     },
   );
+  testWidgets(
+    'Brain quick modify picker requests only its visible inventory window',
+    (tester) async {
+      final medicines = List<Medicine>.generate(
+        40,
+        (index) => _stock(
+          'quick-picker-' + index.toString(),
+          name: 'Medicine ' + index.toString().padLeft(2, '0'),
+          expiry: '2027-12',
+        ),
+        growable: false,
+      );
+      final controller = _QuickPickerWindowController(
+        MemoryInventoryStorage(
+          InventorySnapshot(
+            records: {
+              for (final medicine in medicines) medicine.id: medicine,
+            },
+          ),
+        ),
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+      final autopilot = AarisAutopilotSupervisor(
+        controller,
+        debounce: Duration.zero,
+        startImmediately: false,
+      );
+      addTearDown(autopilot.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: Scaffold(
+            body: BrainScreen(
+              controller: controller,
+              autopilot: autopilot,
+              onOpenSection: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Modify medicine'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(controller.browseLimits, <int>[12]);
+      expect(controller.emptySearchCalled, isFalse);
+      expect(find.text('Choose medicine to modify'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byTooltip('Close').last);
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      autopilot.dispose();
+      controller.dispose();
+      await tester.pump();
+    },
+  );
+
   testWidgets(
     'Brain stock summary reuses cached projections instead of materializing scoped lists',
     (tester) async {
