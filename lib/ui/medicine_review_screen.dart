@@ -452,6 +452,20 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     }
   }
 
+  Future<void> _openSavedMatch(
+    Medicine record,
+    MedicineScanDraft scanDraft,
+  ) async {
+    if (_leaving || _busy || !mounted) return;
+    final live = widget.controller.snapshot.records[record.id];
+    if (live == null || live.archived) {
+      await _prepareMatches();
+      return;
+    }
+    await _editExistingForScan(live, scanDraft);
+    if (mounted && !_leaving) await _prepareMatches();
+  }
+
   Future<void> _advanceOrFinish() async {
     if (!mounted) return;
     if (_index + 1 >= _drafts.length) {
@@ -1057,12 +1071,9 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () => openEditor(
-            context,
-            widget.controller,
-            record: record,
-            scanDraft: scanDraft,
-          ),
+          onTap: _leaving || _busy
+              ? null
+              : () => unawaited(_openSavedMatch(record, scanDraft)),
           borderRadius: BorderRadius.circular(16),
           child: Ink(
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
