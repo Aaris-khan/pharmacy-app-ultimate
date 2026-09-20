@@ -28,7 +28,7 @@ class _BackupScreenState extends State<BackupScreen> {
   String _error = '';
 
   Future<void> _share() async {
-    if (_sharing || _restoring) return;
+    if (_sharing || _reading || _restoring) return;
     setState(() {
       _sharing = true;
       _error = '';
@@ -56,7 +56,7 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   Future<void> _pick() async {
-    if (_reading || _restoring) return;
+    if (_reading || _sharing || _restoring) return;
     setState(() {
       _reading = true;
       _error = '';
@@ -284,7 +284,9 @@ class _BackupScreenState extends State<BackupScreen> {
                   backgroundColor: primarySoft,
                   foregroundColor: ink,
                 ),
-                onPressed: _sharing || _restoring ? null : () => unawaited(_share()),
+                onPressed: _sharing || _reading || _restoring
+                    ? null
+                    : () => unawaited(_share()),
                 icon: const Icon(Icons.ios_share_rounded),
                 label: Text(_sharing ? 'Creating backup…' : 'Export full backup'),
               ),
@@ -325,7 +327,9 @@ class _BackupScreenState extends State<BackupScreen> {
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: _reading || _restoring ? null : () => unawaited(_pick()),
+            onPressed: _reading || _sharing || _restoring
+                ? null
+                : () => unawaited(_pick()),
             icon: const Icon(Icons.file_open_outlined),
             label: Text(
               _reading ? 'Reading & verifying backup…' : 'Import backup file',
