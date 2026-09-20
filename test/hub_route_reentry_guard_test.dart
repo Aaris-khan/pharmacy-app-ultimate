@@ -24,6 +24,9 @@ void main() {
     );
     expect(profile, contains('if (_actionInProgress || !mounted) return;'));
     expect(profile, contains('onTap: _actionInProgress'));
+    expect(profile, contains('class _ActivityScreenState extends State<ActivityScreen>'));
+    expect(profile, contains('bool _undoing = false;'));
+    expect(profile, contains('if (_undoing || !controller.canUndo'));
 
     expect(
       suppliers,
@@ -37,6 +40,10 @@ void main() {
       ),
     );
     expect(suppliers, contains('final VoidCallback? onTap;'));
+    expect(
+      suppliers,
+      contains('final live = widget.controller.snapshot.records[medicine.id];'),
+    );
 
     expect(
       stats,
