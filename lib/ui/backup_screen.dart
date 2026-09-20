@@ -158,7 +158,8 @@ class _BackupScreenState extends State<BackupScreen> {
 
   Future<void> _restore() async {
     final review = _review;
-    if (review == null || _restoring || _sharing || _reading) return;
+    if (review == null || _restoring || _sharing || _reading || _restorePromptOpen) return;
+    setState(() => _restorePromptOpen = true);
     final impact = review.impact;
     var phrase = '';
     final confirmed = await showDialog<bool>(
@@ -232,8 +233,15 @@ class _BackupScreenState extends State<BackupScreen> {
         ),
       ),
     );
-    if (confirmed != true || !mounted) return;
-    setState(() => _restoring = true);
+    if (!mounted) return;
+    if (confirmed != true) {
+      setState(() => _restorePromptOpen = false);
+      return;
+    }
+    setState(() {
+      _restorePromptOpen = false;
+      _restoring = true;
+    });
     var completed = false;
     try {
       await widget.controller.restoreBackup(review);
