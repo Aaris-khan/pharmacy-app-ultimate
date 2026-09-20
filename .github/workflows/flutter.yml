@@ -18,8 +18,8 @@ jobs:
       FLUTTER_SUPPRESS_ANALYTICS: true
       CI: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -37,7 +37,7 @@ jobs:
       - name: Compile Android integration
         run: flutter build apk --debug --no-pub
       - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Aaris-Pharmacy-debug-APK
           path: build/app/outputs/flutter-apk/app-debug.apk
@@ -45,7 +45,7 @@ jobs:
           retention-days: 30
       - name: Upload UI review images
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Aaris-Pharmacy-UI-review
           path: |
