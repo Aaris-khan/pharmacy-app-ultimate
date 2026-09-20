@@ -220,11 +220,15 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   );
 
   Future<void> _openMedicine(Medicine medicine) => _runExclusiveRoute(
-    () => openEditor(
-      context,
-      widget.controller,
-      record: medicine,
-    ),
+    () async {
+      final live = widget.controller.snapshot.records[medicine.id];
+      if (live == null || live.archived) return;
+      await openEditor(
+        context,
+        widget.controller,
+        record: live,
+      );
+    },
   );
 
   Future<void> _prepareReturn(
