@@ -1,41 +1,71 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:isolate';
 
 import '../domain/inventory.dart';
 import '../domain/medicine.dart';
 import '../domain/search.dart';
 
+int _boundedBrowseLimit(int limit) => limit < 1
+    ? 1
+    : limit > 100000
+    ? 100000
+    : limit;
+
+/// Keeps only the ordered prefix the UI can consume.
+///
+/// Empty-query browsing used to materialize and sort every matching medicine
+/// before returning a small page. The work ran off the UI isolate, but the
+/// screen still had to wait for that full O(N log N) sort. A bounded ordered
+/// set makes the first page O(N log K), where K is the requested window, while
+/// preserving exactly the same total ordering and stable IDs.
+List<Medicine> _orderedWindow(
+  Iterable<Medicine> records, {
+  required bool Function(Medicine medicine) include,
+  required int Function(Medicine a, Medicine b) compare,
+  required int limit,
+}) {
+  final boundedLimit = _boundedBrowseLimit(limit);
+  final selected = SplayTreeSet<Medicine>(compare);
+  for (final medicine in records) {
+    if (!include(medicine)) continue;
+    selected.add(medicine);
+    if (selected.length > boundedLimit) {
+      selected.remove(selected.last);
+    }
+  }
+  return selected.toList(growable: false);
+}
+
 List<Medicine> _orderedActiveRecords(
   List<Medicine> records,
   SearchScope scope,
   WarningSettings settings,
-  DateTime today,
-) {
-  final visible = records
-      .where((medicine) => inScope(medicine, scope, settings, today))
-      .toList(growable: false)
-    ..sort((a, b) => expiryOrder(a, b, today));
-  return visible;
-}
+  DateTime today, {
+  required int limit,
+}) => _orderedWindow(
+  records,
+  include: (medicine) => inScope(medicine, scope, settings, today),
+  compare: (a, b) => expiryOrder(a, b, today),
+  limit: limit,
+);
 
-List<Medicine> _orderedArchivedRecords(List<Medicine> records) {
-  final visible = records
-      .where((medicine) => medicine.archived)
-      .toList(growable: false)
-    ..sort(archivedOrder);
-  return visible;
-}
+List<Medicine> _orderedArchivedRecords(
+  List<Medicine> records, {
+  required int limit,
+}) => _orderedWindow(
+  records,
+  include: (medicine) => medicine.archived,
+  compare: archivedOrder,
+  limit: limit,
+);
 
 List<SearchHit> _browseWindow(
   List<Medicine> records,
   int limit,
   String reason,
 ) {
-  final boundedLimit = limit < 1
-      ? 1
-      : limit > 100000
-      ? 100000
-      : limit;
+  final boundedLimit = _boundedBrowseLimit(limit);
   return records
       .take(boundedLimit)
       .map((medicine) => SearchHit(medicine.id, 1, reason, ''))
@@ -50,7 +80,9 @@ void _searchEntry(SendPort main) {
   List<Medicine>? indexedRecords;
   List<Medicine>? activeBrowseRecords;
   String activeBrowseKey = '';
+  var activeBrowseLimit = 0;
   List<Medicine>? archivedBrowseRecords;
+  var archivedBrowseLimit = 0;
   var revision = -1;
   receive.listen((dynamic raw) {
     final message = raw as Map;
@@ -66,7 +98,9 @@ void _searchEntry(SendPort main) {
         archivedEngine = null;
         activeBrowseRecords = null;
         activeBrowseKey = '';
+        activeBrowseLimit = 0;
         archivedBrowseRecords = null;
+        archivedBrowseLimit = 0;
         revision = message['revision'] as int;
         main.send({'id': id, 'result': true});
       } else if (kind == 'reuseIndex') {
@@ -93,33 +127,45 @@ void _searchEntry(SendPort main) {
           final scope = message['scope'] as SearchScope;
           final settings = message['settings'] as WarningSettings;
           final today = message['today'] as DateTime;
+          final requestedLimit = _boundedBrowseLimit(message['limit'] as int);
           final nextBrowseKey =
               '${scope.index}:${settings.shortDays}:${settings.months}:${dateText(today)}';
           if (activeBrowseRecords == null ||
-              activeBrowseKey != nextBrowseKey) {
+              activeBrowseKey != nextBrowseKey ||
+              activeBrowseLimit < requestedLimit) {
             activeBrowseRecords = _orderedActiveRecords(
               indexedRecords!,
               scope,
               settings,
               today,
+              limit: requestedLimit,
             );
             activeBrowseKey = nextBrowseKey;
+            activeBrowseLimit = requestedLimit;
           }
           main.send({
             'id': id,
             'result': _browseWindow(
               activeBrowseRecords!,
-              message['limit'] as int,
+              requestedLimit,
               'Inventory',
             ),
           });
         } else if (kind == 'browseArchived') {
-          archivedBrowseRecords ??= _orderedArchivedRecords(indexedRecords!);
+          final requestedLimit = _boundedBrowseLimit(message['limit'] as int);
+          if (archivedBrowseRecords == null ||
+              archivedBrowseLimit < requestedLimit) {
+            archivedBrowseRecords = _orderedArchivedRecords(
+              indexedRecords!,
+              limit: requestedLimit,
+            );
+            archivedBrowseLimit = requestedLimit;
+          }
           main.send({
             'id': id,
             'result': _browseWindow(
               archivedBrowseRecords!,
-              message['limit'] as int,
+              requestedLimit,
               'Removed stock',
             ),
           });
