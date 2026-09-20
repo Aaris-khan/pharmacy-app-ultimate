@@ -168,4 +168,31 @@ void main() {
       );
     }
   });
+  test('exact barcode search publishes an authoritative high-confidence hit', () async {
+    final worker = SearchWorker();
+    addTearDown(worker.close);
+    final target = stock(
+      'barcode-target',
+      name: 'Cefixime',
+      strength: '200mg',
+      expiry: '2027-01-01',
+      barcode: '8901234567890',
+    );
+
+    final hits = await worker.search(
+      [target],
+      1,
+      '8901234567890',
+      SearchScope.all,
+      contractSettings,
+      contractToday,
+    );
+
+    expect(hits, hasLength(1));
+    expect(hits.single.id, target.id);
+    expect(hits.single.score, 1);
+    expect(hits.single.reason, 'Exact barcode');
+    expect(hits.single.uncertain, isFalse);
+  });
+
 }
