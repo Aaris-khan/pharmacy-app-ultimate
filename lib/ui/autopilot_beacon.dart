@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../domain/stock_guidance.dart';
 import '../state/autopilot_supervisor.dart';
 
 /// A compact global signal for urgent pharmacist work.
@@ -38,8 +37,8 @@ class AarisAutopilotBeacon extends StatelessWidget {
           : critical
           ? '${digest.criticalCount} बहुत ज़रूरी'
           : '${digest.highCount} ज़रूरी';
-      final next = !degraded && digest.nextKind != null
-          ? stockActionLabel(digest.nextKind!)
+      final next = !degraded && digest.nextAction.trim().isNotEmpty
+          ? digest.nextAction
           : 'काम देखने के लिए टैप करें';
 
       return Padding(

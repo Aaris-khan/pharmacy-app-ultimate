@@ -8,6 +8,7 @@ import '../domain/operations_plan.dart';
 import '../domain/sale_history_integrity.dart';
 import '../domain/stock_guidance.dart';
 import '../domain/supplier.dart';
+import '../domain/supplier_intelligence.dart';
 import '../domain/tracking.dart';
 import 'pharmacy_controller.dart';
 
@@ -351,6 +352,7 @@ Medicine _operationalMedicineProjection(Medicine medicine) => Medicine(
   soldAt: medicine.soldAt,
   soldQuantity: medicine.soldQuantity,
   soldUnitPricePaise: medicine.soldUnitPricePaise,
+  intakeHistory: medicine.intakeHistory,
   revision: medicine.revision,
 );
 
@@ -387,6 +389,7 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
     sales: recentSales,
     range: TrackingRange.lastDays(today, 30),
     today: today,
+    suppliers: suppliers,
   );
   final report = PharmacyAttentionReport.build(
     medicines: records,
@@ -407,6 +410,12 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
     for (final movement in tracking.movements.values)
       if (movement.demand != null) movement.key: movement.demand!,
   };
+  final purchaseAdvice = buildSupplierPurchaseAdvice(
+    medicines: records,
+    suppliers: suppliers,
+    reorder: tracking.reorder,
+    today: today,
+  );
   final supplierTasks = supplierReturnGuidance(
     candidates: supplierReturnCandidates(
       medicines: records,
@@ -423,12 +432,19 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
         orders: orders,
         today: today,
         dailyDemand: dailyDemand,
+        supplierAdvice: purchaseAdvice,
       ),
   ];
+  final plannedKeys = plannedTasks.map((task) => task.key).toSet();
+  final visiblePlannedTasks = plannedTasks.where((task) {
+    if (!task.blocked) return true;
+    final prerequisites = task.step?.prerequisites ?? const <AttentionItem>[];
+    return !prerequisites.any((item) => plannedKeys.contains(item.key));
+  }).toList(growable: false);
   final tasks = <StockGuidance>[
     // A supplier return deadline is the more specific action. Do not show a
     // second generic short-expiry/expiry-waste card for the same exact stock.
-    for (final task in plannedTasks)
+    for (final task in visiblePlannedTasks)
       if (!(task.stockIds.any(supplierDueIds.contains) &&
           (task.step?.item.kind == AttentionKind.shortExpiry ||
               task.step?.item.kind == AttentionKind.expiryWastePressure)))
@@ -456,29 +472,70 @@ Map<String, dynamic> _evaluateAutopilot(Map<String, dynamic> payload) {
   final original = {for (var i = 0; i < tasks.length; i++) tasks[i].key: i};
   tasks.sort((a, b) {
     final order = priority(a).compareTo(priority(b));
-    return order != 0 ? order : original[a.key]!.compareTo(original[b.key]!);
+    if (order != 0) return order;
+    final deadline = (a.urgencyDays ?? 1 << 20).compareTo(
+      b.urgencyDays ?? 1 << 20,
+    );
+    if (deadline != 0) return deadline;
+    return original[a.key]!.compareTo(original[b.key]!);
   });
 
-  final next = plan.nextStep;
+  var visibleIssues = 0;
+  var visibleCritical = 0;
+  var visibleHigh = 0;
+  var visibleMedium = 0;
+  var visibleLow = 0;
+  for (final task in tasks) {
+    if (task.group == StockTaskGroup.movement) continue;
+    visibleIssues++;
+    final severity = task.step?.item.severity;
+    if (severity == null) {
+      if ((task.urgencyDays ?? 1 << 20) <= settings.shortDays) {
+        visibleHigh++;
+      } else {
+        visibleMedium++;
+      }
+      continue;
+    }
+    switch (severity) {
+      case AttentionSeverity.critical:
+        visibleCritical++;
+      case AttentionSeverity.high:
+        visibleHigh++;
+      case AttentionSeverity.medium:
+        visibleMedium++;
+      case AttentionSeverity.low:
+        visibleLow++;
+    }
+  }
+
+  final nextTask = tasks.firstOrNull;
+  final next = nextTask?.step;
   return <String, dynamic>{
-    'health': report.isEmpty
+    'health': visibleIssues == 0
         ? 'clear'
-        : report.critical > 0
+        : visibleCritical > 0
         ? 'critical'
         : 'attention',
-    'issueCount': report.items.length,
-    'criticalCount': report.critical,
-    'highCount': report.high,
-    'mediumCount': report.medium,
-    'lowCount': report.low,
+    'issueCount': visibleIssues,
+    'criticalCount': visibleCritical,
+    'highCount': visibleHigh,
+    'mediumCount': visibleMedium,
+    'lowCount': visibleLow,
     'blockedCount': plan.blockedCount,
     'verificationCount': plan.verificationCount,
-    'nextTaskKey': next?.item.key ?? '',
-    'nextTaskTitle': next?.item.title ?? '',
-    'nextAction': next?.actionLabel ?? '',
-    'nextLane': next?.laneLabel ?? '',
+    'nextTaskKey': nextTask?.key ?? '',
+    'nextTaskTitle': nextTask?.title ?? '',
+    'nextAction': nextTask?.action ?? '',
+    'nextLane': nextTask == null
+        ? ''
+        : nextTask.group == StockTaskGroup.supplier
+        ? 'Supplier'
+        : next?.laneLabel ?? '',
     'nextKind': next?.item.kind.name ?? '',
-    'nextStockIds': List<String>.from(next?.item.stockIds ?? const <String>[]),
+    'nextStockIds': List<String>.from(
+      nextTask?.stockIds ?? const <String>[],
+    ),
     'tasks': tasks,
   };
 }
