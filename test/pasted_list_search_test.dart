@@ -96,7 +96,12 @@ void main() {
         300,
         scrollable: find.descendant(
           of: find.byType(CustomScrollView),
-          matching: find.byType(Scrollable),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Scrollable &&
+                (widget.axisDirection == AxisDirection.down ||
+                    widget.axisDirection == AxisDirection.up),
+          ),
         ),
       );
       await tester.pumpAndSettle();
