@@ -260,11 +260,14 @@ class _SearchScreenState extends State<SearchScreen> {
             )
           : await widget.controller.search(typedQuery, widget.scope);
       if (!mounted || generation != _generation) return;
+      final acceptedHits = _bulkQuery == null
+          ? hits
+          : hits.where((hit) => hit.score >= .68).toList(growable: false);
       final hasMoreBrowseRows =
-          browsing && hits.length > requestedBrowseLimit;
+          browsing && acceptedHits.length > requestedBrowseLimit;
       final visibleHits = hasMoreBrowseRows
-          ? hits.take(requestedBrowseLimit).toList(growable: false)
-          : hits;
+          ? acceptedHits.take(requestedBrowseLimit).toList(growable: false)
+          : acceptedHits;
       setState(() {
         _publishedHits = SearchHitPublication.capture(
           visibleHits,
