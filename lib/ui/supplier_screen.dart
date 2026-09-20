@@ -238,10 +238,12 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     if (_interactionLocked || dueIds.isEmpty) return;
     setState(() => _returning = true);
     try {
-      final review = widget.controller.reviewSupplierReturn(
-        supplier.id,
-        dueIds,
-      );
+      final review = await widget.controller
+          .reviewSupplierReturnAfterPendingWrites(
+            supplier.id,
+            dueIds,
+          );
+      if (!mounted) return;
       final shared = await _returnService.share(review);
       if (!mounted || !shared) return;
 
