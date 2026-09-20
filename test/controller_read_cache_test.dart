@@ -79,7 +79,12 @@ void main() {
 
     expect(identical(statsDayTwo, controller.stats), isFalse);
     expect(identical(homeDayTwo, controller.homeProjection), isFalse);
-    expect(identical(salesBeforeWrite, controller.salesOverview), isFalse);
+    expect(
+      identical(salesBeforeWrite, controller.salesOverview),
+      isTrue,
+      reason:
+          'Adding unsold stock cannot change all-time sales analytics and must not discard its cache.',
+    );
     expect(controller.homeProjection.activeCount, 1);
   });
 
