@@ -19,9 +19,25 @@ void main() {
     expect(search, contains('onPressed: _routeOpening ? null : _scanner'));
     expect(search, contains('onPressed: _routeOpening ? null : _mic'));
     expect(search, contains('onPressed: _routeOpening ? null : _bulk'));
+
+    final scannerStart = search.indexOf('Future<void> _scanner() async {');
+    final scannerEnd = search.indexOf(
+      'Future<void> _mic() async {',
+      scannerStart,
+    );
+    expect(scannerStart, greaterThanOrEqualTo(0));
+    expect(scannerEnd, greaterThan(scannerStart));
+    final scannerFlow = search.substring(scannerStart, scannerEnd);
+    expect(scannerFlow, contains('if (_routeOpening || !mounted) return;'));
+    expect(scannerFlow, contains('setState(() => _routeOpening = true);'));
+    expect(scannerFlow, contains('await _search();'));
+    expect(scannerFlow, contains('await _discoverOnline(captured);'));
+    expect(scannerFlow, contains('} finally {'));
+    expect(scannerFlow, contains('setState(() => _routeOpening = false);'));
+    expect(scannerFlow, isNot(contains('_runExclusiveRoute(')));
     expect(
       '_runExclusiveRoute('.allMatches(search).length,
-      greaterThanOrEqualTo(10),
+      greaterThanOrEqualTo(9),
     );
     expect(
       search,
