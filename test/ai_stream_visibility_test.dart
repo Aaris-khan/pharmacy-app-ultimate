@@ -36,5 +36,11 @@ void main() {
       contains('if (!_screenActive || !_followResponse || _scrollScheduled) return;'),
       reason: 'Offstage streaming must not schedule scroll frames either.',
     );
+    expect(
+      source,
+      contains('''// If a response completed while this retained tab was hidden, catch the
+    // viewport up once on return.'''),
+      reason: 'Returning to Brain must reveal a response that completed offstage.',
+    );
   });
 }

@@ -108,6 +108,10 @@ class _AiScreenState extends State<AiScreen> {
     if (_activeStreamBuffer != null && _cancellableRequest) {
       _scheduleStreamPreview(_generation);
     }
+    // If a response completed while this retained tab was hidden, catch the
+    // viewport up once on return. Respect _followResponse when the owner had
+    // intentionally scrolled away from the live tail.
+    _scrollToEnd();
   }
 
   @override
