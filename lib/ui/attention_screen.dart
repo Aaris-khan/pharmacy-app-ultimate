@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../domain/medicine.dart';
@@ -201,6 +203,21 @@ class _AttentionScreenState extends State<AttentionScreen> {
     }
   }
 
+  Future<void> _openSuppliers() async {
+    if (_opening || !mounted) return;
+    _opening = true;
+    try {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SupplierScreen(controller: widget.controller),
+        ),
+      );
+    } finally {
+      _opening = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('आज के काम')),
@@ -333,14 +350,9 @@ class _AttentionScreenState extends State<AttentionScreen> {
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: OutlinedButton.icon(
-                                  onPressed: () => Navigator.push<void>(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => SupplierScreen(
-                                        controller: widget.controller,
-                                      ),
-                                    ),
-                                  ),
+                                  onPressed: _opening
+                                      ? null
+                                      : () => unawaited(_openSuppliers()),
                                   icon: const Icon(
                                     Icons.local_shipping_outlined,
                                   ),
