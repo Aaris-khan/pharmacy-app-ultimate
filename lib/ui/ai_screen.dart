@@ -64,6 +64,7 @@ class _AiScreenState extends State<AiScreen> {
   bool _localCommanding = false;
   bool _sharing = false;
   bool _reviewing = false;
+  bool _toolOpening = false;
   bool _externalReady = false;
   int _generation = 0;
   int _configurationGeneration = 0;
@@ -220,6 +221,28 @@ class _AiScreenState extends State<AiScreen> {
       () => _messages.add(_AiChatMessage(clean, user, status: status)),
     );
     _scrollToEnd(force: user);
+  }
+
+  Future<void> _runComposerTool(Future<void> Function() action) async {
+    if (!mounted ||
+        _toolOpening ||
+        _localCommanding ||
+        _preparingRequest ||
+        _requesting ||
+        _reviewing ||
+        widget.controller.aiPreparing) {
+      return;
+    }
+    // Capture attaches to the durable intake queue before it presents a route.
+    // Lock synchronously so a fast second tap cannot start another picker,
+    // scanner or microphone flow while the first tool is still acquiring its
+    // resources. The same gate also keeps camera work out of an active AI turn.
+    setState(() => _toolOpening = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _toolOpening = false);
+    }
   }
 
   String _friendlyAiError(Object error) {
@@ -987,6 +1010,7 @@ class _AiScreenState extends State<AiScreen> {
           _preparingRequest ||
           _requesting ||
           _reviewing ||
+          _toolOpening ||
           widget.controller.aiPreparing;
       return Column(
         children: [
@@ -1169,21 +1193,25 @@ class _AiScreenState extends State<AiScreen> {
             controller: _request,
             busy: busy,
             onSend: _sendComposer,
-            onCamera: () async {
-              await openMedicineCapture(context, widget.controller);
-              if (mounted) _scrollToEnd();
-            },
-            onMic: () async {
-              final words = await voiceSearch(
-                context,
-                offlineOnly: true,
-                title: 'Speak to Aaris',
-                actionLabel: 'Use message',
-              );
-              if (mounted && words != null) {
-                setState(() => _request.text = words);
-              }
-            },
+            onCamera: () => unawaited(
+              _runComposerTool(() async {
+                await openMedicineCapture(context, widget.controller);
+                if (mounted) _scrollToEnd();
+              }),
+            ),
+            onMic: () => unawaited(
+              _runComposerTool(() async {
+                final words = await voiceSearch(
+                  context,
+                  offlineOnly: true,
+                  title: 'Speak to Aaris',
+                  actionLabel: 'Use message',
+                );
+                if (mounted && words != null) {
+                  setState(() => _request.text = words);
+                }
+              }),
+            ),
           ),
         ],
       );
@@ -1618,7 +1646,7 @@ class _AiComposer extends StatelessWidget {
         children: [
           IconButton(
             tooltip: 'Camera, rapid photos or video',
-            onPressed: onCamera,
+            onPressed: busy ? null : onCamera,
             icon: const Icon(Icons.camera_alt_outlined),
           ),
           Expanded(
