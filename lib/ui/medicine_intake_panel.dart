@@ -27,7 +27,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
   final queue = MedicineIntakeService.instance;
   int visible = 5;
   String error = '';
-  String? _openingJob;
+  String? _activeJobAction;
 
   @override
   void initState() {
@@ -64,34 +64,40 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
         singlePackExpected: _singlePackExpected(job),
       );
 
-  Future<void> _review(MedicineIntakeJob job) async {
-    if (_openingJob != null || !job.canReview) return;
-    setState(() => _openingJob = job.id);
+  Future<void> _runJobAction(
+    MedicineIntakeJob job,
+    Future<void> Function() action,
+  ) async {
+    if (_activeJobAction != null || !mounted) return;
+    setState(() => _activeJobAction = job.id);
     try {
-      await queue.continueWithDraft(job);
-      if (!mounted) return;
-      final drafts = _reviewDrafts(job);
-      final completed = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MedicineReviewScreen(
-            controller: widget.controller,
-            input: MedicineReviewInput.prepared(
-              drafts,
-              singlePackExpected: _singlePackExpected(job),
-            ),
-          ),
-        ),
-      );
-      if (completed == true) {
-        await _run(() => queue.dismiss(job));
-      }
+      await action();
     } catch (value) {
       if (mounted) setState(() => error = _cleanError(value));
     } finally {
-      if (mounted) setState(() => _openingJob = null);
+      if (mounted) setState(() => _activeJobAction = null);
     }
   }
+
+  Future<void> _review(MedicineIntakeJob job) => _runJobAction(job, () async {
+    if (!job.canReview) return;
+    await queue.continueWithDraft(job);
+    if (!mounted) return;
+    final drafts = _reviewDrafts(job);
+    final completed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MedicineReviewScreen(
+          controller: widget.controller,
+          input: MedicineReviewInput.prepared(
+            drafts,
+            singlePackExpected: _singlePackExpected(job),
+          ),
+        ),
+      ),
+    );
+    if (completed == true) await queue.dismiss(job);
+  });
 
   bool _expired(String value) {
     try {
@@ -127,11 +133,18 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     return 'Medicine details could not be completed. Try again.';
   }
 
-  Future<void> _retry(MedicineIntakeJob job) => _run(
+  Future<void> _retry(MedicineIntakeJob job) => _runJobAction(
+        job,
         () => job.canRescanVideo
             ? queue.retry(job, rescanVideo: true)
             : queue.retry(job),
       );
+
+  Future<void> _ask(MedicineIntakeJob job, MedicineScanDraft draft) =>
+      _runJobAction(job, () async {
+        await queue.continueWithDraft(job);
+        if (mounted) widget.onAsk?.call(draft.rawText);
+      });
 
   @override
   Widget build(BuildContext context) => ActiveListenableBuilder(
@@ -261,7 +274,9 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: () => _retry(job),
+                onPressed: _activeJobAction != null
+                    ? null
+                    : () => unawaited(_retry(job)),
                 icon: const Icon(Icons.refresh_rounded),
                 label:
                     Text(job.kind == 'video' ? 'Try video again' : 'Try again'),
@@ -330,7 +345,9 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(
-                      onPressed: () => _retry(job),
+                      onPressed: _activeJobAction != null
+                    ? null
+                    : () => unawaited(_retry(job)),
                       icon: const Icon(Icons.video_library_outlined, size: 18),
                       label: const Text('Read video again'),
                     ),
@@ -351,7 +368,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                       ),
                     ),
                   ),
-                  onPressed: reviewDrafts.isEmpty || _openingJob != null
+                  onPressed: reviewDrafts.isEmpty || _activeJobAction != null
                       ? null
                       : () => _review(job),
                   icon: const Icon(Icons.arrow_forward_rounded),
@@ -372,7 +389,9 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
                 child: IconButton(
                   tooltip: 'Remove this scan',
                   visualDensity: VisualDensity.compact,
-                  onPressed: () => _dismiss(job),
+                  onPressed: _activeJobAction != null
+                      ? null
+                      : () => unawaited(_dismiss(job)),
                   icon: const Icon(Icons.close_rounded, size: 20),
                 ),
               ),
@@ -455,10 +474,9 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: () => _run(() async {
-                  await queue.continueWithDraft(job);
-                  if (mounted) widget.onAsk?.call(draft.rawText);
-                }),
+                onPressed: _activeJobAction != null
+                    ? null
+                    : () => unawaited(_ask(job, draft)),
                 icon: const Icon(Icons.auto_awesome_rounded, size: 18),
                 label: const Text('Ask AI'),
               ),
@@ -502,7 +520,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     ),
   );
 
-  Future<void> _dismiss(MedicineIntakeJob job) async {
+  Future<void> _dismiss(MedicineIntakeJob job) => _runJobAction(job, () async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -522,6 +540,6 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
         ],
       ),
     );
-    if (confirmed == true) await _run(() => queue.dismiss(job));
-  }
+    if (confirmed == true) await queue.dismiss(job);
+  });
 }
