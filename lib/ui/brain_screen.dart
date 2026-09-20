@@ -66,6 +66,15 @@ class _BrainScreenState extends State<BrainScreen> {
   String _reply =
       'Ready. Ask stock, expiry, location or FEFO from the local Medicine Database, open safe actions, recover removed stock, or ask “aaj kya dekhna hai”.';
 
+  // BrainScreen owns command/session state, while AiScreen owns every rendered
+  // interaction state. None of these fields participate in build(), so marking
+  // this parent dirty on each local-command phase only rebuilds the full AI hub
+  // without changing pixels. Keep these mutations off the Flutter build path.
+  void _updateCommandState(VoidCallback update) {
+    if (!mounted) return;
+    update();
+  }
+
   Future<String?> _handleUnifiedCommand(String raw) async {
     if (_busy) return 'Aaris is finishing the previous local command.';
     final text = raw.trim();
@@ -83,7 +92,7 @@ class _BrainScreenState extends State<BrainScreen> {
     }
 
     if (mounted) {
-      setState(() {
+      _updateCommandState(() {
         _busy = true;
         _reply = 'Understanding local command…';
       });
@@ -99,10 +108,10 @@ class _BrainScreenState extends State<BrainScreen> {
         RegExp(r'^(FormatException|Bad state|StateError):\s*'),
         '',
       );
-      if (mounted) setState(() => _reply = message);
+      if (mounted) _updateCommandState(() => _reply = message);
       return message;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) _updateCommandState(() => _busy = false);
     }
   }
 
@@ -118,7 +127,7 @@ class _BrainScreenState extends State<BrainScreen> {
       case BrainChoiceResolutionKind.cancelled:
         _pendingChoice = null;
         if (mounted) {
-          setState(
+          _updateCommandState(
             () =>
                 _reply = 'Pending medicine choice cancelled. Nothing changed.',
           );
@@ -129,7 +138,7 @@ class _BrainScreenState extends State<BrainScreen> {
         final fresh = parseAppBrainIntent(raw);
         if (fresh.action != AppBrainAction.unknown) return false;
         if (mounted) {
-          setState(
+          _updateCommandState(
             () => _reply = 'That medicine-choice list expired or one of its stock rows changed. Nothing changed. Run the command again so Aaris can rank the live Medicine Database.',
           );
         }
@@ -142,7 +151,7 @@ class _BrainScreenState extends State<BrainScreen> {
         _pendingChoice = null;
         if (record == null || record.archived) {
           if (mounted) {
-            setState(
+            _updateCommandState(
               () => _reply = 'That exact stock row is no longer active. Nothing changed; choose again from the live Medicine Database.',
             );
           }
@@ -152,7 +161,7 @@ class _BrainScreenState extends State<BrainScreen> {
         return true;
       case BrainChoiceResolutionKind.ambiguous:
         if (mounted) {
-          setState(
+          _updateCommandState(
             () => _reply =
                 '${_pendingChoicePrompt(pending)} That exact cue still belongs to more than one displayed row, so Aaris did not guess.',
           );
@@ -164,7 +173,7 @@ class _BrainScreenState extends State<BrainScreen> {
           _pendingChoice = null;
           return false;
         }
-        if (mounted) setState(() => _reply = _pendingChoicePrompt(pending));
+        if (mounted) _updateCommandState(() => _reply = _pendingChoicePrompt(pending));
         return true;
     }
   }
@@ -182,7 +191,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (intent.action == AppBrainAction.search) {
       widget.onOpenSection(AppSection.stock);
       if (mounted) {
-        setState(
+        _updateCommandState(
           () => _reply =
               '${record.title} selected from the exact displayed options. This stock row is now the session context.',
         );
@@ -244,7 +253,7 @@ class _BrainScreenState extends State<BrainScreen> {
     switch (intent.action) {
       case AppBrainAction.safetyBlocked:
         if (mounted) {
-          setState(
+          _updateCommandState(
             () => _reply = intent.safetyReason?.message ?? 'Nothing changed. This command did not pass the deterministic inventory-action safety check.',
           );
         }
@@ -256,13 +265,13 @@ class _BrainScreenState extends State<BrainScreen> {
           return;
         }
         widget.onOpenSection(section);
-        if (mounted) setState(() => _reply = _sectionReply(section));
+        if (mounted) _updateCommandState(() => _reply = _sectionReply(section));
         return;
       case AppBrainAction.addMedicine:
         if (mounted) {
           final seed = _draftSeedFromCommand(intent.query);
           widget.onOpenSection(AppSection.stock);
-          setState(
+          _updateCommandState(
             () => _reply = seed == null
                 ? 'Opening a fresh medicine entry.'
                 : 'Draft ready for ${seed.name}${seed.strength.isEmpty ? '' : ' ${seed.strength}'}. Review the fields and tap Save to add it.',
@@ -328,7 +337,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (!mounted) return;
     final query = intent.query.trim();
     widget.onOpenSection(AppSection.profile);
-    setState(
+    _updateCommandState(
       () => _reply = query.isEmpty
           ? 'Opening Removed stock. Search and recovery stay local; every restore requires an exact archived-row review and explicit confirmation.'
           : 'Opening Removed stock filtered for “$query”. Aaris will rank local archived rows but will not restore from a fuzzy match automatically.',
@@ -345,7 +354,7 @@ class _BrainScreenState extends State<BrainScreen> {
       ),
     );
     if (!mounted) return;
-    setState(
+    _updateCommandState(
       () => _reply = 'Removed-stock review closed. Nothing is restored unless you explicitly confirm the exact archived row; stale reviews fail closed if inventory changes.',
     );
   }
@@ -353,7 +362,7 @@ class _BrainScreenState extends State<BrainScreen> {
   Future<void> _scanMedicine() async {
     if (!mounted) return;
     widget.onOpenSection(AppSection.stock);
-    setState(
+    _updateCommandState(
       () => _reply = 'Opening the existing local scanner. Barcode + OCR evidence will be reviewed before any stock can change.',
     );
     await Future<void>.delayed(Duration.zero);
@@ -365,11 +374,11 @@ class _BrainScreenState extends State<BrainScreen> {
     );
     if (!mounted) return;
     if (result == null) {
-      setState(() => _reply = 'Scan cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Scan cancelled. Nothing changed.');
       return;
     }
     if (result.barcode.trim().isEmpty && result.text.trim().isEmpty) {
-      setState(
+      _updateCommandState(
         () => _reply = 'The scan contained no usable barcode or medicine text. Nothing changed.',
       );
       return;
@@ -403,7 +412,7 @@ class _BrainScreenState extends State<BrainScreen> {
               source: 'Aaris Brain scanner',
             ),
           ];
-    setState(
+    _updateCommandState(
       () => _reply = direct == null
           ? 'Scan captured. Review the ranked local matches or create a new stock entry; Aaris will not guess an ambiguous batch.'
           : 'Scan captured and one high-confidence local stock match was found. Review it before editing or creating another batch.',
@@ -419,7 +428,7 @@ class _BrainScreenState extends State<BrainScreen> {
     );
     if (!mounted) return;
     final remembered = _rememberedTarget();
-    setState(
+    _updateCommandState(
       () => _reply = remembered == null
           ? 'Scan review closed. No stock was changed automatically.'
           : '${remembered.title} is now the exact session context. You can say “isko edit karo”, “isko stock kitna hai”, “isko remove karo”, or another reviewed command.',
@@ -436,7 +445,7 @@ class _BrainScreenState extends State<BrainScreen> {
       if (remembered == null) {
         widget.onOpenSection(AppSection.stock);
         if (mounted) {
-          setState(
+          _updateCommandState(
             () => _reply = 'I do not have a safe previous medicine target yet. Medicine Database opened so you can choose the exact medicine first.',
           );
         }
@@ -450,17 +459,17 @@ class _BrainScreenState extends State<BrainScreen> {
       if (!mounted) return;
       if (briefFocus != null) {
         widget.onOpenSection(AppSection.stock);
-        setState(
+        _updateCommandState(
           () => _reply = 'Medicine name, batch, barcode or an exact previous selection is missing. Medicine Database opened instead of guessing which medicine you meant.',
         );
         return;
       }
       if (intent.scope == SearchScope.all) {
         widget.onOpenSection(AppSection.stock);
-        setState(() => _reply = 'Medicine Database opened.');
+        _updateCommandState(() => _reply = 'Medicine Database opened.');
         return;
       }
-      setState(
+      _updateCommandState(
         () => _reply =
             'Opening ${scopeTitle(intent.scope, widget.controller.settings)}.',
       );
@@ -481,7 +490,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (briefFocus != null) {
       if (viable.isEmpty) {
         widget.onOpenSection(AppSection.stock);
-        setState(
+        _updateCommandState(
           () => _reply =
               'I could not safely identify “$query” in the local Medicine Database. I will not invent a stock, expiry, location or FEFO answer.',
         );
@@ -508,7 +517,7 @@ class _BrainScreenState extends State<BrainScreen> {
         _remember(record);
         if (intent.openExact) {
           widget.onOpenSection(AppSection.stock);
-          setState(
+          _updateCommandState(
             () => _reply = '${record.title} matched exactly. Opening that stock entry now.',
           );
           await Future<void>.delayed(Duration.zero);
@@ -532,7 +541,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final live = widget.controller.snapshot.records[anchor.id];
     if (live == null || live.archived) {
       widget.controller.clearOperationalTarget(anchor.id);
-      setState(
+      _updateCommandState(
         () => _reply = 'That stock entry is no longer active. Choose the medicine again so Aaris can answer from the current inventory snapshot.',
       );
       return;
@@ -543,7 +552,7 @@ class _BrainScreenState extends State<BrainScreen> {
       today: widget.controller.today,
     );
     _remember(live);
-    setState(() => _reply = brief.describe(focus));
+    _updateCommandState(() => _reply = brief.describe(focus));
   }
 
   Future<void> _medicineAction(AppBrainIntent intent) async {
@@ -554,7 +563,7 @@ class _BrainScreenState extends State<BrainScreen> {
       if (remembered == null) {
         widget.onOpenSection(AppSection.stock);
         if (mounted) {
-          setState(
+          _updateCommandState(
             () => _reply = 'I do not have a safe previous medicine target yet. Medicine Database opened so you can choose the exact stock entry first.',
           );
         }
@@ -574,7 +583,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (query.isEmpty) {
       if (!mounted) return;
       widget.onOpenSection(AppSection.stock);
-      setState(
+      _updateCommandState(
         () => _reply = 'Medicine name, batch, barcode or location is missing. Medicine Database opened so you can choose the exact stock entry safely.',
       );
       return;
@@ -585,7 +594,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final viable = hits.where((hit) => hit.score >= .90).take(8).toList();
     if (viable.isEmpty) {
       widget.onOpenSection(AppSection.stock);
-      setState(
+      _updateCommandState(
         () => _reply =
             'I could not safely identify “$query”. Medicine Database opened instead of guessing the wrong stock entry.',
       );
@@ -658,7 +667,7 @@ class _BrainScreenState extends State<BrainScreen> {
         '${record.title} matched. Preparing a reviewed location change: ${describeStockLocationPatch(locationPatch)}.',
       _ => _editorInstruction(action, record),
     };
-    setState(() => _reply = '$prefix$instruction');
+    _updateCommandState(() => _reply = '$prefix$instruction');
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
 
@@ -724,7 +733,7 @@ class _BrainScreenState extends State<BrainScreen> {
     }
 
     if (!review.changesQuantity && kind == StockAdjustmentKind.setExact) {
-      setState(
+      _updateCommandState(
         () => _reply =
             '${live.title} already has ${review.afterQuantity} units recorded. No inventory change was needed.',
       );
@@ -766,13 +775,13 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'Stock action cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Stock action cancelled. Nothing changed.');
       return;
     }
 
     await widget.controller.applyStockAdjustment(review);
     if (!mounted) return;
-    setState(
+    _updateCommandState(
       () => _reply = kind == StockAdjustmentKind.receive
           ? '${live.title}: +${review.requestedQuantity} units received; stock is now ${review.afterQuantity}. The transaction is audited and Undo is available.'
           : '${live.title}: recorded stock corrected to ${review.afterQuantity} units. Sales history was not changed; Undo is available.',
@@ -795,7 +804,7 @@ class _BrainScreenState extends State<BrainScreen> {
       );
     }
     if (!review.changesLocation) {
-      setState(
+      _updateCommandState(
         () => _reply =
             '${live.title} already has that stock location. No inventory change was needed.',
       );
@@ -825,7 +834,7 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'Location update cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Location update cancelled. Nothing changed.');
       return;
     }
 
@@ -833,7 +842,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (!mounted) return;
     final updated = widget.controller.snapshot.records[live.id];
     if (updated != null && !updated.archived) _remember(updated);
-    setState(
+    _updateCommandState(
       () => _reply =
           '${live.title} moved to ${review.afterDisplay}. The reviewed location change is audited and Undo is available.',
     );
@@ -846,7 +855,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (!mounted) return;
     final live = widget.controller.snapshot.records[original.id];
     if (live == null || live.archived) {
-      setState(
+      _updateCommandState(
         () => _reply = 'That stock entry is no longer active. Nothing changed.',
       );
       return;
@@ -897,7 +906,7 @@ class _BrainScreenState extends State<BrainScreen> {
           ),
         );
     if (reason == null || !mounted) {
-      setState(() => _reply = 'Remove cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Remove cancelled. Nothing changed.');
       return;
     }
 
@@ -931,14 +940,14 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'Remove cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Remove cancelled. Nothing changed.');
       return;
     }
 
     await widget.controller.applyArchive(review);
     if (!mounted) return;
     widget.controller.clearOperationalTarget(reviewed.id);
-    setState(
+    _updateCommandState(
       () => _reply =
           '${reviewed.title} removed with reason “${review.reason}”. It is still recoverable from removed history, and Undo is available for this latest change.',
     );
@@ -948,17 +957,17 @@ class _BrainScreenState extends State<BrainScreen> {
     if (!mounted) return;
     final live = widget.controller.snapshot.records[original.id];
     if (live == null || live.archived) {
-      setState(
+      _updateCommandState(
         () => _reply = 'That stock entry is no longer active. Nothing changed.',
       );
       return;
     }
     if (live.sold) {
-      setState(() => _reply = '${live.title} is already marked SOLD.');
+      _updateCommandState(() => _reply = '${live.title} is already marked SOLD.');
       return;
     }
     if (isExpiredOn(live, widget.controller.today)) {
-      setState(
+      _updateCommandState(
         () => _reply =
             '${live.title} is expired, so Aaris blocked SOLD. Remove it with reason Expired to keep expiry and reorder history correct.',
       );
@@ -989,12 +998,12 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'SOLD action cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'SOLD action cancelled. Nothing changed.');
       return;
     }
     await widget.controller.applyMarkSold(review);
     if (mounted) {
-      setState(
+      _updateCommandState(
         () => _reply =
             '${live.title} marked SOLD. Reorder intelligence is updated and the latest change remains undoable.',
       );
@@ -1009,7 +1018,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final plan = review.plan;
     if (!plan.complete) {
       if (!mounted) return;
-      setState(() {
+      _updateCommandState(() {
         _reply = plan.blockedByUnknownQuantity
             ? 'FEFO automation stopped safely: an earlier-priority batch has unknown quantity. Verify that physical batch first; no stock or sale was changed.'
             : 'FEFO automation found only ${plan.plannedQuantity} safely allocatable known units for the requested ${plan.requestedQuantity}. No sale was recorded.';
@@ -1061,13 +1070,13 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'FEFO sale cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'FEFO sale cancelled. Nothing changed.');
       return;
     }
 
     await widget.controller.applyFefoSale(review);
     if (!mounted) return;
-    setState(
+    _updateCommandState(
       () => _reply =
           '${plan.requestedQuantity} units recorded across ${plan.allocations.length} FEFO ${plan.allocations.length == 1 ? 'batch' : 'batches'}. Stock, sales tracking and reorder intelligence updated atomically; Undo is available.',
     );
@@ -1158,7 +1167,7 @@ class _BrainScreenState extends State<BrainScreen> {
     }
     if (records.isEmpty) {
       widget.onOpenSection(AppSection.stock);
-      if (mounted) setState(() => _reply = emptyReply);
+      if (mounted) _updateCommandState(() => _reply = emptyReply);
       return;
     }
     if (records.length > 1) {
@@ -1176,7 +1185,7 @@ class _BrainScreenState extends State<BrainScreen> {
     } else {
       _pendingChoice = null;
     }
-    setState(
+    _updateCommandState(
       () => _reply = briefFocus != null
           ? records.length == 1
                 ? '1 stock entry found. Select it and Aaris will answer read-only from the current Medicine Database.'
@@ -1291,7 +1300,7 @@ class _BrainScreenState extends State<BrainScreen> {
                             }
                             if (action == AppBrainAction.search) {
                               widget.onOpenSection(AppSection.stock);
-                              setState(
+                              _updateCommandState(
                                 () => _reply =
                                     '${record.title} selected. I will remember this exact stock entry for your next command.',
                               );
@@ -1335,7 +1344,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final review = suggestions.where((item) => item.reviewRequired).length;
 
     if (mounted) {
-      setState(
+      _updateCommandState(
         () => _reply = suggestions.isEmpty
             ? 'No deterministic reorder trigger is active from current stock and recorded sales. Opening Order Review so you can verify.'
             : 'Order Review: ${suggestions.length} suggestion${suggestions.length == 1 ? '' : 's'} · $urgent urgent · $review need pharmacist evidence review. Weak-evidence rows are never preselected.',
@@ -1355,7 +1364,7 @@ class _BrainScreenState extends State<BrainScreen> {
 
   Future<void> _undo() async {
     if (!widget.controller.canUndo) {
-      setState(() => _reply = 'There is no current change available to undo.');
+      _updateCommandState(() => _reply = 'There is no current change available to undo.');
       return;
     }
 
@@ -1396,12 +1405,12 @@ class _BrainScreenState extends State<BrainScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) {
-      setState(() => _reply = 'Undo cancelled. Nothing changed.');
+      _updateCommandState(() => _reply = 'Undo cancelled. Nothing changed.');
       return;
     }
     await widget.controller.undo();
     if (mounted) {
-      setState(() => _reply = 'Last reviewed inventory change was undone.');
+      _updateCommandState(() => _reply = 'Last reviewed inventory change was undone.');
     }
   }
 
@@ -1413,7 +1422,7 @@ class _BrainScreenState extends State<BrainScreen> {
     // plus two full sorts on the UI isolate for a simple text answer.
     final projection = widget.controller.homeProjection;
     final stats = widget.controller.stats;
-    setState(
+    _updateCommandState(
       () => _reply =
           'Inventory now: ${projection.activeCount} active stock entries · ${projection.uniqueMedicines} unique medicines · ${stats.knownUnits} known units · ${projection.expiredCount} expired · ${projection.soldCount} sold/reorder entries · ${stats.unknownQuantity} entries with unknown quantity.',
     );
@@ -1427,7 +1436,7 @@ class _BrainScreenState extends State<BrainScreen> {
       stats: stats,
       today: widget.controller.today,
     );
-    setState(() => _reply = brief);
+    _updateCommandState(() => _reply = brief);
   }
 
   PharmacyAttentionReport _currentAttentionReport() {
@@ -1549,7 +1558,7 @@ class _BrainScreenState extends State<BrainScreen> {
     }
     if (step == null || step.blocked) {
       final replacement = livePlan?.nextStep;
-      setState(
+      _updateCommandState(
         () => _reply = replacement == null
             ? 'The operating queue changed before this task opened. Aaris stopped instead of using a stale recommendation. Open Needs attention to review the current verified blockers.'
             : 'The operating queue changed before this task opened. Nothing was changed. The new next safe task is ${replacement.item.title}.',
@@ -1577,7 +1586,7 @@ class _BrainScreenState extends State<BrainScreen> {
     // require an explicit row choice. Aaris may prioritize the work, but it may
     // not guess which physical pack the pharmacist intends to correct.
     if (records.length != 1) {
-      setState(
+      _updateCommandState(
         () => _reply = records.isEmpty
             ? 'That recommended task changed while Aaris was opening it. Nothing was changed; the live operating plan is opening for re-evaluation.'
             : '${item.title} involves ${records.length} exact stock rows. Aaris opened the operating plan so you can choose the physical row instead of guessing.',
@@ -1589,7 +1598,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final record = records.single;
     _remember(record);
     widget.onOpenSection(AppSection.stock);
-    setState(
+    _updateCommandState(
       () => _reply =
           'Starting the next safe task: ${item.title}. ${selectedStep.actionLabel} Aaris has selected only this exact stock ID; no inventory change happens without the existing review/confirmation boundary.',
     );
@@ -1614,7 +1623,7 @@ class _BrainScreenState extends State<BrainScreen> {
     if (!mounted) return;
     final report = _currentAttentionReport();
     if (report.isEmpty) {
-      setState(
+      _updateCommandState(
         () => _reply = 'Task review closed. The deterministic operating queue is clear right now.',
       );
       return;
@@ -1623,7 +1632,7 @@ class _BrainScreenState extends State<BrainScreen> {
     final plan = _currentOperationsPlan(report);
     final attempted = _findPlanStep(plan, attemptedKey);
     final next = plan.nextStep;
-    setState(() {
+    _updateCommandState(() {
       if (attempted != null) {
         _reply =
             'Task review closed. “${attempted.item.title}” still needs attention, so Aaris kept it in the live queue instead of pretending it was completed.${next == null ? '' : ' Next safe task: ${next.item.title}.'}';
@@ -1642,7 +1651,7 @@ class _BrainScreenState extends State<BrainScreen> {
 
     if (projection.issueCount == 0) {
       if (mounted) {
-        setState(
+        _updateCommandState(
           () => _reply = focusNext
               ? 'There is no deterministic pharmacist task waiting right now. Nothing changed.'
               : 'Attention brief: no deterministic operational issue needs attention right now.',
@@ -1653,7 +1662,7 @@ class _BrainScreenState extends State<BrainScreen> {
 
     if (!focusNext) {
       if (mounted) {
-        setState(
+        _updateCommandState(
           () => _reply = next == null
               ? 'Attention queue: ${projection.issueCount} items, but no downstream task is safe to start until its recorded prerequisites are rechecked. Opening the operating plan; nothing will be changed automatically.'
               : 'Attention queue: ${projection.issueCount} item${projection.issueCount == 1 ? '' : 's'} · ${projection.critical} critical · ${projection.high} high · ${projection.medium} medium · ${projection.readyCount} ready now · ${projection.blockedCount} waiting on prerequisites. Next safe task: ${next.item.title}.',
@@ -1667,7 +1676,7 @@ class _BrainScreenState extends State<BrainScreen> {
 
     if (next == null) {
       if (mounted) {
-        setState(
+        _updateCommandState(
           () => _reply = 'No task can be started safely from the current queue because the remaining work is waiting on verified prerequisites. Opening the operating plan instead; nothing will be changed automatically.',
         );
       }
@@ -1678,7 +1687,7 @@ class _BrainScreenState extends State<BrainScreen> {
     }
 
     if (mounted) {
-      setState(
+      _updateCommandState(
         () => _reply =
             'Recommended next: ${next.item.title}. Revalidating the live queue before opening the exact safe workflow…',
       );
@@ -1692,13 +1701,13 @@ class _BrainScreenState extends State<BrainScreen> {
 
   void _bulkRemoveBlocked() {
     widget.onOpenSection(AppSection.profile);
-    setState(
+    _updateCommandState(
       () => _reply = 'Bulk removal is intentionally blocked from natural-language commands. Profile opened at the protected owner area; “Remove all inventory” still requires its dedicated multi-step confirmation and a revision-bound inventory review so a voice/AI misunderstanding cannot wipe stock.',
     );
   }
 
   void _unknown(String raw) {
-    setState(
+    _updateCommandState(
       () => _reply =
           '“$raw” looks like a deeper reasoning request rather than a deterministic app command. Use the AI Controller composer directly below; its Local AI → Aaris Default AI → configured provider safety pipeline remains authoritative for complex reasoning and proposed inventory changes.',
     );
@@ -1726,7 +1735,7 @@ class _BrainScreenState extends State<BrainScreen> {
       return null;
     }
     if (mounted) {
-      setState(() {
+      _updateCommandState(() {
         _busy = true;
         _reply = action == AppBrainAction.removeMedicine
             ? 'Choose the exact medicine to delete. The protected Remove review remains mandatory.'
@@ -1737,7 +1746,7 @@ class _BrainScreenState extends State<BrainScreen> {
       final hits = await widget.controller.search('', SearchScope.all);
       if (!mounted) return null;
       if (hits.isEmpty) {
-        setState(
+        _updateCommandState(
           () => _reply = 'No active medicine is available for this action.',
         );
         return _reply;
@@ -1756,10 +1765,10 @@ class _BrainScreenState extends State<BrainScreen> {
         RegExp(r'^(FormatException|Bad state|StateError):\s*'),
         '',
       );
-      if (mounted) setState(() => _reply = message);
+      if (mounted) _updateCommandState(() => _reply = message);
       return message;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) _updateCommandState(() => _busy = false);
     }
   }
 
