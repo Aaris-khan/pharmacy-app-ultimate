@@ -25,6 +25,7 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _sharing = false;
   bool _reading = false;
   bool _restoring = false;
+  bool _restorePromptOpen = false;
   String _error = '';
 
   Future<void> _share() async {
