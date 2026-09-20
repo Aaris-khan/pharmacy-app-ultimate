@@ -10,6 +10,8 @@ void main() {
     final attention = File('lib/ui/attention_screen.dart').readAsStringSync();
     final removed = File('lib/ui/removed_stock_screen.dart').readAsStringSync();
     final review = File('lib/ui/medicine_review_screen.dart').readAsStringSync();
+    final editor = File('lib/ui/editor_screen.dart').readAsStringSync();
+    final versions = File('lib/ui/version_history_screen.dart').readAsStringSync();
 
     expect(
       profile,
@@ -85,5 +87,23 @@ void main() {
         'onTap: _leaving || _busy\n              ? null\n              : () => unawaited(_openSavedMatch(record, scanDraft))',
       ),
     );
+
+    expect(editor, contains('bool _supplierOpening = false;'));
+    expect(
+      editor,
+      contains('if (_busy || _supplierOpening || !mounted) return;'),
+    );
+    expect(
+      editor,
+      contains('onTap: _busy || _supplierOpening ? null : _selectSupplier'),
+    );
+
+    expect(
+      versions,
+      contains('class _VersionHistoryScreenState extends State<VersionHistoryScreen>'),
+    );
+    expect(versions, contains('bool _restoring = false;'));
+    expect(versions, contains('if (_restoring || !mounted) return;'));
+    expect(versions, contains('onPressed: _restoring'));
   });
 }
