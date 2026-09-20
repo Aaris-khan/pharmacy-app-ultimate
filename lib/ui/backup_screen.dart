@@ -64,12 +64,18 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       final picked = await _service.pickBackupFile();
       if (!mounted || picked == null) return;
-      final review = await _reviewFile(picked);
-      if (!mounted || review == null) return;
+      // Cancelling the picker keeps the previously reviewed backup, but once
+      // the owner chooses a replacement file that old review must stop being
+      // actionable immediately. If the replacement is corrupt, stale or cannot
+      // be read, Restore therefore stays fail-closed instead of falling back to
+      // a different file than the one the owner just selected.
       setState(() {
         _pickedFile = picked;
-        _review = review;
+        _review = null;
       });
+      final review = await _reviewFile(picked);
+      if (!mounted || review == null) return;
+      setState(() => _review = review);
     } on MissingPluginException {
       if (mounted) {
         setState(

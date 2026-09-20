@@ -45,6 +45,28 @@ void main() {
       backup,
       contains('if (review == null || _restoring || _sharing || _reading) return;'),
     );
+
+    // Cancelling the picker may preserve the currently reviewed backup. Once a
+    // different file is actually selected, however, its predecessor must stop
+    // being restorable before the replacement is parsed or compared.
+    final pickerCancelGuard =
+        backup.indexOf('if (!mounted || picked == null) return;');
+    final replacementFile = backup.indexOf(
+      '_pickedFile = picked;',
+      pickerCancelGuard,
+    );
+    final retireOldReview = backup.indexOf(
+      '_review = null;',
+      replacementFile,
+    );
+    final reviewReplacement = backup.indexOf(
+      'final review = await _reviewFile(picked);',
+      retireOldReview,
+    );
+    expect(pickerCancelGuard, greaterThanOrEqualTo(0));
+    expect(replacementFile, greaterThan(pickerCancelGuard));
+    expect(retireOldReview, greaterThan(replacementFile));
+    expect(reviewReplacement, greaterThan(retireOldReview));
     expect(
       supplier,
       contains('final messenger = ScaffoldMessenger.maybeOf(context);'),
