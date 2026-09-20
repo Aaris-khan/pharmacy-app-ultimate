@@ -31,6 +31,7 @@ void main() {
     expect(scannerFlow, contains('if (_routeOpening || !mounted) return;'));
     expect(scannerFlow, contains('setState(() => _routeOpening = true);'));
     expect(scannerFlow, contains('await _search();'));
+    expect(scannerFlow, contains('!_controllerListening ||'));
     expect(scannerFlow, contains('await _discoverOnline(captured);'));
     expect(scannerFlow, contains('} finally {'));
     expect(scannerFlow, contains('setState(() => _routeOpening = false);'));
