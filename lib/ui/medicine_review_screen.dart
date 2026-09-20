@@ -608,9 +608,14 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       await widget.controller.applyStockAdjustment(stockReview);
       final confirmedRecord = widget.controller.snapshot.records[expectedId];
       if (confirmedRecord != null && !confirmedRecord.archived) {
-        await OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
-          draft,
-          confirmedRecord,
+        // Stock receipt is already durable. Keep adaptive OCR memory outside the
+        // pharmacist-facing completion path for the same reason as new-stock
+        // confirmation above.
+        unawaited(
+          OfflineRecognitionMemoryService.instance.learnFromConfirmedScan(
+            draft,
+            confirmedRecord,
+          ),
         );
       }
       if (!mounted) return;
