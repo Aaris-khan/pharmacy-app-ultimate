@@ -1216,10 +1216,16 @@ void showError(BuildContext context, Object error) {
   );
 }
 
+void showSavedWithMessenger(
+  ScaffoldMessengerState? messenger,
+  String message,
+) {
+  messenger?.showSnackBar(
+    SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+  );
+}
+
 void showSaved(BuildContext context, String message) {
-  if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-    );
-  }
+  if (!context.mounted) return;
+  showSavedWithMessenger(ScaffoldMessenger.maybeOf(context), message);
 }
