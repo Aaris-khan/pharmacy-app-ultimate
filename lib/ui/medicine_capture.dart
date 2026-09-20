@@ -166,25 +166,36 @@ Future<void> openMedicineCapture(
           builder: (_) => const ScannerScreen(autoSubmit: true),
         ),
       );
-      if (scan != null) {
-        await queue.addEvidence(
-          scan.evidence.isNotEmpty
-              ? scan.evidence
-              : [
-                  MedicineFrameEvidence(
-                    text: scan.text,
-                    barcode: scan.barcode,
-                    source: 'AI Hub camera',
-                  ),
-                ],
-        );
-      }
+      if (scan == null || !context.mounted) return;
+      await queue.addEvidence(
+        scan.evidence.isNotEmpty
+            ? scan.evidence
+            : [
+                MedicineFrameEvidence(
+                  text: scan.text,
+                  barcode: scan.barcode,
+                  source: 'AI Hub camera',
+                ),
+              ],
+      );
     } else {
       final media = MediaImportService();
       final source = await media.pick(choice == 'video' ? 'video' : 'image');
       if (source == null) return;
       try {
-        await queue.addFile(source.path, kind: choice, title: source.name);
+        // The picker can outlive the route that launched it. Do not turn a
+        // retired capture flow into a durable intake job, and keep checking
+        // during a potentially large private-file copy.
+        if (!context.mounted) return;
+        await queue.addFile(
+          source.path,
+          kind: choice,
+          title: source.name,
+          cancelled: () => !context.mounted,
+        );
+      } on MedicineIntakeEnqueueCancelled {
+        // Route cancellation is expected; queue.addFile owns rollback/cleanup
+        // of any private copy or durable row it had already started.
       } finally {
         await media.cleanup([source.path]);
       }
