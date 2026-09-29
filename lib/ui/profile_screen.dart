@@ -58,6 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove all inventory?'),
+        scrollable: true,
         content: Text(
           '${review.activeCount} active stock ${review.activeCount == 1 ? 'entry' : 'entries'} will be removed from search, dashboard and totals. They remain in removed history so you can restore them. The exact reviewed inventory snapshot must still match when you confirm.',
         ),
@@ -81,6 +82,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           title: const Text('Confirm removal'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,6 +313,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
             context: context,
             builder: (ctx) => AlertDialog(
               title: const Text('Undo the latest change?'),
+              scrollable: true,
               content: Text(
                 'Aaris will reverse the latest saved change only:\n\n${review.label}\n\nRevision ${review.eventRevision} must still be current. If activity changes before the commit, this Undo is rejected instead of touching a newer change.',
               ),

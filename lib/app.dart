@@ -250,7 +250,10 @@ class _ShellState extends State<_Shell> {
               final compactNavigation =
                   navigationWidth < 380 || navigationLabelHeight > 15;
               final navigationHeight =
-                  navigationLabelHeight > 16 ? 80.0 : 72.0;
+                  72.0 +
+                  (navigationLabelHeight - 11)
+                      .clamp(0.0, 24.0)
+                      .toDouble();
               return NavigationBar(
                 height: navigationHeight,
                 labelBehavior: compactNavigation

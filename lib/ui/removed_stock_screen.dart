@@ -338,6 +338,7 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('Restore this removed stock?'),
+            scrollable: true,
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,

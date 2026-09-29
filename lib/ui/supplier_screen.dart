@@ -252,6 +252,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           title: const Text('Supplier को stock दे दिया?'),
+          scrollable: true,
           content: Text(
             '${review.lines.length} stock entries की return list share हो गई है. '
             'सिर्फ तभी Returned करें जब physical stock supplier को सच में hand over हो चुका हो. '

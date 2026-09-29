@@ -187,4 +187,52 @@ void main() {
     );
   });
 
+
+  test('bottom navigation height grows with accessibility text', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(source, contains('(navigationLabelHeight - 11)'));
+    expect(source, contains('.clamp(0.0, 24.0)'));
+    expect(
+      source,
+      isNot(contains('navigationLabelHeight > 16 ? 80.0 : 72.0')),
+    );
+  });
+
+  test('custom warning settings cannot save without an explicit edit', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+
+    expect(
+      source,
+      contains(
+        'bool get _hasChanges => _shortDaysChanged || _monthsChanged;',
+      ),
+    );
+    expect(source, contains('onPressed: _hasChanges'));
+    expect(
+      RegExp(r'_error = null').allMatches(source).length,
+      greaterThanOrEqualTo(4),
+    );
+    expect(source, contains('textInputAction: TextInputAction.next'));
+    expect(source, contains('textInputAction: TextInputAction.done'));
+  });
+
+  test('management confirmations stay scrollable on short or large-text screens', () {
+    const minimumScrollableDialogs = <String, int>{
+      'lib/ui/editor_screen.dart': 1,
+      'lib/ui/profile_screen.dart': 3,
+      'lib/ui/removed_stock_screen.dart': 1,
+      'lib/ui/supplier_screen.dart': 1,
+    };
+
+    for (final entry in minimumScrollableDialogs.entries) {
+      final source = File(entry.key).readAsStringSync();
+      expect(
+        RegExp(r'scrollable:\s*true').allMatches(source).length,
+        greaterThanOrEqualTo(entry.value),
+        reason: '${entry.key} must keep confirmation content reachable.',
+      );
+    }
+  });
+
 }

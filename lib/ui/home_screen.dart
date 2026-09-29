@@ -866,6 +866,8 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
   bool _monthsChanged = false;
   String? _error;
 
+  bool get _hasChanges => _shortDaysChanged || _monthsChanged;
+
   @override
   void initState() {
     super.initState();
@@ -910,6 +912,7 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
                     _shortDaysChanged = true;
                     _selectedDays = value;
                     _days.text = '$value';
+                    _error = null;
                   }),
                 ),
             ],
@@ -920,8 +923,10 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
             onChanged: (_) => setState(() {
               _shortDaysChanged = true;
               _selectedDays = null;
+              _error = null;
             }),
             keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
               labelText: 'Custom short warning · days',
             ),
@@ -943,6 +948,7 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
                     _monthsChanged = true;
                     _selectedMonths = value;
                     _months.text = '$value';
+                    _error = null;
                   }),
                 ),
             ],
@@ -953,8 +959,10 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
             onChanged: (_) => setState(() {
               _monthsChanged = true;
               _selectedMonths = null;
+              _error = null;
             }),
             keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.done,
             decoration: const InputDecoration(
               labelText: 'Custom month warning · months',
             ),
@@ -975,8 +983,9 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
         child: const Text('Cancel'),
       ),
       FilledButton(
-        onPressed: () {
-          try {
+        onPressed: _hasChanges
+            ? () {
+                try {
             final shortDays = int.tryParse(_days.text);
             final months = int.tryParse(_months.text);
             if (shortDays == null || months == null) {
@@ -994,15 +1003,16 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
                 monthsChanged: _monthsChanged,
               ),
             );
-          } catch (e) {
-            setState(
-              () => _error = e.toString().replaceFirst(
-                'FormatException: ',
-                '',
-              ),
-            );
-          }
-        },
+                } catch (e) {
+                  setState(
+                    () => _error = e.toString().replaceFirst(
+                      'FormatException: ',
+                      '',
+                    ),
+                  );
+                }
+              }
+            : null,
         child: const Text('Save'),
       ),
     ],

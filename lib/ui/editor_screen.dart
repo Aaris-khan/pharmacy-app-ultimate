@@ -576,6 +576,7 @@ class _EditorScreenState extends State<EditorScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(title),
+          scrollable: true,
           content: Text(message),
           actions: [
             TextButton(
