@@ -321,6 +321,65 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
+class TactileInkWell extends StatefulWidget {
+  const TactileInkWell({
+    super.key,
+    required this.onTap,
+    required this.borderRadius,
+    required this.child,
+    this.splashColor,
+    this.highlightColor,
+    this.pressedScale = .985,
+  });
+
+  final VoidCallback? onTap;
+  final BorderRadius borderRadius;
+  final Widget child;
+  final Color? splashColor;
+  final Color? highlightColor;
+  final double pressedScale;
+
+  @override
+  State<TactileInkWell> createState() => _TactileInkWellState();
+}
+
+class _TactileInkWellState extends State<TactileInkWell> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (!mounted || _pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
+  void didUpdateWidget(covariant TactileInkWell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.onTap == null) _pressed = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final enabled = widget.onTap != null;
+    return AnimatedScale(
+      scale: enabled && _pressed ? widget.pressedScale : 1,
+      duration: reduceMotion
+          ? Duration.zero
+          : Duration(milliseconds: _pressed ? 70 : 150),
+      curve: Curves.easeOutCubic,
+      child: InkWell(
+        onTap: widget.onTap,
+        onHighlightChanged: enabled ? _setPressed : null,
+        borderRadius: widget.borderRadius,
+        splashColor: widget.splashColor,
+        highlightColor: widget.highlightColor,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 class GlassIconButton extends StatelessWidget {
   const GlassIconButton({
     super.key,
@@ -350,9 +409,12 @@ class GlassIconButton extends StatelessWidget {
       elevation: 1,
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
+        child: TactileInkWell(
           onTap: onPressed,
           borderRadius: BorderRadius.circular(size * .5),
+          splashColor: color.withValues(alpha: .10),
+          highlightColor: color.withValues(alpha: .05),
+          pressedScale: .94,
           child: SizedBox(
             width: size,
             height: size,
@@ -393,11 +455,12 @@ class RaisedActionButton extends StatelessWidget {
         elevation: 1.1,
         child: Material(
           color: Colors.transparent,
-          child: InkWell(
+          child: TactileInkWell(
             onTap: onPressed,
             borderRadius: BorderRadius.circular(radius),
             splashColor: primary.withValues(alpha: .10),
             highlightColor: primary.withValues(alpha: .05),
+            pressedScale: .975,
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: height),
               child: Padding(
@@ -1048,9 +1111,12 @@ class MedicineCard extends StatelessWidget {
             elevation: 1,
             child: Material(
               color: Colors.transparent,
-              child: InkWell(
+              child: TactileInkWell(
                 onTap: onTap,
                 borderRadius: BorderRadius.circular(28),
+                splashColor: statusColor.withValues(alpha: .08),
+                highlightColor: statusColor.withValues(alpha: .04),
+                pressedScale: .992,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 15),
                   child: Column(
