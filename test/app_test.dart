@@ -321,7 +321,7 @@ void main() {
     await tester.pumpWidget(PharmacyApp(controller: c));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    for (final tab in ['Stock', 'Aaris Brain', 'Calculator', 'Profile']) {
+    for (final tab in ['Stock', 'Aaris Brain', 'Insights', 'Profile']) {
       await tester.tap(find.text(tab).last);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'Overflow in $tab');
@@ -329,7 +329,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     c.dispose();
   });
-  testWidgets('Calculator and Aaris Brain have reviewable screenshots', (
+  testWidgets('Insights and Aaris Brain have reviewable screenshots', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -345,9 +345,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Calculator'));
+    await tester.tap(find.text('Insights'));
     await tester.pumpAndSettle();
-    await screenshot(tester, key, 'calculator');
+    await screenshot(tester, key, 'insights');
     await tester.tap(find.text('Aaris Brain').last);
     await tester.pumpAndSettle();
     await screenshot(tester, key, 'aaris-brain');
