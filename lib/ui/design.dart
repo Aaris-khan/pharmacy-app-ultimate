@@ -994,11 +994,19 @@ class MedicineCard extends StatelessWidget {
     };
     final timeline =
         state.status == StockStatus.shortExpiry || state.status == StockStatus.monthExpiry;
+    final semanticLabel = <String>[
+      record.title,
+      state.label,
+      if (record.quantity != null) '${record.quantity} units in stock',
+      if (record.unitPricePaise != null)
+        'unit cost ${money(record.unitPricePaise!)}',
+      if (record.address.isNotEmpty) record.address,
+    ].join(', ');
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Semantics(
-        label: '${record.title}, ${state.label}, ${record.address}',
+        label: semanticLabel,
         button: true,
         child: CustomPaint(
           foregroundPainter: _ExpiryBorder(
@@ -1108,6 +1116,24 @@ class MedicineCard extends StatelessWidget {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
+                          if (record.quantity != null)
+                            Text(
+                              'Qty ${record.quantity}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: ink,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          if (record.unitPricePaise != null)
+                            Text(
+                              'Cost ${money(record.unitPricePaise!)}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: ink,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                         ],
                       ),
                       if (record.address.isNotEmpty)
@@ -1212,7 +1238,9 @@ void showError(BuildContext context, Object error) {
     RegExp(r'^(FormatException|Bad state|StateError):\s*'),
     '',
   );
-  ScaffoldMessenger.of(context).showSnackBar(
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(
     SnackBar(
       content: Text(text),
       backgroundColor: red,
@@ -1226,7 +1254,9 @@ void showSavedWithMessenger(
   ScaffoldMessengerState? messenger,
   String message,
 ) {
-  messenger?.showSnackBar(
+  if (messenger == null) return;
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(
     SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
   );
 }
