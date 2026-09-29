@@ -565,7 +565,7 @@ void main() {
       contains('TactileInkWell('),
     );
 
-    final taskStart = attention.indexOf('class _TaskCard');
+    final taskStart = attention.indexOf('class _AttentionCard');
     expect(taskStart, greaterThanOrEqualTo(0));
     expect(attention.substring(taskStart), contains('TactileInkWell('));
 
