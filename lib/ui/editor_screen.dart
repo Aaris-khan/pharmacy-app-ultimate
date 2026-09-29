@@ -332,8 +332,13 @@ class _EditorScreenState extends State<EditorScreen> {
     suffixIcon: suffixIcon,
   );
 
-  Widget _raisedFieldSurface(Widget child) =>
-      GlassPanel(tint: Colors.white, radius: 18, elevation: 1.12, child: child);
+  Widget _raisedFieldSurface(Widget child) => GlassPanel(
+    tint: Colors.white,
+    radius: 18,
+    elevation: 1.12,
+    padding: const EdgeInsets.only(top: 8),
+    child: child,
+  );
 
   Widget _saltField({TextEditingController? controller, int? extraIndex}) {
     final isPrimary = controller == null;
@@ -1136,6 +1141,7 @@ class _EditorScreenState extends State<EditorScreen> {
     tint: Colors.white,
     radius: 18,
     elevation: 1.12,
+    padding: const EdgeInsets.only(top: 8),
     child: DateEntryField(
       controller: controller,
       label: label,
