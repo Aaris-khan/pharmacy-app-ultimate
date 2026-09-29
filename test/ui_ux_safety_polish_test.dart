@@ -552,7 +552,7 @@ void main() {
     ]) {
       final source = File(path).readAsStringSync();
       expect(source, contains('TactileInkWell('), reason: path);
-      expect(RegExp(r'\\bInkWell\\(').hasMatch(source), isFalse, reason: path);
+      expect(RegExp(r'\bInkWell\(').hasMatch(source), isFalse, reason: path);
     }
 
     final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
