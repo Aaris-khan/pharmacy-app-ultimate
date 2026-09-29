@@ -986,23 +986,23 @@ class _WarningSettingsDialogState extends State<_WarningSettingsDialog> {
         onPressed: _hasChanges
             ? () {
                 try {
-            final shortDays = int.tryParse(_days.text);
-            final months = int.tryParse(_months.text);
-            if (shortDays == null || months == null) {
-              throw const FormatException('Enter whole numbers.');
-            }
-            final value = WarningSettings.fromJson({
-              'shortDays': shortDays,
-              'months': months,
-            });
-            Navigator.pop(
-              context,
-              _WarningSettingsEdit(
-                settings: value,
-                shortDaysChanged: _shortDaysChanged,
-                monthsChanged: _monthsChanged,
-              ),
-            );
+                  final shortDays = int.tryParse(_days.text);
+                  final months = int.tryParse(_months.text);
+                  if (shortDays == null || months == null) {
+                    throw const FormatException('Enter whole numbers.');
+                  }
+                  final value = WarningSettings.fromJson({
+                    'shortDays': shortDays,
+                    'months': months,
+                  });
+                  Navigator.pop(
+                    context,
+                    _WarningSettingsEdit(
+                      settings: value,
+                      shortDaysChanged: _shortDaysChanged,
+                      monthsChanged: _monthsChanged,
+                    ),
+                  );
                 } catch (e) {
                   setState(
                     () => _error = e.toString().replaceFirst(
