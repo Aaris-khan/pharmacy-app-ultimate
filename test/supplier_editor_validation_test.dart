@@ -45,6 +45,7 @@ void main() {
       final fields = find.byType(TextFormField);
       expect(fields, findsNWidgets(7));
       await tester.enterText(fields.at(5), 'address');
+      await tester.pump();
       await tester.tap(find.text('Save supplier'));
       await tester.pump();
 
@@ -102,6 +103,7 @@ void main() {
 
       final fields = find.byType(TextFormField);
       await tester.enterText(fields.at(5), List<String>.filled(101, 'x').join());
+      await tester.pump();
       await tester.tap(find.text('Save supplier'));
       await tester.pump();
 

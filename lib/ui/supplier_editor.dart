@@ -230,11 +230,12 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       return;
     }
 
+    final old = widget.supplier;
+    if (old != null && _matchesOriginalSupplier()) return;
+
     var completed = false;
     setState(() => _busy = true);
     try {
-      final old = widget.supplier;
-      if (old != null && _matchesOriginalSupplier()) return;
       final supplier = _draftSupplier(returnDays);
       await widget.controller.saveSupplier(
         supplier,

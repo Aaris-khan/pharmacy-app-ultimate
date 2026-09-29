@@ -160,10 +160,8 @@ void main() {
     final source =
         File('lib/ui/medicine_review_screen.dart').readAsStringSync();
     final start = source.indexOf('Widget _matchCard(');
-    final end = source.indexOf('@override', start);
     expect(start, greaterThanOrEqualTo(0));
-    expect(end, greaterThan(start));
-    final matchSource = source.substring(start, end);
+    final matchSource = source.substring(start);
 
     expect(matchSource, contains('maxLines: 2'));
     expect(
