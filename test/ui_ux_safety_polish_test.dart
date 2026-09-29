@@ -43,4 +43,33 @@ void main() {
       greaterThanOrEqualTo(2),
     );
   });
+
+  test('management navigation describes the screen the user actually opens', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(source, contains("label: 'Insights'"));
+    expect(source, contains('Icons.insights_outlined'));
+    expect(source, isNot(contains("label: 'Calculator'")));
+  });
+
+  test('snapshot uses on-hand inventory value instead of summing unit costs', () {
+    final source = File('lib/ui/stats_screen.dart').readAsStringSync();
+
+    expect(source, contains("label: 'Inventory value'"));
+    expect(source, contains('inventory.onHandValue'));
+    expect(
+      source,
+      isNot(contains('_money(inventory.totalEnteredAmountPaise)')),
+    );
+  });
+
+  test('medicine editor exposes the stock facts its model already persists', () {
+    final source = File('lib/ui/editor_screen.dart').readAsStringSync();
+
+    expect(source, contains("'Stock quantity'"));
+    expect(source, contains("label: 'Medicine form'"));
+    expect(source, contains("'Unit cost (₹)'"));
+    expect(source, contains('DropdownButtonFormField<String>'));
+    expect(source, contains('bool _matchesOriginalRecord()'));
+  });
 }
