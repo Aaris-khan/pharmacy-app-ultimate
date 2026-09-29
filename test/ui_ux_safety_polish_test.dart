@@ -328,14 +328,15 @@ void main() {
     );
   });
 
-  test('latest user feedback replaces stale snackbar feedback', () {
+  test('latest user feedback drops stale snackbar queues', () {
     final source = File('lib/ui/design.dart').readAsStringSync();
     final feedback = source.substring(source.indexOf('void showError'));
 
     expect(
-      RegExp(r'removeCurrentSnackBar\(\)').allMatches(feedback).length,
+      RegExp(r'clearSnackBars\(\)').allMatches(feedback).length,
       greaterThanOrEqualTo(2),
     );
+    expect(feedback, isNot(contains('removeCurrentSnackBar()')));
   });
 
   test('supplier fields release the keyboard when the user taps away', () {
@@ -355,5 +356,59 @@ void main() {
     expect(source, contains('Icons.home_outlined'));
     expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
   });
+
+  test('high-risk supplier return and backup restore actions are explicit', () {
+    final supplier = File('lib/ui/supplier_screen.dart').readAsStringSync();
+    final backup = File('lib/ui/backup_screen.dart').readAsStringSync();
+
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,220}child:\s*const Text\('Mark returned'\)",
+      ).hasMatch(supplier),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,260}child:\s*const Text\('Restore backup'\)",
+      ).hasMatch(backup),
+      isTrue,
+    );
+  });
+
+  test('medicine capture chooser can use the full safe viewport', () {
+    final source = File('lib/ui/medicine_capture.dart').readAsStringSync();
+    final start = source.indexOf('showModalBottomSheet<String>');
+    expect(start, greaterThanOrEqualTo(0));
+    final chooser = source.substring(start, source.indexOf('if (choice == null', start));
+
+    expect(chooser, contains('useSafeArea: true'));
+    expect(chooser, contains('isScrollControlled: true'));
+    expect(chooser, contains('showDragHandle: true'));
+    expect(chooser, contains('SingleChildScrollView('));
+  });
+
+  test('today work beacon keeps priority and next action readable', () {
+    final source = File('lib/ui/autopilot_beacon.dart').readAsStringSync();
+
+    expect(
+      RegExp(r'maxLines:\s*2').allMatches(source).length,
+      greaterThanOrEqualTo(2),
+    );
+    expect(source, isNot(contains('maxLines: 1')));
+  });
+
+  test('shared screen intros adapt before text and icon collide', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class ScreenIntro');
+    final end = source.indexOf('class FlowSteps', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final intro = source.substring(start, end);
+
+    expect(intro, contains('LayoutBuilder('));
+    expect(intro, contains('constraints.maxWidth < 330'));
+    expect(intro, contains('scaler.scale(27) > 38'));
+  });
+
 
 }
