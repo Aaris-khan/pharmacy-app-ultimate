@@ -1076,7 +1076,7 @@ class MedicineCard extends StatelessWidget {
                                   Text(
                                     record.manufacturer,
                                     style: const TextStyle(color: muted, fontSize: 12),
-                                    maxLines: 1,
+                                    maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 if (record.salt.isNotEmpty)

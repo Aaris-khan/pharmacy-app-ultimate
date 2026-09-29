@@ -144,4 +144,49 @@ void main() {
     expect(taskSource, isNot(contains('maxLines: 1')));
   });
 
+  test('bottom navigation adapts instead of crushing labels on small screens', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(source, contains('navigationWidth < 380'));
+    expect(source, contains('navigationLabelHeight > 15'));
+    expect(
+      source,
+      contains('NavigationDestinationLabelBehavior.onlyShowSelected'),
+    );
+    expect(source, contains('height: navigationHeight'));
+  });
+
+  test('saved medicine matches keep enough identity visible before selection', () {
+    final source =
+        File('lib/ui/medicine_review_screen.dart').readAsStringSync();
+    final start = source.indexOf('Widget _matchCard(');
+    final end = source.indexOf('@override', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final matchSource = source.substring(start, end);
+
+    expect(matchSource, contains('maxLines: 2'));
+    expect(
+      matchSource,
+      contains('crossAxisAlignment: CrossAxisAlignment.start'),
+    );
+  });
+
+  test('medicine cards do not force manufacturer identity to one line', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class MedicineCard');
+    final end = source.indexOf('class _ExpiryBorder', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final cardSource = source.substring(start, end);
+
+    expect(cardSource, contains('record.manufacturer'));
+    expect(
+      RegExp(
+        r'record\.manufacturer,[\s\S]{0,180}maxLines:\s*2',
+      ).hasMatch(cardSource),
+      isTrue,
+    );
+  });
+
 }

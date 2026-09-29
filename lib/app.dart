@@ -244,7 +244,18 @@ class _ShellState extends State<_Shell> {
               final digest = widget.autopilot.digest;
               final issues = digest.isReady ? digest.navigationBadgeCount : 0;
               final badgeCount = issues > 99 ? 99 : issues;
+              final navigationWidth = MediaQuery.sizeOf(context).width;
+              final navigationLabelHeight =
+                  MediaQuery.textScalerOf(context).scale(11);
+              final compactNavigation =
+                  navigationWidth < 380 || navigationLabelHeight > 15;
+              final navigationHeight =
+                  navigationLabelHeight > 16 ? 80.0 : 72.0;
               return NavigationBar(
+                height: navigationHeight,
+                labelBehavior: compactNavigation
+                    ? NavigationDestinationLabelBehavior.onlyShowSelected
+                    : NavigationDestinationLabelBehavior.alwaysShow,
                 selectedIndex: tab,
                 onDestinationSelected: _selectTab,
                 destinations: [
