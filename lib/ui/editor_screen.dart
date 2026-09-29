@@ -207,12 +207,79 @@ class _EditorScreenState extends State<EditorScreen> {
   ].map((value) => value.trim()).where((value) => value.isNotEmpty).join(' + ');
 
   // Text controllers and FormField state already repaint the edited field.
-  // The parent screen only needs one rebuild when unsaved-change protection
-  // first becomes active; rebuilding this large form for every character makes
-  // ordinary typing needlessly expensive on low-end devices.
+  // Rebuild the parent only when the semantic dirty bit actually changes.
+  // Existing medicines can therefore become clean again when the pharmacist
+  // edits a value and then restores the exact persisted facts.
+  bool _matchesOriginalRecord() {
+    final record = widget.record;
+    if (record == null || _restocking) return false;
+
+    // Compare only fields the editor can change. This runs while typing, so it
+    // must stay allocation-light even when OCR/search text is large.
+    final textFacts = <String, String>{
+      'name': record.name,
+      'brand': record.brand,
+      'manufacturer': record.manufacturer,
+      'strength': record.strength,
+      'barcode': record.barcode,
+      'batchNumber': record.batchNumber,
+      'block': record.block,
+      'row': record.row,
+      'vertical': record.vertical,
+      'location': record.location,
+      'notes': record.notes,
+      'ocrText': record.ocrText,
+    };
+    for (final entry in textFacts.entries) {
+      if (fields[entry.key]!.text.trim() != entry.value) return false;
+    }
+    if (_saltValue != record.salt ||
+        _form != record.form ||
+        _supplierId != record.supplierId) {
+      return false;
+    }
+
+    final quantityText = fields['quantity']!.text.trim();
+    final quantity = quantityText.isEmpty ? null : int.tryParse(quantityText);
+    if (quantityText.isNotEmpty && quantity == null) return false;
+    if (quantity != record.quantity) return false;
+
+    try {
+      if (parseMoney(fields['price']!.text) != record.unitPricePaise) {
+        return false;
+      }
+      final mfg = inputDateToIso(
+        fields['mfg']!.text,
+        monthOnly: _mfgMonthOnly,
+      );
+      final expiry = inputDateToIso(
+        fields['expiry']!.text,
+        monthOnly: _expiryMonthOnly,
+      );
+      final recordMfg = record.mfg == null
+          ? null
+          : record.mfgMonthOnly
+          ? dateText(record.mfg!).substring(0, 7)
+          : dateText(record.mfg!);
+      final recordExpiry = record.expiry == null
+          ? null
+          : record.expiryMonthOnly
+          ? dateText(record.expiry!).substring(0, 7)
+          : dateText(record.expiry!);
+      return mfg == recordMfg && expiry == recordExpiry;
+    } catch (_) {
+      // Partially typed money/date input is still an unsaved edit. Validation
+      // remains authoritative when Save is pressed.
+      return false;
+    }
+  }
+
   void _markDirty() {
-    if (_dirty) return;
-    setState(() => _dirty = true);
+    final nextDirty = widget.record == null || _restocking
+        ? true
+        : !_matchesOriginalRecord();
+    if (_dirty == nextDirty) return;
+    setState(() => _dirty = nextDirty);
   }
 
   void _finishAndPop(String message) {
@@ -227,15 +294,16 @@ class _EditorScreenState extends State<EditorScreen> {
     if (_busy) return;
     setState(() {
       _extraSaltControllers.add(TextEditingController());
-      _dirty = true;
     });
+    _markDirty();
   }
 
   void _removeSalt(int index) {
     if (_busy || index < 0 || index >= _extraSaltControllers.length) return;
     final controller = _extraSaltControllers.removeAt(index);
     controller.dispose();
-    setState(() => _dirty = true);
+    setState(() {});
+    _markDirty();
   }
 
   OutlineInputBorder _editorBorder({Color? color, double width = 1}) =>
@@ -254,6 +322,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }) => InputDecoration(
     labelText: label,
     hintText: hint,
+    floatingLabelBehavior: FloatingLabelBehavior.always,
     filled: false,
     counterText: '',
     alignLabelWithHint: multiline,
@@ -263,8 +332,13 @@ class _EditorScreenState extends State<EditorScreen> {
     suffixIcon: suffixIcon,
   );
 
-  Widget _raisedFieldSurface(Widget child) =>
-      GlassPanel(tint: Colors.white, radius: 18, elevation: 1.12, child: child);
+  Widget _raisedFieldSurface(Widget child) => GlassPanel(
+    tint: Colors.white,
+    radius: 18,
+    elevation: 1.12,
+    padding: const EdgeInsets.only(top: 8),
+    child: child,
+  );
 
   Widget _saltField({TextEditingController? controller, int? extraIndex}) {
     final isPrimary = controller == null;
@@ -383,14 +457,14 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted || created == null) return;
       setState(() {
         _supplierId = created;
-        _dirty = true;
       });
+      _markDirty();
       return;
     }
       setState(() {
         _supplierId = selected;
-        _dirty = true;
       });
+      _markDirty();
     } finally {
       if (mounted) setState(() => _supplierOpening = false);
     }
@@ -978,8 +1052,8 @@ class _EditorScreenState extends State<EditorScreen> {
         text: next,
         selection: TextSelection.collapsed(offset: next.length),
       );
-      _dirty = true;
     });
+    _markDirty();
   }
 
   Widget _field(
@@ -1020,6 +1094,43 @@ class _EditorScreenState extends State<EditorScreen> {
     ),
   );
 
+  Widget _formField() {
+    final options = <String>['', ...forms];
+    if (_form.isNotEmpty && !options.contains(_form)) options.add(_form);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: _raisedFieldSurface(
+        DropdownButtonFormField<String>(
+          initialValue: _form,
+          isExpanded: true,
+          decoration: _editorDecoration(
+            label: 'Medicine form',
+            hint: 'Not specified',
+          ),
+          items: [
+            for (final value in options)
+              DropdownMenuItem<String>(
+                value: value,
+                child: Text(
+                  value.isEmpty ? 'Not specified' : value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) {
+                  final next = value ?? '';
+                  if (next == _form) return;
+                  setState(() => _form = next);
+                  _markDirty();
+                },
+        ),
+      ),
+    );
+  }
+
   Widget _dateField({
     required TextEditingController controller,
     required String label,
@@ -1030,6 +1141,7 @@ class _EditorScreenState extends State<EditorScreen> {
     tint: Colors.white,
     radius: 18,
     elevation: 1.12,
+    padding: const EdgeInsets.only(top: 8),
     child: DateEntryField(
       controller: controller,
       label: label,
@@ -1282,28 +1394,40 @@ class _EditorScreenState extends State<EditorScreen> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _field(
-                              'strength',
-                              'Strength',
-                              hint: '500 mg',
-                            ),
+                      ResponsivePair(
+                        first: _field(
+                          'strength',
+                          'Strength',
+                          hint: '500 mg',
+                        ),
+                        second: _formField(),
+                      ),
+                      ResponsivePair(
+                        first: _field(
+                          'quantity',
+                          'Stock quantity',
+                          hint: 'e.g. 20',
+                          keyboard: TextInputType.number,
+                        ),
+                        second: _field(
+                          'price',
+                          'Unit cost (₹)',
+                          hint: 'e.g. 2.50',
+                          keyboard: const TextInputType.numberWithOptions(
+                            decimal: true,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _field(
-                              'price',
-                              'Amount (₹)',
-                              hint: '0.00',
-                              keyboard: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                            ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          'Use the same unit for quantity and cost — for example, tablets with tablet cost or strips with strip cost.',
+                          style: TextStyle(
+                            color: muted,
+                            fontSize: 11.5,
+                            height: 1.4,
                           ),
-                        ],
+                        ),
                       ),
                       _field(
                         'location',

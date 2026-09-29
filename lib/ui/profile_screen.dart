@@ -105,6 +105,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: red,
+                foregroundColor: Colors.white,
+              ),
               onPressed: phrase == 'REMOVE ALL'
                   ? () => Navigator.pop(ctx, true)
                   : null,

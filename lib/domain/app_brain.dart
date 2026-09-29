@@ -671,6 +671,14 @@ AppSection? _sectionIntent(String text) {
     return AppSection.ai;
   }
   if (_containsAny(text, const [
+    'open insights',
+    'insights kholo',
+    'analytics',
+    'pharmacy snapshot',
+    'snapshot kholo',
+    'इनसाइट्स खोलो',
+    // Keep the old Calculator phrases as backwards-compatible aliases. The
+    // fourth tab now presents pharmacy insights rather than a calculator.
     'open calculator',
     'calculator kholo',
     'stats kholo',

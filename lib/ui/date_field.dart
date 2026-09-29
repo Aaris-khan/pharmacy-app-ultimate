@@ -171,6 +171,7 @@ class DateEntryField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         hintText: monthOnly ? 'MM/YYYY' : 'DD/MM/YYYY',
+        floatingLabelBehavior: FloatingLabelBehavior.always,
         helperText: showHelper
             ? monthOnly
                   ? 'Type 042026 → 04/2026. Valid through the end of the month.'

@@ -51,7 +51,7 @@
   velocity-aware reorder queue, editable Order Now and native Android PDF share.
 - Versioned full backup/restore with strict validation, missing-record archiving,
   typed confirmation and Undo. Secure AI keys are excluded.
-- Consistent pharmacy UI across Home, Database, AI, Calculator, Profile, scanner,
+- Consistent pharmacy UI across Home, Stock, Aaris Brain, Insights, Profile, scanner,
   editor, import and backup, with responsive warning cards and shared typography.
 - Voice-search lifecycle repair: device locales, permission retry, serialized
   commands, final-word preservation, stale callback rejection and exit cleanup.

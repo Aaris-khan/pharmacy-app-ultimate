@@ -271,9 +271,9 @@ class _ShellState extends State<_Shell> {
                     label: 'Aaris Brain',
                   ),
                   const NavigationDestination(
-                    icon: Icon(Icons.calculate_outlined),
-                    selectedIcon: Icon(Icons.calculate_rounded),
-                    label: 'Calculator',
+                    icon: Icon(Icons.insights_outlined),
+                    selectedIcon: Icon(Icons.insights_rounded),
+                    label: 'Insights',
                   ),
                   const NavigationDestination(
                     icon: Icon(Icons.person_outline_rounded),
