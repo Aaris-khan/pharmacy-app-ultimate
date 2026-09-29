@@ -44,6 +44,13 @@ void main() {
     );
   });
 
+  test('global inventory removal keeps its final action visibly destructive', () {
+    final source = File('lib/ui/profile_screen.dart').readAsStringSync();
+
+    expect(source, contains("backgroundColor: red"));
+    expect(source, contains("child: const Text('Remove all')"));
+  });
+
   test('management navigation describes the screen the user actually opens', () {
     final source = File('lib/app.dart').readAsStringSync();
 
