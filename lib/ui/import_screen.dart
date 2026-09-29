@@ -213,8 +213,8 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
         body: SafeArea(
           top: false,
           child: ListView(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-          children: [
+            padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
+            children: [
             const ScreenIntro(
               title: 'Add your medicines',
               message:
@@ -299,9 +299,9 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
                       },
                 child: Text(_cancelRequested ? 'Cancelling…' : 'Cancel'),
               ),
+              ],
             ],
-          ],
-        ),
+          ),
         ),
       );
 }
