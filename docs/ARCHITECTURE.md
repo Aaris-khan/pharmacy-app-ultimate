@@ -21,7 +21,7 @@ flowchart TD
   D --> B["Local backup and restore"]
 ```
 
-Bottom navigation is **Home / Database / AI / Calculator / Profile**. Results open
+Bottom navigation is **Home / Stock / Aaris Brain / Insights / Profile**. Results open
 the exact invisible stock ID; they never repeat a name search to find an editor.
 
 ## Layer map
