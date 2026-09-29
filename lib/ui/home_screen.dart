@@ -527,8 +527,12 @@ class _HomeWorkRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: color.withValues(alpha: .12)),
       ),
-      child: InkWell(
+      child: TactileInkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: color.withValues(alpha: .08),
+        highlightColor: color.withValues(alpha: .04),
+        pressedScale: .99,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
@@ -634,14 +638,33 @@ class _OverviewTile extends StatelessWidget {
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  '$count',
-                  style: const TextStyle(
-                    color: ink,
-                    fontSize: 36,
-                    height: 1.2,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -1.2,
+                child: AnimatedSwitcher(
+                  duration:
+                      MediaQuery.maybeOf(context)?.disableAnimations ?? false
+                      ? Duration.zero
+                      : const Duration(milliseconds: 220),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale: Tween<double>(
+                        begin: .94,
+                        end: 1,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  ),
+                  child: Text(
+                    '$count',
+                    key: ValueKey<int>(count),
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 36,
+                      height: 1.2,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1.2,
+                    ),
                   ),
                 ),
               ),
@@ -768,11 +791,12 @@ class _ScanBanner extends StatelessWidget {
     elevation: 1.12,
     child: Material(
       color: Colors.transparent,
-      child: InkWell(
+      child: TactileInkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(22),
         splashColor: primary.withValues(alpha: .10),
         highlightColor: primary.withValues(alpha: .05),
+        pressedScale: .985,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
