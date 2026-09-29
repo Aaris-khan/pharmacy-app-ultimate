@@ -47,6 +47,8 @@ class AarisAutopilotBeacon extends StatelessWidget {
         child: Semantics(
           button: true,
           label: 'आज के काम · $priorityText · $next',
+          onTap: onOpenWorkQueue,
+          excludeSemantics: true,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620),
             child: Material(
