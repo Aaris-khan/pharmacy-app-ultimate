@@ -537,25 +537,43 @@ class ScreenIntro extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 22),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final scaler = MediaQuery.textScalerOf(context);
+        final stack =
+            constraints.maxWidth < 330 || scaler.scale(27) > 38;
+        final copy = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 7),
+            Text(
+              message,
+              style: const TextStyle(color: muted, fontSize: 13, height: 1.5),
+            ),
+          ],
+        );
+
+        if (stack) {
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: 7),
-              Text(
-                message,
-                style: const TextStyle(color: muted, fontSize: 13, height: 1.5),
-              ),
+              DepthIcon(icon, color: color),
+              const SizedBox(height: 12),
+              copy,
             ],
-          ),
-        ),
-        const SizedBox(width: 14),
-        DepthIcon(icon, color: color),
-      ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: copy),
+            const SizedBox(width: 14),
+            DepthIcon(icon, color: color),
+          ],
+        );
+      },
     ),
   );
 }
@@ -1239,7 +1257,9 @@ void showError(BuildContext context, Object error) {
     '',
   );
   final messenger = ScaffoldMessenger.of(context);
-  messenger.removeCurrentSnackBar();
+  // Operation feedback is current state, not a queue. Drop stale messages so
+  // the pharmacist always sees the result of the action they just performed.
+  messenger.clearSnackBars();
   messenger.showSnackBar(
     SnackBar(
       content: Text(text),
@@ -1255,7 +1275,7 @@ void showSavedWithMessenger(
   String message,
 ) {
   if (messenger == null) return;
-  messenger.removeCurrentSnackBar();
+  messenger.clearSnackBars();
   messenger.showSnackBar(
     SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
   );
