@@ -37,8 +37,8 @@ const pharmacyDarkSystemUiOverlayStyle = SystemUiOverlayStyle(
   statusBarColor: Colors.transparent,
   statusBarIconBrightness: Brightness.light,
   statusBarBrightness: Brightness.dark,
-  systemNavigationBarColor: canvas,
-  systemNavigationBarIconBrightness: Brightness.dark,
+  systemNavigationBarColor: ink,
+  systemNavigationBarIconBrightness: Brightness.light,
   systemNavigationBarDividerColor: Colors.transparent,
 );
 
