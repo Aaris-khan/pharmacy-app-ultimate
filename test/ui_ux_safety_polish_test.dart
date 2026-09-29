@@ -353,13 +353,17 @@ void main() {
 
     expect(source, contains('constraints: const BoxConstraints(maxWidth: 720)'));
     expect(source, contains('alignment: Alignment.bottomCenter'));
-    expect(source, contains('Icons.home_outlined'));
-    expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
+    expect(source, contains('Icons.dashboard_outlined'));
+    expect(source, contains('selectedIcon: Icon(Icons.dashboard_rounded)'));
+    expect(source, contains('Icons.psychology_outlined'));
+    expect(source, contains('Icons.psychology_rounded'));
     expect(source, contains('HapticFeedback.selectionClick()'));
     expect(source, contains('final reduceMotion ='));
     expect(source, contains('animationDuration: reduceMotion'));
     expect(source, contains('? Duration.zero'));
     expect(source, contains('const Duration(milliseconds: 260)'));
+    final design = File('lib/ui/design.dart').readAsStringSync();
+    expect(design, contains('size: selected ? 27 : 24'));
   });
 
   test('home keeps empty-state actions focused and status icons meaningful', () {
@@ -602,5 +606,37 @@ void main() {
     expect(search.substring(catalogStart), contains('TactileInkWell('));
   });
 
+
+
+  test('retained home tab detaches the today-work listener while offstage', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+    final start = source.indexOf('class _TodayWorkPreview');
+    final end = source.indexOf('class _ReadyTodayWork', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final preview = source.substring(start, end);
+    expect(preview, contains('ActiveListenableBuilder('));
+    expect(preview, contains('listenable: autopilot.workQueue'));
+    expect(preview, contains('rebuildToken: () => autopilot.workQueue.value'));
+    expect(
+      preview,
+      isNot(contains('ValueListenableBuilder<AarisAutopilotWorkQueue>')),
+    );
+  });
+
+  test('snapshot value changes use motion-safe continuity', () {
+    final source = File('lib/ui/stats_screen.dart').readAsStringSync();
+    final start = source.indexOf('class _SnapshotCard');
+    final end = source.indexOf('class _SoldMedicineTrackerScreen', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final card = source.substring(start, end);
+    expect(card, contains('AnimatedSwitcher('));
+    expect(card, contains('disableAnimations'));
+    expect(card, contains('ValueKey<String>(metric.value)'));
+    expect(card, contains('Tween<double>(begin: .96, end: 1)'));
+  });
 
 }

@@ -276,8 +276,8 @@ class _ShellState extends State<_Shell> {
                 onDestinationSelected: _selectTab,
                 destinations: [
                   const NavigationDestination(
-                    icon: Icon(Icons.home_outlined),
-                    selectedIcon: Icon(Icons.home_rounded),
+                    icon: Icon(Icons.dashboard_outlined),
+                    selectedIcon: Icon(Icons.dashboard_rounded),
                     label: 'Home',
                   ),
                   const NavigationDestination(
@@ -289,12 +289,12 @@ class _ShellState extends State<_Shell> {
                     icon: Badge.count(
                       count: badgeCount,
                       isLabelVisible: issues > 0,
-                      child: const Icon(Icons.psychology_alt_outlined),
+                      child: const Icon(Icons.psychology_outlined),
                     ),
                     selectedIcon: Badge.count(
                       count: badgeCount,
                       isLabelVisible: issues > 0,
-                      child: const Icon(Icons.psychology_alt_rounded),
+                      child: const Icon(Icons.psychology_rounded),
                     ),
                     label: 'Aaris Brain',
                   ),

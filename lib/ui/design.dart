@@ -966,9 +966,13 @@ ThemeData pharmacyTheme() => ThemeData(
     indicatorColor: primarySoft,
     indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     iconTheme: WidgetStateProperty.resolveWith(
-      (states) => IconThemeData(
-        color: states.contains(WidgetState.selected) ? primary : muted,
-      ),
+      (states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          color: selected ? primary : muted,
+          size: selected ? 27 : 24,
+        );
+      },
     ),
     labelTextStyle: WidgetStateProperty.resolveWith(
       (states) => TextStyle(

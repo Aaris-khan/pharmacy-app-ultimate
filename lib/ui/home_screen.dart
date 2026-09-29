@@ -377,9 +377,11 @@ class _TodayWorkPreview extends StatelessWidget {
   final VoidCallback onAddMedicine;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<AarisAutopilotWorkQueue>(
-    valueListenable: autopilot.workQueue,
-    builder: (context, queue, _) {
+  Widget build(BuildContext context) => ActiveListenableBuilder(
+    listenable: autopilot.workQueue,
+    rebuildToken: () => autopilot.workQueue.value,
+    builder: (context, _) {
+      final queue = autopilot.workQueue.value;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

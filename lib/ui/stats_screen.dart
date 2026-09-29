@@ -237,17 +237,33 @@ class _SnapshotCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 13),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              metric.value,
-              style: const TextStyle(
-                color: ink,
-                fontSize: 36,
-                height: 1.2,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -1.2,
+          AnimatedSwitcher(
+            duration:
+                MediaQuery.maybeOf(context)?.disableAnimations ?? false
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: .96, end: 1).animate(animation),
+                child: child,
+              ),
+            ),
+            child: FittedBox(
+              key: ValueKey<String>(metric.value),
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                metric.value,
+                style: const TextStyle(
+                  color: ink,
+                  fontSize: 36,
+                  height: 1.2,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.2,
+                ),
               ),
             ),
           ),
