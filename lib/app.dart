@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'domain/app_brain.dart';
 import 'domain/inventory.dart';
@@ -126,6 +127,8 @@ class _ShellState extends State<_Shell> {
 
   void _selectTab(int next) {
     if (next == tab) return;
+    // Keep tab switches crisp and physical without delaying navigation.
+    unawaited(HapticFeedback.selectionClick());
     // A retained offstage tab must not keep its text field and keyboard active.
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => tab = next);
@@ -261,6 +264,7 @@ class _ShellState extends State<_Shell> {
                       .toDouble();
               return NavigationBar(
                 height: navigationHeight,
+                animationDuration: const Duration(milliseconds: 260),
                 labelBehavior: compactNavigation
                     ? NavigationDestinationLabelBehavior.onlyShowSelected
                     : NavigationDestinationLabelBehavior.alwaysShow,
@@ -268,8 +272,8 @@ class _ShellState extends State<_Shell> {
                 onDestinationSelected: _selectTab,
                 destinations: [
                   const NavigationDestination(
-                    icon: Icon(Icons.dashboard_outlined),
-                    selectedIcon: Icon(Icons.dashboard_rounded),
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home_rounded),
                     label: 'Home',
                   ),
                   const NavigationDestination(
