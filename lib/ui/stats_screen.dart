@@ -310,7 +310,7 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
     body: SafeArea(
       top: false,
       child: ActiveListenableBuilder(
-          listenable: controller,
+        listenable: controller,
         rebuildToken: () => controller.salesOverviewEpoch,
         builder: (context, _) {
           final overview = controller.salesOverview;
