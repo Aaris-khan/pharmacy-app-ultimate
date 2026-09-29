@@ -569,7 +569,7 @@ void main() {
     expect(taskStart, greaterThanOrEqualTo(0));
     expect(attention.substring(taskStart), contains('TactileInkWell('));
 
-    final metricStart = stats.indexOf('class _MetricCard');
+    final metricStart = stats.indexOf('class _SnapshotCard');
     expect(metricStart, greaterThanOrEqualTo(0));
     expect(stats.substring(metricStart), contains('TactileInkWell('));
 
