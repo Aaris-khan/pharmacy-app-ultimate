@@ -125,6 +125,9 @@ void main() {
     );
     expect(editable, findsOneWidget);
     expect(tester.widget<EditableText>(editable).focusNode.hasFocus, isTrue);
+    expect(find.text('Stock quantity'), findsOneWidget);
+    expect(find.text('Medicine form'), findsOneWidget);
+    expect(find.text('Unit cost (₹)'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
