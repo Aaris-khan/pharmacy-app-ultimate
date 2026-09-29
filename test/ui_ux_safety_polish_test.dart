@@ -557,7 +557,7 @@ void main() {
 
     final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
     final quickStart = ai.indexOf('class _AiQuickActionChip');
-    final quickEnd = ai.indexOf('class _AiHubAction', quickStart);
+    final quickEnd = ai.indexOf('class _AiConnectionsSheet', quickStart);
     expect(quickStart, greaterThanOrEqualTo(0));
     expect(quickEnd, greaterThan(quickStart));
     final quick = ai.substring(quickStart, quickEnd);
