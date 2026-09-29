@@ -524,6 +524,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Remove this scan?'),
         content: const Text(
           'This removes only this saved scan draft. Your medicine database is unchanged.',
@@ -534,6 +535,7 @@ class _MedicineIntakePanelState extends State<MedicineIntakePanel> {
             child: const Text('Cancel'),
           ),
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: red),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Remove'),
           ),

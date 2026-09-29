@@ -756,6 +756,7 @@ class _BrainScreenState extends State<BrainScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
+            scrollable: true,
             title: Text(
               kind == StockAdjustmentKind.receive
                   ? 'Receive ${review.requestedQuantity} units?'
@@ -821,6 +822,7 @@ class _BrainScreenState extends State<BrainScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
+            scrollable: true,
             title: Text('Update ${live.name} location?'),
             content: Text(
               '${_stockIdentityCue(live)}\n\nBefore: ${review.beforeDisplay}\nAfter: ${review.afterDisplay}\n\nOnly physical storage-location fields will change. Medicine identity, expiry, quantity, price and sales are untouched. The write is revision-checked and Undo remains available.',
@@ -927,6 +929,7 @@ class _BrainScreenState extends State<BrainScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
+            scrollable: true,
             title: Text('Remove ${reviewed.name}?'),
             content: Text(
               '${_stockIdentityCue(reviewed)}\n\nReason: ${review.reason}\n\nThis stock entry will leave active inventory, search and totals. It remains in removed history and can be restored or undone.',
@@ -937,6 +940,10 @@ class _BrainScreenState extends State<BrainScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: red,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Remove'),
               ),
@@ -985,6 +992,7 @@ class _BrainScreenState extends State<BrainScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
+            scrollable: true,
             title: Text('Mark ${reviewed.name} SOLD?'),
             content: Text(
               '${_stockIdentityCue(reviewed)}\n\nThis means this entire physical stock entry is finished. Quantity becomes 0 and the medicine enters reorder intelligence. It does not create a customer sale event.',
@@ -1390,6 +1398,7 @@ class _BrainScreenState extends State<BrainScreen> {
         await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
+            scrollable: true,
             title: const Text('Undo this exact inventory change?'),
             content: Text(
               '$label\n\nRevision $revision${businessDay.isEmpty ? '' : ' · business day $businessDay'}\n$timeLabel\n\nAaris will restore the immediately previous audited inventory state. If anything changes before this confirmation commits, the revision-protected undo will fail closed.',
