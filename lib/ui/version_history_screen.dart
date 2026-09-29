@@ -67,7 +67,9 @@ class _VersionHistoryScreenState extends State<VersionHistoryScreen> {
     final versions = controller.versionsFor(medicineId);
     return Scaffold(
       appBar: AppBar(title: const Text('Version history')),
-      body: ListView.builder(
+      body: SafeArea(
+        top: false,
+        child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
         itemCount: versions.isEmpty ? 2 : versions.length + 1,
         itemBuilder: (context, index) {
@@ -165,7 +167,8 @@ class _VersionHistoryScreenState extends State<VersionHistoryScreen> {
               ),
             ),
           );
-        },
+          },
+        ),
       ),
     );
   }
