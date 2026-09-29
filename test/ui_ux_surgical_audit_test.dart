@@ -75,9 +75,14 @@ void main() {
 
     await tester.enterText(nameField, 'Dolo');
     await tester.pump();
-    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+    expect(
+      tester.widget<FilledButton>(save).onPressed,
+      isNull,
+      reason:
+          'Restoring the exact persisted facts must clear the semantic dirty state.',
+    );
 
-    await tester.tap(save);
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     expect(find.byType(EditorScreen), findsNothing);
@@ -120,6 +125,9 @@ void main() {
     );
     expect(editable, findsOneWidget);
     expect(tester.widget<EditableText>(editable).focusNode.hasFocus, isTrue);
+    expect(find.text('Stock quantity'), findsOneWidget);
+    expect(find.text('Medicine form'), findsOneWidget);
+    expect(find.text('Unit cost (₹)'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
