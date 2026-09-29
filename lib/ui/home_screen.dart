@@ -596,9 +596,12 @@ class _OverviewTile extends StatelessWidget {
     radius: 22,
     child: Material(
       color: Colors.transparent,
-      child: InkWell(
+      child: TactileInkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(22),
+        splashColor: color.withValues(alpha: .08),
+        highlightColor: color.withValues(alpha: .04),
+        pressedScale: .985,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
