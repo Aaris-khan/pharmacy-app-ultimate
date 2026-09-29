@@ -770,4 +770,31 @@ void main() {
     expect(reply, isNot(contains("AppSection.calculator => 'Calculator opened.'")));
   });
 
+  test('shared tactile controls emit one non-blocking haptic pulse', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class _TactileInkWellState');
+    final end = source.indexOf('class GlassIconButton', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final tactile = source.substring(start, end);
+
+    expect(source, contains("import 'dart:async';"));
+    expect(tactile, contains('final bool hapticFeedback;'));
+    expect(tactile, contains('unawaited(HapticFeedback.selectionClick())'));
+    expect(tactile, contains('onTap: enabled ? _handleTap : null'));
+  });
+
+  test('scanner chrome and success reticle stay legible and motion-safe', () {
+    final design = File('lib/ui/design.dart').readAsStringSync();
+    final scanner = File('lib/ui/scanner_view.dart').readAsStringSync();
+
+    expect(design, contains('pharmacyDarkSystemUiOverlayStyle'));
+    expect(design, contains('statusBarIconBrightness: Brightness.light'));
+    expect(scanner, contains('systemOverlayStyle: pharmacyDarkSystemUiOverlayStyle'));
+    expect(scanner, contains('AnimatedContainer('));
+    expect(scanner, contains('?.disableAnimations ??'));
+    expect(scanner, contains('? green'));
+    expect(scanner, contains('const Duration(milliseconds: 220)'));
+  });
+
 }

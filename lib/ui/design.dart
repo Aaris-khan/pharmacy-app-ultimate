@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -26,6 +28,15 @@ const pharmacySystemUiOverlayStyle = SystemUiOverlayStyle(
   statusBarColor: Colors.transparent,
   statusBarIconBrightness: Brightness.dark,
   statusBarBrightness: Brightness.light,
+  systemNavigationBarColor: canvas,
+  systemNavigationBarIconBrightness: Brightness.dark,
+  systemNavigationBarDividerColor: Colors.transparent,
+);
+
+const pharmacyDarkSystemUiOverlayStyle = SystemUiOverlayStyle(
+  statusBarColor: Colors.transparent,
+  statusBarIconBrightness: Brightness.light,
+  statusBarBrightness: Brightness.dark,
   systemNavigationBarColor: canvas,
   systemNavigationBarIconBrightness: Brightness.dark,
   systemNavigationBarDividerColor: Colors.transparent,
@@ -341,6 +352,7 @@ class TactileInkWell extends StatefulWidget {
     this.highlightColor,
     this.tooltip,
     this.pressedScale = .985,
+    this.hapticFeedback = true,
   });
 
   final VoidCallback? onTap;
@@ -350,6 +362,7 @@ class TactileInkWell extends StatefulWidget {
   final Color? highlightColor;
   final String? tooltip;
   final double pressedScale;
+  final bool hapticFeedback;
 
   @override
   State<TactileInkWell> createState() => _TactileInkWellState();
@@ -361,6 +374,15 @@ class _TactileInkWellState extends State<TactileInkWell> {
   void _setPressed(bool value) {
     if (!mounted || _pressed == value) return;
     setState(() => _pressed = value);
+  }
+
+  void _handleTap() {
+    final onTap = widget.onTap;
+    if (onTap == null) return;
+    if (widget.hapticFeedback) {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    onTap();
   }
 
   @override
@@ -381,7 +403,7 @@ class _TactileInkWellState extends State<TactileInkWell> {
           : Duration(milliseconds: _pressed ? 70 : 150),
       curve: Curves.easeOutCubic,
       child: InkWell(
-        onTap: widget.onTap,
+        onTap: enabled ? _handleTap : null,
         onHighlightChanged: enabled ? _setPressed : null,
         borderRadius: widget.borderRadius,
         splashColor: widget.splashColor,

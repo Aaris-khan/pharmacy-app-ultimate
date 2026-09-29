@@ -38,6 +38,7 @@ class ScannerView extends StatelessWidget {
       title: const Text('Scan medicine', style: TextStyle(color: Colors.white)),
       backgroundColor: ink,
       foregroundColor: Colors.white,
+      systemOverlayStyle: pharmacyDarkSystemUiOverlayStyle,
       actions: [
         IconButton(
           style: IconButton.styleFrom(foregroundColor: Colors.white),
@@ -140,13 +141,36 @@ class ScannerView extends StatelessWidget {
                                 child: FractionallySizedBox(
                                   widthFactor: .88,
                                   heightFactor: .68,
-                                  child: Container(
+                                  child: AnimatedContainer(
+                                    duration:
+                                        MediaQuery.maybeOf(context)
+                                                ?.disableAnimations ??
+                                            false
+                                        ? Duration.zero
+                                        : const Duration(milliseconds: 220),
+                                    curve: Curves.easeOutCubic,
                                     decoration: BoxDecoration(
                                       border: Border.all(
-                                        color: primarySoft,
-                                        width: 2,
+                                        color:
+                                            barcode.isNotEmpty || text.isNotEmpty
+                                            ? green
+                                            : primarySoft,
+                                        width:
+                                            barcode.isNotEmpty || text.isNotEmpty
+                                            ? 3
+                                            : 2,
                                       ),
                                       borderRadius: BorderRadius.circular(20),
+                                      boxShadow:
+                                          barcode.isNotEmpty || text.isNotEmpty
+                                          ? [
+                                              BoxShadow(
+                                                color: green.withValues(alpha: .24),
+                                                blurRadius: 18,
+                                                spreadRadius: 1,
+                                              ),
+                                            ]
+                                          : const [],
                                     ),
                                   ),
                                 ),
