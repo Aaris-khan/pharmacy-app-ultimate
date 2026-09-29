@@ -1030,7 +1030,7 @@ class _AiScreenState extends State<AiScreen> {
                   _configuration.key.isNotEmpty
                       ? 'Aaris Brain · On-device · ${_local.activeLabel} · Cloud connection saved'
                       : 'Aaris Brain · On-device · ${_local.activeLabel}',
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 10.5, color: muted),
                 ),
@@ -1745,6 +1745,7 @@ class _AiQuickActionsState extends State<_AiQuickActions> {
       final action = await showModalBottomSheet<AiHubQuickAction>(
         context: context,
         useSafeArea: true,
+        isScrollControlled: true,
         showDragHandle: true,
         builder: (sheetContext) => SafeArea(
           top: false,
