@@ -322,6 +322,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }) => InputDecoration(
     labelText: label,
     hintText: hint,
+    floatingLabelBehavior: FloatingLabelBehavior.always,
     filled: false,
     counterText: '',
     alignLabelWithHint: multiline,
