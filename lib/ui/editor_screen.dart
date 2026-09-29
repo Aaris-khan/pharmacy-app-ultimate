@@ -207,12 +207,27 @@ class _EditorScreenState extends State<EditorScreen> {
   ].map((value) => value.trim()).where((value) => value.isNotEmpty).join(' + ');
 
   // Text controllers and FormField state already repaint the edited field.
-  // The parent screen only needs one rebuild when unsaved-change protection
-  // first becomes active; rebuilding this large form for every character makes
-  // ordinary typing needlessly expensive on low-end devices.
+  // Rebuild the parent only when the semantic dirty bit actually changes.
+  // Existing medicines can therefore become clean again when the pharmacist
+  // edits a value and then restores the exact persisted facts.
+  bool _matchesOriginalRecord() {
+    final record = widget.record;
+    if (record == null || _restocking) return false;
+    try {
+      return _samePersistedFacts(record, _draft());
+    } catch (_) {
+      // A partially typed date/number is still an unsaved edit. Validation
+      // remains authoritative when Save is pressed.
+      return false;
+    }
+  }
+
   void _markDirty() {
-    if (_dirty) return;
-    setState(() => _dirty = true);
+    final nextDirty = widget.record == null || _restocking
+        ? true
+        : !_matchesOriginalRecord();
+    if (_dirty == nextDirty) return;
+    setState(() => _dirty = nextDirty);
   }
 
   void _finishAndPop(String message) {
@@ -227,15 +242,16 @@ class _EditorScreenState extends State<EditorScreen> {
     if (_busy) return;
     setState(() {
       _extraSaltControllers.add(TextEditingController());
-      _dirty = true;
     });
+    _markDirty();
   }
 
   void _removeSalt(int index) {
     if (_busy || index < 0 || index >= _extraSaltControllers.length) return;
     final controller = _extraSaltControllers.removeAt(index);
     controller.dispose();
-    setState(() => _dirty = true);
+    setState(() {});
+    _markDirty();
   }
 
   OutlineInputBorder _editorBorder({Color? color, double width = 1}) =>
@@ -383,14 +399,14 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted || created == null) return;
       setState(() {
         _supplierId = created;
-        _dirty = true;
       });
+      _markDirty();
       return;
     }
       setState(() {
         _supplierId = selected;
-        _dirty = true;
       });
+      _markDirty();
     } finally {
       if (mounted) setState(() => _supplierOpening = false);
     }
@@ -978,8 +994,8 @@ class _EditorScreenState extends State<EditorScreen> {
         text: next,
         selection: TextSelection.collapsed(offset: next.length),
       );
-      _dirty = true;
     });
+    _markDirty();
   }
 
   Widget _field(
@@ -1019,6 +1035,43 @@ class _EditorScreenState extends State<EditorScreen> {
       ),
     ),
   );
+
+  Widget _formField() {
+    final options = <String>['', ...forms];
+    if (_form.isNotEmpty && !options.contains(_form)) options.add(_form);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: _raisedFieldSurface(
+        DropdownButtonFormField<String>(
+          initialValue: _form,
+          isExpanded: true,
+          decoration: _editorDecoration(
+            label: 'Medicine form',
+            hint: 'Not specified',
+          ),
+          items: [
+            for (final value in options)
+              DropdownMenuItem<String>(
+                value: value,
+                child: Text(
+                  value.isEmpty ? 'Not specified' : value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) {
+                  final next = value ?? '';
+                  if (next == _form) return;
+                  setState(() => _form = next);
+                  _markDirty();
+                },
+        ),
+      ),
+    );
+  }
 
   Widget _dateField({
     required TextEditingController controller,
@@ -1282,28 +1335,40 @@ class _EditorScreenState extends State<EditorScreen> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _field(
-                              'strength',
-                              'Strength',
-                              hint: '500 mg',
-                            ),
+                      ResponsivePair(
+                        first: _field(
+                          'strength',
+                          'Strength',
+                          hint: '500 mg',
+                        ),
+                        second: _formField(),
+                      ),
+                      ResponsivePair(
+                        first: _field(
+                          'quantity',
+                          'Stock quantity',
+                          hint: 'e.g. 20',
+                          keyboard: TextInputType.number,
+                        ),
+                        second: _field(
+                          'price',
+                          'Unit cost (₹)',
+                          hint: 'e.g. 2.50',
+                          keyboard: const TextInputType.numberWithOptions(
+                            decimal: true,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _field(
-                              'price',
-                              'Amount (₹)',
-                              hint: '0.00',
-                              keyboard: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                            ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          'Use the same unit for quantity and cost — for example, tablets with tablet cost or strips with strip cost.',
+                          style: TextStyle(
+                            color: muted,
+                            fontSize: 11.5,
+                            height: 1.4,
                           ),
-                        ],
+                        ),
                       ),
                       _field(
                         'location',
