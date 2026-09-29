@@ -205,4 +205,41 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
+  testWidgets('screen intro stacks before narrow large-text layouts collide', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(280, 640);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: const Scaffold(
+          body: SafeArea(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: ScreenIntro(
+                title: 'Medicine Database',
+                message:
+                    'Find a medicine to edit, record a sale or remove stock.',
+                icon: Icons.inventory_2_outlined,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final iconTop = tester.getTopLeft(find.byIcon(Icons.inventory_2_outlined)).dy;
+    final titleTop = tester.getTopLeft(find.text('Medicine Database')).dy;
+    expect(titleTop, greaterThan(iconTop));
+    expect(tester.takeException(), isNull);
+  });
+
+
 }
