@@ -268,7 +268,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.searchRequests, 1);
 
-      final scopeLabel = find.text('Searching: All medicines');
+      final scopeLabel = find.text('Scope · All medicines');
       final before = tester.widget<Text>(scopeLabel);
 
       final live = controller.snapshot.records[unrelated.id]!;
