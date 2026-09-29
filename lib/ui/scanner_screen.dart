@@ -485,6 +485,9 @@ class _ScannerScreenState extends State<ScannerScreen>
         // A durable queue acknowledgement remains valid across app pause; only
         // the camera session was retired, not the already-saved photo.
         if (mounted && !_closed && !_leaving) {
+          if (_foreground) {
+            unawaited(HapticFeedback.mediumImpact());
+          }
           setState(() {
             _text = queued == 1
                 ? '1 photo queued. Capture the next pack. Review in AI Hub.'
@@ -526,6 +529,9 @@ class _ScannerScreenState extends State<ScannerScreen>
           return;
         }
         final recognized = await stillRecognition;
+        if (current() && recognized) {
+          unawaited(HapticFeedback.lightImpact());
+        }
         if (current() &&
             widget.autoSubmit &&
             recognized &&
