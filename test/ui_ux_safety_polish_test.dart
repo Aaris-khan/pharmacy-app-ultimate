@@ -235,4 +235,73 @@ void main() {
     }
   });
 
+
+  test('long management confirmations stay reachable across high-risk flows', () {
+    const minimumScrollableDialogs = <String, int>{
+      'lib/ui/brain_screen.dart': 5,
+      'lib/ui/medicine_review_screen.dart': 2,
+      'lib/ui/search_screen.dart': 1,
+      'lib/ui/supplier_editor.dart': 2,
+      'lib/ui/local_models_panel.dart': 1,
+      'lib/ui/medicine_intake_panel.dart': 1,
+      'lib/ui/version_history_screen.dart': 1,
+    };
+
+    for (final entry in minimumScrollableDialogs.entries) {
+      final source = File(entry.key).readAsStringSync();
+      expect(
+        RegExp(r'scrollable:\s*true').allMatches(source).length,
+        greaterThanOrEqualTo(entry.value),
+        reason:
+            '${entry.key} must keep long confirmation content reachable on '
+            'short screens and with accessibility text scaling.',
+      );
+    }
+  });
+
+  test('destructive management actions are visually distinct before commit', () {
+    final brain = File('lib/ui/brain_screen.dart').readAsStringSync();
+    final intake = File('lib/ui/medicine_intake_panel.dart').readAsStringSync();
+    final supplier = File('lib/ui/supplier_editor.dart').readAsStringSync();
+
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,180}child:\s*const Text\('Remove'\)",
+      ).hasMatch(brain),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r"TextButton\.styleFrom\(foregroundColor:\s*red\)[\s\S]{0,180}child:\s*const Text\('Remove'\)",
+      ).hasMatch(intake),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,180}child:\s*const Text\('Discard'\)",
+      ).hasMatch(supplier),
+      isTrue,
+    );
+  });
+
+  test('pasted-list search cannot submit an empty accidental request', () {
+    final source = File('lib/ui/search_screen.dart').readAsStringSync();
+
+    expect(source, contains('builder: (ctx) => StatefulBuilder('));
+    expect(source, contains('scrollable: true'));
+    expect(source, contains('autofocus: true'));
+    expect(source, contains('onPressed: draft.trim().isEmpty'));
+    expect(source, contains('Navigator.pop(ctx, draft.trim())'));
+    expect(source, contains('textInputAction: TextInputAction.newline'));
+  });
+
+  test('supplier custom-field validation feedback clears while correcting', () {
+    final source = File('lib/ui/supplier_editor.dart').readAsStringSync();
+
+    expect(
+      source,
+      contains("if (error.isNotEmpty) setDialogState(() => error = '');"),
+    );
+  });
+
 }
