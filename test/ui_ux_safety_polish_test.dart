@@ -27,7 +27,10 @@ void main() {
     () {
       final source = File('lib/ui/search_screen.dart').readAsStringSync();
 
-      expect(source, contains("'Scope · ${scopeTitle(widget.scope, settings)}"));
+      expect(
+        source,
+        contains(r"'Scope · ${scopeTitle(widget.scope, settings)}"),
+      );
       expect(
         source,
         contains(
