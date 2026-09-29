@@ -264,267 +264,270 @@ class _BackupScreenState extends State<BackupScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Backup & Restore')),
-    body: ListView(
-      padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-      children: [
-        const ScreenIntro(
-          title: 'Keep a safe copy',
-          message:
-              'Save a full backup, or review a saved file before restoring it.',
-          icon: Icons.shield_outlined,
-        ),
-        Surface(
-          color: ink,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.shield_outlined, color: primarySoft, size: 30),
-              const SizedBox(height: 14),
-              const Text(
-                'Keep your pharmacy portable',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 21,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Creates a verified .txt backup, saves a local copy first, then opens the share menu. Medicines, removed stock, supplier details, warning settings and aggregate sales are included; AI API keys are never included.',
-                style: TextStyle(color: inverseMuted, fontSize: 12),
-              ),
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: primarySoft,
-                  foregroundColor: ink,
-                ),
-                onPressed: _sharing || _reading || _restoring
-                    ? null
-                    : () => unawaited(_share()),
-                icon: const Icon(Icons.ios_share_rounded),
-                label: Text(_sharing ? 'Creating backup…' : 'Export full backup'),
-              ),
-            ],
+    body: SafeArea(
+      top: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
+        children: [
+          const ScreenIntro(
+            title: 'Keep a safe copy',
+            message:
+                'Save a full backup, or review a saved file before restoring it.',
+            icon: Icons.shield_outlined,
           ),
-        ),
-        if (_lastExport != null) ...[
-          const SizedBox(height: 10),
           Surface(
-            color: primary.withAlpha(10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.check_circle_outline_rounded, color: primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    "${_lastExport!.fileName}\n${_fileSize(_lastExport!.sizeBytes)}"
-                    " · ${_lastExport!.savedLocation ?? 'share file ready'}"
-                    "${_lastExport!.warning == null ? '' : '\n${_lastExport!.warning}'}",
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        const SectionHeading('Restore a backup'),
-        FlowSteps(
-          const ['Choose file', 'Review', 'Restore'],
-          current: _restoring ? 2 : _review == null ? 0 : 1,
-        ),
-        const Text(
-          'Choose the backup file directly. Aaris reads and verifies the file without pasting its JSON into the screen, then prepares the restore review automatically.',
-          style: TextStyle(color: muted, fontSize: 13),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _reading || _sharing || _restoring
-                ? null
-                : () => unawaited(_pick()),
-            icon: const Icon(Icons.file_open_outlined),
-            label: Text(
-              _reading ? 'Reading & verifying backup…' : 'Import backup file',
-            ),
-          ),
-        ),
-        if (_pickedFile != null) ...[
-          const SizedBox(height: 12),
-          Surface(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  _review != null
-                      ? Icons.verified_outlined
-                      : Icons.description_outlined,
-                  color: _review != null ? primary : muted,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _pickedFile!.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: ink,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        "${_fileSize(_pickedFile!.sizeBytes)} · "
-                        "${_review != null ? 'Ready for next step' : _reading ? 'Checking file…' : 'Not reviewed'}",
-                        style: const TextStyle(color: muted, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        if (_error.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: Surface(
-              color: errorSoft,
-              child: Text(_error, style: const TextStyle(color: red)),
-            ),
-          ),
-        if (_review != null) ...[
-          const SectionHeading('Backup summary'),
-          Surface(
+            color: ink,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      _review!.integrityVerified
-                          ? Icons.verified_user_outlined
-                          : Icons.history_rounded,
-                      color: _review!.integrityVerified ? primary : amber,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Text(
-                        _review!.integrityVerified
-                            ? 'Integrity verified'
-                            : 'Legacy backup · validated without an integrity seal',
-                        style: TextStyle(
-                          color: _review!.integrityVerified ? primary : amber,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                const Icon(Icons.shield_outlined, color: primarySoft, size: 30),
                 const SizedBox(height: 14),
-                Text(
-                  '${_review!.activeMedicines} active stock entries',
-                  style: Theme.of(context).textTheme.titleLarge,
+                const Text(
+                  'Keep your pharmacy portable',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 21,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
-                Text('${_review!.removedMedicines} removed entries'),
-                Text('${_review!.suppliers} suppliers'),
-                Text('${_review!.sales} aggregate sale events'),
-                Text(
-                  'Warnings: ${_review!.backup.settings.shortDays} days · ${_review!.backup.settings.months} months',
+                const Text(
+                  'Creates a verified .txt backup, saves a local copy first, then opens the share menu. Medicines, removed stock, supplier details, warning settings and aggregate sales are included; AI API keys are never included.',
+                  style: TextStyle(color: inverseMuted, fontSize: 12),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Created ${localDateTimeLabel(_review!.backup.createdAt)}',
-                  style: const TextStyle(color: muted, fontSize: 12),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: primarySoft,
+                    foregroundColor: ink,
+                  ),
+                  onPressed: _sharing || _reading || _restoring
+                      ? null
+                      : () => unawaited(_share()),
+                  icon: const Icon(Icons.ios_share_rounded),
+                  label: Text(_sharing ? 'Creating backup…' : 'Export full backup'),
                 ),
               ],
             ),
           ),
-          const SectionHeading('Restore impact'),
-          Surface(
-            child: Builder(
-              builder: (context) {
-                final impact = _review!.impact;
-                if (!impact.hasMaterialChange) {
-                  return _impactRow(
-                    Icons.check_circle_outline_rounded,
-                    'No material stock, supplier, sales, warning or sold-total difference was found against the reviewed live snapshot.',
-                    color: primary,
-                  );
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (impact.newStockEntries > 0)
-                      _impactRow(
-                        Icons.add_box_outlined,
-                        '${impact.newStockEntries} new stock ${impact.newStockEntries == 1 ? 'entry' : 'entries'} will be added.',
-                      ),
-                    if (impact.changedStockEntries > 0)
-                      _impactRow(
-                        Icons.edit_note_rounded,
-                        '${impact.changedStockEntries} existing stock ${impact.changedStockEntries == 1 ? 'entry has' : 'entries have'} different saved facts in this backup.',
-                      ),
-                    if (impact.reactivatedStockEntries > 0)
-                      _impactRow(
-                        Icons.restore_from_trash_outlined,
-                        '${impact.reactivatedStockEntries} removed stock ${impact.reactivatedStockEntries == 1 ? 'entry returns' : 'entries return'} to active stock.',
-                      ),
-                    if (impact.activeEntriesMovingToRemoved > 0)
-                      _impactRow(
-                        Icons.inventory_2_outlined,
-                        '${impact.activeEntriesMovingToRemoved} current active ${impact.activeEntriesMovingToRemoved == 1 ? 'entry moves' : 'entries move'} to Removed stock because it is not in this backup.',
-                        color: amber,
-                      ),
-                    if (impact.newSuppliers > 0 ||
-                        impact.changedSuppliers > 0 ||
-                        impact.removedSuppliers > 0)
-                      _impactRow(
-                        Icons.local_shipping_outlined,
-                        'Suppliers: ${impact.newSuppliers} new · ${impact.changedSuppliers} changed · ${impact.removedSuppliers} removed.',
-                        color: impact.removedSuppliers > 0 ? amber : ink,
-                      ),
-                    if (impact.newSaleEvents > 0 ||
-                        impact.changedSaleEvents > 0 ||
-                        impact.removedSaleEvents > 0)
-                      _impactRow(
-                        Icons.receipt_long_outlined,
-                        'Sale history: ${impact.newSaleEvents} new · ${impact.changedSaleEvents} changed · ${impact.removedSaleEvents} removed.',
-                        color: impact.removedSaleEvents > 0 ? amber : ink,
-                      ),
-                    if (impact.warningSettingsChange)
-                      _impactRow(
-                        Icons.notifications_active_outlined,
-                        'Expiry warning windows will change to ${_review!.backup.settings.shortDays} days and ${_review!.backup.settings.months} months.',
-                      ),
-                    if (impact.soldTotalsChange)
-                      _impactRow(
-                        Icons.calculate_outlined,
-                        'Saved sold-stock totals will be restored from this backup.',
-                      ),
-                  ],
-                );
-              },
+          if (_lastExport != null) ...[
+            const SizedBox(height: 10),
+            Surface(
+              color: primary.withAlpha(10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.check_circle_outline_rounded, color: primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "${_lastExport!.fileName}\n${_fileSize(_lastExport!.sizeBytes)}"
+                      " · ${_lastExport!.savedLocation ?? 'share file ready'}"
+                      "${_lastExport!.warning == null ? '' : '\n${_lastExport!.warning}'}",
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ],
+          const SectionHeading('Restore a backup'),
+          FlowSteps(
+            const ['Choose file', 'Review', 'Restore'],
+            current: _restoring ? 2 : _review == null ? 0 : 1,
+          ),
+          const Text(
+            'Choose the backup file directly. Aaris reads and verifies the file without pasting its JSON into the screen, then prepares the restore review automatically.',
+            style: TextStyle(color: muted, fontSize: 13),
           ),
           const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: _restoring || _sharing || _reading
-                ? null
-                : () => unawaited(_restore()),
-            icon: const Icon(Icons.arrow_forward_rounded),
-            label: Text(_restoring ? 'Restoring…' : 'Next'),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _reading || _sharing || _restoring
+                  ? null
+                  : () => unawaited(_pick()),
+              icon: const Icon(Icons.file_open_outlined),
+              label: Text(
+                _reading ? 'Reading & verifying backup…' : 'Import backup file',
+              ),
+            ),
           ),
+          if (_pickedFile != null) ...[
+            const SizedBox(height: 12),
+            Surface(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _review != null
+                        ? Icons.verified_outlined
+                        : Icons.description_outlined,
+                    color: _review != null ? primary : muted,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _pickedFile!.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: ink,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          "${_fileSize(_pickedFile!.sizeBytes)} · "
+                          "${_review != null ? 'Ready for next step' : _reading ? 'Checking file…' : 'Not reviewed'}",
+                          style: const TextStyle(color: muted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (_error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Surface(
+                color: errorSoft,
+                child: Text(_error, style: const TextStyle(color: red)),
+              ),
+            ),
+          if (_review != null) ...[
+            const SectionHeading('Backup summary'),
+            Surface(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        _review!.integrityVerified
+                            ? Icons.verified_user_outlined
+                            : Icons.history_rounded,
+                        color: _review!.integrityVerified ? primary : amber,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          _review!.integrityVerified
+                              ? 'Integrity verified'
+                              : 'Legacy backup · validated without an integrity seal',
+                          style: TextStyle(
+                            color: _review!.integrityVerified ? primary : amber,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '${_review!.activeMedicines} active stock entries',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text('${_review!.removedMedicines} removed entries'),
+                  Text('${_review!.suppliers} suppliers'),
+                  Text('${_review!.sales} aggregate sale events'),
+                  Text(
+                    'Warnings: ${_review!.backup.settings.shortDays} days · ${_review!.backup.settings.months} months',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Created ${localDateTimeLabel(_review!.backup.createdAt)}',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SectionHeading('Restore impact'),
+            Surface(
+              child: Builder(
+                builder: (context) {
+                  final impact = _review!.impact;
+                  if (!impact.hasMaterialChange) {
+                    return _impactRow(
+                      Icons.check_circle_outline_rounded,
+                      'No material stock, supplier, sales, warning or sold-total difference was found against the reviewed live snapshot.',
+                      color: primary,
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (impact.newStockEntries > 0)
+                        _impactRow(
+                          Icons.add_box_outlined,
+                          '${impact.newStockEntries} new stock ${impact.newStockEntries == 1 ? 'entry' : 'entries'} will be added.',
+                        ),
+                      if (impact.changedStockEntries > 0)
+                        _impactRow(
+                          Icons.edit_note_rounded,
+                          '${impact.changedStockEntries} existing stock ${impact.changedStockEntries == 1 ? 'entry has' : 'entries have'} different saved facts in this backup.',
+                        ),
+                      if (impact.reactivatedStockEntries > 0)
+                        _impactRow(
+                          Icons.restore_from_trash_outlined,
+                          '${impact.reactivatedStockEntries} removed stock ${impact.reactivatedStockEntries == 1 ? 'entry returns' : 'entries return'} to active stock.',
+                        ),
+                      if (impact.activeEntriesMovingToRemoved > 0)
+                        _impactRow(
+                          Icons.inventory_2_outlined,
+                          '${impact.activeEntriesMovingToRemoved} current active ${impact.activeEntriesMovingToRemoved == 1 ? 'entry moves' : 'entries move'} to Removed stock because it is not in this backup.',
+                          color: amber,
+                        ),
+                      if (impact.newSuppliers > 0 ||
+                          impact.changedSuppliers > 0 ||
+                          impact.removedSuppliers > 0)
+                        _impactRow(
+                          Icons.local_shipping_outlined,
+                          'Suppliers: ${impact.newSuppliers} new · ${impact.changedSuppliers} changed · ${impact.removedSuppliers} removed.',
+                          color: impact.removedSuppliers > 0 ? amber : ink,
+                        ),
+                      if (impact.newSaleEvents > 0 ||
+                          impact.changedSaleEvents > 0 ||
+                          impact.removedSaleEvents > 0)
+                        _impactRow(
+                          Icons.receipt_long_outlined,
+                          'Sale history: ${impact.newSaleEvents} new · ${impact.changedSaleEvents} changed · ${impact.removedSaleEvents} removed.',
+                          color: impact.removedSaleEvents > 0 ? amber : ink,
+                        ),
+                      if (impact.warningSettingsChange)
+                        _impactRow(
+                          Icons.notifications_active_outlined,
+                          'Expiry warning windows will change to ${_review!.backup.settings.shortDays} days and ${_review!.backup.settings.months} months.',
+                        ),
+                      if (impact.soldTotalsChange)
+                        _impactRow(
+                          Icons.calculate_outlined,
+                          'Saved sold-stock totals will be restored from this backup.',
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _restoring || _sharing || _reading
+                  ? null
+                  : () => unawaited(_restore()),
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: Text(_restoring ? 'Restoring…' : 'Next'),
+            ),
+          ],
         ],
-      ],
+      ),
     ),
   );
 }

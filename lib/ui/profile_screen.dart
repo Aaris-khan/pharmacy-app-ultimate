@@ -341,92 +341,95 @@ class _ActivityScreenState extends State<ActivityScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Activity & Undo')),
-    body: ActiveListenableBuilder(
-      listenable: controller,
-      rebuildToken: () => controller.snapshot,
-      builder: (context, _) {
-        final events = controller.snapshot.events;
-        final headerCount = 3;
-        return ListView.builder(
-          padding: const EdgeInsets.all(22),
-          itemCount: events.isEmpty ? headerCount + 1 : headerCount + events.length,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return const ScreenIntro(
-                title: 'Your recent activity',
-                message:
-                    'See the latest 200 changes. Undo reverses only the most recent current change, including an approved import.',
-                icon: Icons.history_rounded,
-              );
-            }
-            if (index == 1) {
-              return FilledButton.icon(
-                onPressed: controller.canUndo && !_undoing
-                    ? () => unawaited(_undoLast())
-                    : null,
-                icon: _undoing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.undo_rounded),
-                label: Text(
-                  _undoing ? 'Undoing latest change…' : 'Review & undo last change',
-                ),
-              );
-            }
-            if (index == 2) return const SizedBox(height: 22);
-            if (events.isEmpty) {
-              return const EmptyState(
-                title: 'A clean slate',
-                message: 'Your saved changes will appear here.',
-              );
-            }
-
-            final event = events[index - headerCount];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Surface(
-                padding: const EdgeInsets.all(18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      event['undone'] == true
-                          ? Icons.undo_rounded
-                          : Icons.check_circle_outline,
-                      color: green,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${event['label']}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            localDateTimeLabel(event['time']),
-                            style: const TextStyle(fontSize: 12, color: muted),
-                          ),
-                          if (event['undone'] == true)
-                            const Text(
-                              'Undone',
-                              style: TextStyle(color: amber, fontSize: 12),
-                            ),
-                        ],
+    body: SafeArea(
+      top: false,
+      child: ActiveListenableBuilder(
+        listenable: controller,
+        rebuildToken: () => controller.snapshot,
+        builder: (context, _) {
+          final events = controller.snapshot.events;
+          final headerCount = 3;
+          return ListView.builder(
+            padding: const EdgeInsets.all(22),
+            itemCount: events.isEmpty ? headerCount + 1 : headerCount + events.length,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return const ScreenIntro(
+                  title: 'Your recent activity',
+                  message:
+                      'See the latest 200 changes. Undo reverses only the most recent current change, including an approved import.',
+                  icon: Icons.history_rounded,
+                );
+              }
+              if (index == 1) {
+                return FilledButton.icon(
+                  onPressed: controller.canUndo && !_undoing
+                      ? () => unawaited(_undoLast())
+                      : null,
+                  icon: _undoing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.undo_rounded),
+                  label: Text(
+                    _undoing ? 'Undoing latest change…' : 'Review & undo last change',
+                  ),
+                );
+              }
+              if (index == 2) return const SizedBox(height: 22);
+              if (events.isEmpty) {
+                return const EmptyState(
+                  title: 'A clean slate',
+                  message: 'Your saved changes will appear here.',
+                );
+              }
+  
+              final event = events[index - headerCount];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Surface(
+                  padding: const EdgeInsets.all(18),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        event['undone'] == true
+                            ? Icons.undo_rounded
+                            : Icons.check_circle_outline,
+                        color: green,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${event['label']}',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              localDateTimeLabel(event['time']),
+                              style: const TextStyle(fontSize: 12, color: muted),
+                            ),
+                            if (event['undone'] == true)
+                              const Text(
+                                'Undone',
+                                style: TextStyle(color: amber, fontSize: 12),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            );
+              );
+            },
+          );
           },
-        );
-      },
+        ),
     ),
   );
 }

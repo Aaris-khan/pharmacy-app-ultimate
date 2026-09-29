@@ -654,95 +654,98 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     final loading = _sourceLoading || _matchLoading;
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm medicine')),
-      body: _sourceLoading
-          ? const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text(
-                    'Reading medicine…',
-                    style: TextStyle(color: muted, fontSize: 12),
-                  ),
-                ],
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _drafts.isEmpty ? _loadSource : _prepareMatches,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 32),
-                children: [
-                  if (_drafts.length > 1) _progressCard(),
-                  if (_warning.isNotEmpty) ...[
-                    _smallNotice(_warning, amber),
-                    const SizedBox(height: 10),
-                  ],
-                  if (_error.isNotEmpty) ...[
-                    _smallNotice(_error, red),
-                    const SizedBox(height: 12),
-                  ],
-                  if (_drafts.isEmpty && _error.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 40),
-                      child: Text(
-                        'No medicine to review.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: muted),
-                      ),
+      body: SafeArea(
+        top: false,
+        child: _sourceLoading
+            ? const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 14),
+                    Text(
+                      'Reading medicine…',
+                      style: TextStyle(color: muted, fontSize: 12),
                     ),
-                  if (_review != null) ...[
-                    _scannedMedicineCard(_review!.draft),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: 54,
-                      child: FilledButton.icon(
-                        onPressed: _leaving || _busy || loading ? null : _next,
-                        icon: _busy
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_forward_rounded),
-                        label: const Text(
-                          'Next',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                  ],
+                ),
+              )
+            : RefreshIndicator(
+                onRefresh: _drafts.isEmpty ? _loadSource : _prepareMatches,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 32),
+                  children: [
+                    if (_drafts.length > 1) _progressCard(),
+                    if (_warning.isNotEmpty) ...[
+                      _smallNotice(_warning, amber),
+                      const SizedBox(height: 10),
+                    ],
+                    if (_error.isNotEmpty) ...[
+                      _smallNotice(_error, red),
+                      const SizedBox(height: 12),
+                    ],
+                    if (_drafts.isEmpty && _error.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Text(
+                          'No medicine to review.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: muted),
+                        ),
+                      ),
+                    if (_review != null) ...[
+                      _scannedMedicineCard(_review!.draft),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 54,
+                        child: FilledButton.icon(
+                          onPressed: _leaving || _busy || loading ? null : _next,
+                          icon: _busy
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_forward_rounded),
+                          label: const Text(
+                            'Next',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    _matchingSection(_review!),
-                  ] else if (_matchLoading) ...[
-                    const SizedBox(height: 30),
-                    const Center(child: CircularProgressIndicator()),
+                      const SizedBox(height: 24),
+                      _matchingSection(_review!),
+                    ] else if (_matchLoading) ...[
+                      const SizedBox(height: 30),
+                      const Center(child: CircularProgressIndicator()),
+                    ],
+                    if (_ignoredFrames > 0) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        '$_ignoredFrames duplicate or unclear capture${_ignoredFrames == 1 ? '' : 's'} ignored automatically.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: muted, fontSize: 10.5),
+                      ),
+                    ],
+                    if (_routeLabel.isNotEmpty && _warning.isEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _routeLabel,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: muted, fontSize: 10),
+                      ),
+                    ],
                   ],
-                  if (_ignoredFrames > 0) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      '$_ignoredFrames duplicate or unclear capture${_ignoredFrames == 1 ? '' : 's'} ignored automatically.',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: muted, fontSize: 10.5),
-                    ),
-                  ],
-                  if (_routeLabel.isNotEmpty && _warning.isEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _routeLabel,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: muted, fontSize: 10),
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
+      ),
     );
   }
 
