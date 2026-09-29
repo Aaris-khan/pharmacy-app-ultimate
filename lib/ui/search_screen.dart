@@ -687,8 +687,12 @@ class _SearchScreenState extends State<SearchScreen> {
       double spacing = 8,
     }) => LayoutBuilder(
       builder: (context, constraints) {
+        if (actions.isEmpty) return const SizedBox.shrink();
+        final gapWidth = spacing * (actions.length - 1);
+        final cellWidth =
+            (constraints.maxWidth - gapWidth) / actions.length;
         final stack =
-            constraints.maxWidth < 360 ||
+            cellWidth < 96 ||
             MediaQuery.textScalerOf(context).scale(14) > 20;
         if (stack) {
           return Column(
