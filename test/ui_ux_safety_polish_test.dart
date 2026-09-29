@@ -328,14 +328,15 @@ void main() {
     );
   });
 
-  test('latest user feedback replaces stale snackbar feedback', () {
+  test('latest user feedback drops stale snackbar queues', () {
     final source = File('lib/ui/design.dart').readAsStringSync();
     final feedback = source.substring(source.indexOf('void showError'));
 
     expect(
-      RegExp(r'removeCurrentSnackBar\(\)').allMatches(feedback).length,
+      RegExp(r'clearSnackBars\(\)').allMatches(feedback).length,
       greaterThanOrEqualTo(2),
     );
+    expect(feedback, isNot(contains('removeCurrentSnackBar()')));
   });
 
   test('supplier fields release the keyboard when the user taps away', () {
@@ -372,6 +373,31 @@ void main() {
       ).hasMatch(backup),
       isTrue,
     );
+  });
+
+
+  test('medicine capture chooser keeps every source reachable', () {
+    final source = File('lib/ui/medicine_capture.dart').readAsStringSync();
+    final start = source.indexOf('showModalBottomSheet<String>');
+    final end = source.indexOf('if (choice == null', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final chooser = source.substring(start, end);
+    expect(chooser, contains('useSafeArea: true'));
+    expect(chooser, contains('isScrollControlled: true'));
+    expect(chooser, contains('showDragHandle: true'));
+    expect(chooser, contains('SingleChildScrollView('));
+  });
+
+  test('today work beacon keeps priority and next action readable', () {
+    final source = File('lib/ui/autopilot_beacon.dart').readAsStringSync();
+
+    expect(
+      RegExp(r'maxLines:\s*2').allMatches(source).length,
+      greaterThanOrEqualTo(2),
+    );
+    expect(source, isNot(contains('maxLines: 1')));
   });
 
 
