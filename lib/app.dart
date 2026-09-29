@@ -262,9 +262,13 @@ class _ShellState extends State<_Shell> {
                   (navigationLabelHeight - 11)
                       .clamp(0.0, 24.0)
                       .toDouble();
+              final reduceMotion =
+                  MediaQuery.maybeOf(context)?.disableAnimations ?? false;
               return NavigationBar(
                 height: navigationHeight,
-                animationDuration: const Duration(milliseconds: 260),
+                animationDuration: reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 260),
                 labelBehavior: compactNavigation
                     ? NavigationDestinationLabelBehavior.onlyShowSelected
                     : NavigationDestinationLabelBehavior.alwaysShow,
