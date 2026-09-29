@@ -224,6 +224,10 @@ class _BackupScreenState extends State<BackupScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: red,
+                foregroundColor: Colors.white,
+              ),
               onPressed: phrase == 'RESTORE'
                   ? () => Navigator.pop(ctx, true)
                   : null,
