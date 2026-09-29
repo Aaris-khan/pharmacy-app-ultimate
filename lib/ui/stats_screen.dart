@@ -53,7 +53,7 @@ class _StatsScreenState extends State<StatsScreen> {
       final topShare = top?.demandShare(sales.totalUnitsSold) ?? 0;
       final cards = [
         _SnapshotMetric(
-          label: 'Medicines',
+          label: 'Stock variants',
           value: '${inventory.uniqueMedicines}',
           detail: 'Unique name + strength + form',
           icon: Icons.medication_outlined,
@@ -77,19 +77,24 @@ class _StatsScreenState extends State<StatsScreen> {
           icon: Icons.check_circle_outline_rounded,
         ),
         _SnapshotMetric(
-          label: 'Total amount',
-          value: _money(inventory.totalEnteredAmountPaise),
-          detail: 'Sum of amounts entered for medicines',
-          icon: Icons.currency_rupee_rounded,
+          label: 'Inventory value',
+          value:
+              inventory.valuedEntries == 0 && inventory.unvaluedEntries > 0
+              ? '—'
+              : _money(inventory.onHandValue),
+          detail: inventory.unvaluedEntries == 0
+              ? 'Known quantity × unit cost'
+              : '${inventory.valuedEntries} valued · ${inventory.unvaluedEntries} missing quantity or unit cost',
+          icon: Icons.inventory_rounded,
         ),
         _SnapshotMetric(
-          label: 'Number of medicines',
+          label: 'Medicine names',
           value: '${inventory.uniqueMedicineNames}',
-          detail: 'Distinct medicine names, not stock units',
+          detail: 'Distinct names, not stock units or variants',
           icon: Icons.format_list_numbered_rounded,
         ),
         _SnapshotMetric(
-          label: 'Sales Value',
+          label: 'Sales value',
           value: _money(sales.salesValuePaise),
           detail: sales.unknownValueSales == 0
               ? 'From recorded medicine sales'
@@ -97,7 +102,7 @@ class _StatsScreenState extends State<StatsScreen> {
           icon: Icons.payments_outlined,
         ),
         _SnapshotMetric(
-          label: 'Sold Medicine Tracker',
+          label: 'Sales tracker',
           value: top == null ? '—' : '${(topShare * 100).round()}%',
           detail: top == null
               ? 'No recorded sales yet'
