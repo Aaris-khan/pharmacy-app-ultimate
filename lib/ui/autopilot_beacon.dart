@@ -83,7 +83,7 @@ class AarisAutopilotBeacon extends StatelessWidget {
                           children: [
                             Text(
                               'आज के काम · $priorityText',
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelMedium?.copyWith(
                                 color: scheme.onSurface,
@@ -93,7 +93,7 @@ class AarisAutopilotBeacon extends StatelessWidget {
                             const SizedBox(height: 1),
                             Text(
                               next,
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: scheme.onSurfaceVariant,

@@ -1257,7 +1257,7 @@ void showError(BuildContext context, Object error) {
     '',
   );
   final messenger = ScaffoldMessenger.of(context);
-  messenger.removeCurrentSnackBar();
+  messenger.clearSnackBars();
   messenger.showSnackBar(
     SnackBar(
       content: Text(text),
@@ -1273,7 +1273,7 @@ void showSavedWithMessenger(
   String message,
 ) {
   if (messenger == null) return;
-  messenger.removeCurrentSnackBar();
+  messenger.clearSnackBars();
   messenger.showSnackBar(
     SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
   );
