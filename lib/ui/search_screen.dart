@@ -793,32 +793,56 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: blueAction(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final stackActions =
+                        constraints.maxWidth < 330 ||
+                        MediaQuery.textScalerOf(context).scale(13) > 19;
+                    final actions = <Widget>[
+                      blueAction(
                         icon: Icons.qr_code_scanner_rounded,
                         label: 'Scan',
                         onPressed: _routeOpening ? null : _scanner,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: blueAction(
+                      blueAction(
                         icon: Icons.mic_none_rounded,
                         label: 'Voice',
                         onPressed: _routeOpening ? null : _mic,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: blueAction(
+                      blueAction(
                         icon: Icons.playlist_add_rounded,
                         label: 'Paste list',
                         onPressed: _routeOpening ? null : _bulk,
                       ),
-                    ),
-                  ],
+                    ];
+                    if (stackActions) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (
+                            var index = 0;
+                            index < actions.length;
+                            index++
+                          ) ...[
+                            if (index > 0) const SizedBox(height: 8),
+                            actions[index],
+                          ],
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        for (
+                          var index = 0;
+                          index < actions.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(width: 8),
+                          Expanded(child: actions[index]),
+                        ],
+                      ],
+                    );
+                  },
                 ),
                 if (widget.database)
                   Padding(
@@ -844,7 +868,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Searching: ${scopeTitle(widget.scope, settings)}${widget.scope == SearchScope.all ? '' : ' only'}',
+                          'Scope · ${scopeTitle(widget.scope, settings)}${widget.scope == SearchScope.all ? '' : ' only'}',
                           style: const TextStyle(
                             fontSize: 12,
                             color: muted,
@@ -863,8 +887,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 if (_scan != null &&
                     widget.database &&
-                    !_catalogLoading &&
-                    _catalogHits.isEmpty)
+                    !_catalogLoading)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: OutlinedButton.icon(
