@@ -286,6 +286,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
         maxLines: maxLines,
         validator: validator,
         onChanged: (_) => _markDirty(),
+        onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
         textInputAction:
             maxLines > 1 ? TextInputAction.newline : TextInputAction.next,
         decoration: InputDecoration(
@@ -401,6 +402,9 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                                           value ?? '',
                                         ),
                                     onChanged: (_) => _markDirty(),
+                                    onTapOutside: (_) =>
+                                        FocusManager.instance.primaryFocus?.unfocus(),
+                                    textInputAction: TextInputAction.next,
                                     decoration: const InputDecoration(
                                       labelText: 'Field name',
                                       filled: false,
@@ -429,6 +433,9 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                               enabled: !_busy,
                               maxLines: 2,
                               onChanged: (_) => _markDirty(),
+                              onTapOutside: (_) =>
+                                  FocusManager.instance.primaryFocus?.unfocus(),
+                              textInputAction: TextInputAction.newline,
                               decoration: const InputDecoration(
                                 labelText: 'Value',
                                 filled: false,
