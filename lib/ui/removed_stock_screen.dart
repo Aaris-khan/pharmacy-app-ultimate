@@ -437,7 +437,9 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
     // this keeps rendering cost proportional to visible rows as that bound grows.
     return Scaffold(
       appBar: AppBar(title: const Text('Removed stock')),
-      body: ListView.builder(
+      body: SafeArea(
+        top: false,
+        child: ListView.builder(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
         itemCount: rows.length + 1 + (canExpandBrowse ? 1 : 0),
@@ -550,7 +552,8 @@ class _RemovedStockScreenState extends State<RemovedStockScreen> {
                   : () => unawaited(_reviewRestore(entry.$2)),
             ),
           );
-        },
+          },
+        ),
       ),
     );
   }
