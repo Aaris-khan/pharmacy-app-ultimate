@@ -556,6 +556,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final pastedList = _bulkQuery;
     if (pastedList != null) draft = pastedList;
     String? result;
+    var dialogError = '';
     await _runExclusiveRoute(() async {
       result = await showDialog<String>(
         context: context,
@@ -565,21 +566,33 @@ class _SearchScreenState extends State<SearchScreen> {
             scrollable: true,
             content: SizedBox(
               width: 500,
-              child: TextFormField(
-                initialValue: draft,
-                autofocus: true,
-                onChanged: (value) {
-                  draft = value;
-                  setDialogState(() {});
-                },
-                minLines: 6,
-                maxLines: 12,
-                maxLength: 30000,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText:
-                      'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    initialValue: draft,
+                    autofocus: true,
+                    onChanged: (value) => draft = value,
+                    minLines: 6,
+                    maxLines: 12,
+                    maxLength: 30000,
+                    textInputAction: TextInputAction.newline,
+                    decoration: const InputDecoration(
+                      hintText:
+                          'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
+                    ),
+                  ),
+                  if (dialogError.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        dialogError,
+                        style: const TextStyle(color: red, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             actions: [
@@ -588,9 +601,17 @@ class _SearchScreenState extends State<SearchScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: draft.trim().isEmpty
-                    ? null
-                    : () => Navigator.pop(ctx, draft.trim()),
+                onPressed: () {
+                  final clean = draft.trim();
+                  if (clean.isEmpty) {
+                    setDialogState(
+                      () => dialogError =
+                          'Paste at least one medicine name before searching.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx, clean);
+                },
                 child: const Text('Find medicines'),
               ),
             ],
