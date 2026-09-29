@@ -511,6 +511,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     final units = await showDialog<int>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: Text('Add stock to ${current.title}'),
         content: Form(
           key: formKey,
@@ -529,6 +530,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
                 controller: quantityController,
                 autofocus: true,
                 keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
                 decoration: const InputDecoration(
                   labelText: 'Units received',
                   hintText: 'Example: 20',
@@ -586,6 +588,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
+          scrollable: true,
           title: const Text('Confirm stock'),
           content: Text(
             '${live.title}\n\n'
