@@ -737,4 +737,37 @@ void main() {
     );
   });
 
+
+  test('primary navigation uses a conventional Home glyph and motion-safe Brain badge', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(source, contains('Icons.home_outlined'));
+    expect(source, contains('Icons.home_rounded'));
+    expect(source, isNot(contains('Icons.dashboard_outlined')));
+
+    final start = source.indexOf('class _AnimatedBrainNavigationIcon');
+    expect(start, greaterThanOrEqualTo(0));
+    final icon = source.substring(start);
+    expect(icon, contains('AnimatedSwitcher('));
+    expect(
+      icon,
+      contains(
+        'duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180)',
+      ),
+    );
+    expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
+    expect(icon, contains('ValueKey((icon.codePoint, badgeCount, showBadge))'));
+  });
+
+  test('Aaris Brain names the current Insights destination in navigation replies', () {
+    final source = File('lib/ui/brain_screen.dart').readAsStringSync();
+    final start = source.indexOf('String _sectionReply(AppSection section)');
+    expect(start, greaterThanOrEqualTo(0));
+    final reply = source.substring(start);
+
+    expect(reply, contains("AppSection.ai => 'Aaris Brain is already open.'"));
+    expect(reply, contains("AppSection.calculator => 'Insights opened.'"));
+    expect(reply, isNot(contains("AppSection.calculator => 'Calculator opened.'")));
+  });
+
 }
