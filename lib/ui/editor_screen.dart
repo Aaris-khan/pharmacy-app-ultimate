@@ -213,10 +213,62 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _matchesOriginalRecord() {
     final record = widget.record;
     if (record == null || _restocking) return false;
+
+    // Compare only fields the editor can change. This runs while typing, so it
+    // must stay allocation-light even when OCR/search text is large.
+    final textFacts = <String, String>{
+      'name': record.name,
+      'brand': record.brand,
+      'manufacturer': record.manufacturer,
+      'strength': record.strength,
+      'barcode': record.barcode,
+      'batchNumber': record.batchNumber,
+      'block': record.block,
+      'row': record.row,
+      'vertical': record.vertical,
+      'location': record.location,
+      'notes': record.notes,
+      'ocrText': record.ocrText,
+    };
+    for (final entry in textFacts.entries) {
+      if (fields[entry.key]!.text.trim() != entry.value) return false;
+    }
+    if (_saltValue != record.salt ||
+        _form != record.form ||
+        _supplierId != record.supplierId) {
+      return false;
+    }
+
+    final quantityText = fields['quantity']!.text.trim();
+    final quantity = quantityText.isEmpty ? null : int.tryParse(quantityText);
+    if (quantityText.isNotEmpty && quantity == null) return false;
+    if (quantity != record.quantity) return false;
+
     try {
-      return _samePersistedFacts(record, _draft());
+      if (parseMoney(fields['price']!.text) != record.unitPricePaise) {
+        return false;
+      }
+      final mfg = inputDateToIso(
+        fields['mfg']!.text,
+        monthOnly: _mfgMonthOnly,
+      );
+      final expiry = inputDateToIso(
+        fields['expiry']!.text,
+        monthOnly: _expiryMonthOnly,
+      );
+      final recordMfg = record.mfg == null
+          ? null
+          : record.mfgMonthOnly
+          ? dateText(record.mfg!).substring(0, 7)
+          : dateText(record.mfg!);
+      final recordExpiry = record.expiry == null
+          ? null
+          : record.expiryMonthOnly
+          ? dateText(record.expiry!).substring(0, 7)
+          : dateText(record.expiry!);
+      return mfg == recordMfg && expiry == recordExpiry;
     } catch (_) {
-      // A partially typed date/number is still an unsaved edit. Validation
+      // Partially typed money/date input is still an unsaved edit. Validation
       // remains authoritative when Save is pressed.
       return false;
     }
