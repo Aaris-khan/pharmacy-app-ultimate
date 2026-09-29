@@ -188,45 +188,82 @@ class ScannerView extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Row(
-                            children: [
-                              DepthIcon(
-                                barcode.isNotEmpty || text.isNotEmpty
-                                    ? Icons.check_rounded
-                                    : Icons.document_scanner_outlined,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      rapidCapture && text.isNotEmpty
-                                          ? 'Captures saved'
-                                          : barcode.isNotEmpty
-                                          ? 'Barcode detected'
-                                          : text.isNotEmpty
-                                          ? 'Text captured'
-                                          : 'Ready to scan',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.titleMedium,
-                                    ),
-                                    Text(
-                                      rapidCapture
-                                          ? 'Keep capturing. Review your saved photos in AI Hub.'
-                                          : autoSubmit
-                                          ? 'Capture once to continue to medicine review.'
-                                          : 'Check the result, then tap Use scan above.',
-                                      style: const TextStyle(
-                                        color: muted,
-                                        fontSize: 12,
+                          Semantics(
+                            container: true,
+                            liveRegion: true,
+                            child: Row(
+                              children: [
+                                AnimatedSwitcher(
+                                  duration:
+                                      MediaQuery.maybeOf(context)
+                                              ?.disableAnimations ??
+                                          false
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 180),
+                                  switchInCurve: Curves.easeOutCubic,
+                                  switchOutCurve: Curves.easeInCubic,
+                                  transitionBuilder: (child, animation) =>
+                                      FadeTransition(
+                                        opacity: animation,
+                                        child: ScaleTransition(
+                                          scale:
+                                              Tween<double>(
+                                                begin: .92,
+                                                end: 1,
+                                              ).animate(animation),
+                                          child: child,
+                                        ),
                                       ),
+                                  child: DepthIcon(
+                                    barcode.isNotEmpty || text.isNotEmpty
+                                        ? Icons.check_rounded
+                                        : Icons.document_scanner_outlined,
+                                    key: ValueKey(
+                                      barcode.isNotEmpty || text.isNotEmpty,
                                     ),
-                                  ],
+                                    color:
+                                        barcode.isNotEmpty || text.isNotEmpty
+                                        ? green
+                                        : primary,
+                                    background:
+                                        barcode.isNotEmpty || text.isNotEmpty
+                                        ? successSoft
+                                        : primarySoft,
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        rapidCapture && text.isNotEmpty
+                                            ? 'Captures saved'
+                                            : barcode.isNotEmpty
+                                            ? 'Barcode detected'
+                                            : text.isNotEmpty
+                                            ? 'Text captured'
+                                            : 'Ready to scan',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
+                                      ),
+                                      Text(
+                                        rapidCapture
+                                            ? 'Keep capturing. Review your saved photos in AI Hub.'
+                                            : autoSubmit
+                                            ? 'Capture once to continue to medicine review.'
+                                            : 'Check the result, then tap Use scan above.',
+                                        style: const TextStyle(
+                                          color: muted,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 12),
                           Text(
