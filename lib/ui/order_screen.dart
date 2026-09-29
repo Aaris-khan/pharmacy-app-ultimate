@@ -328,6 +328,8 @@ class _OrderScreenState extends State<OrderScreen> {
         final selected = await showModalBottomSheet<String>(
           context: context,
           useSafeArea: true,
+          isScrollControlled: true,
+          showDragHandle: true,
           builder: (sheetContext) => ListView.builder(
             itemCount: records.length,
             itemBuilder: (_, index) {
