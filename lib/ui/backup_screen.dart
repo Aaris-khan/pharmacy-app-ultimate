@@ -264,7 +264,9 @@ class _BackupScreenState extends State<BackupScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Backup & Restore')),
-    body: ListView(
+    body: SafeArea(
+      top: false,
+      child: ListView(
       padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
       children: [
         const ScreenIntro(
@@ -525,6 +527,7 @@ class _BackupScreenState extends State<BackupScreen> {
           ),
         ],
       ],
+    ),
     ),
   );
 }
