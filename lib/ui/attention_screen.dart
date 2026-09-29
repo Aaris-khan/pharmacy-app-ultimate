@@ -456,8 +456,12 @@ class _AttentionCard extends StatelessWidget {
         side: BorderSide(color: color.withValues(alpha: .12)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
+      child: TactileInkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: color.withValues(alpha: .08),
+        highlightColor: color.withValues(alpha: .04),
+        pressedScale: .99,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(

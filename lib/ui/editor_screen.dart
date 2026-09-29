@@ -482,9 +482,12 @@ class _EditorScreenState extends State<EditorScreen> {
         elevation: 1.12,
         child: Material(
           color: Colors.transparent,
-          child: InkWell(
+          child: TactileInkWell(
             onTap: _busy || _supplierOpening ? null : _selectSupplier,
             borderRadius: BorderRadius.circular(18),
+            splashColor: primary.withValues(alpha: .08),
+            highlightColor: primary.withValues(alpha: .04),
+            pressedScale: .99,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
@@ -1165,11 +1168,12 @@ class _EditorScreenState extends State<EditorScreen> {
       elevation: selected ? 1.12 : 1,
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
+        child: TactileInkWell(
           onTap: _busy ? null : () => _changeExpiryFormat(monthOnly),
           borderRadius: BorderRadius.circular(18),
           splashColor: primary.withValues(alpha: .10),
           highlightColor: primary.withValues(alpha: .05),
+          pressedScale: .98,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 54),
             child: Padding(

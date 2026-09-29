@@ -1192,9 +1192,12 @@ class _CatalogCandidateCard extends StatelessWidget {
       child: Surface(
         color: Colors.white,
         padding: EdgeInsets.zero,
-        child: InkWell(
+        child: TactileInkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(24),
+          splashColor: primary.withValues(alpha: .08),
+          highlightColor: primary.withValues(alpha: .04),
+          pressedScale: .99,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(

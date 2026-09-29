@@ -356,10 +356,10 @@ void main() {
     expect(source, contains('Icons.home_outlined'));
     expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
     expect(source, contains('HapticFeedback.selectionClick()'));
-    expect(
-      source,
-      contains('animationDuration: const Duration(milliseconds: 260)'),
-    );
+    expect(source, contains('final reduceMotion ='));
+    expect(source, contains('animationDuration: reduceMotion'));
+    expect(source, contains('? Duration.zero'));
+    expect(source, contains('const Duration(milliseconds: 260)'));
   });
 
   test('home keeps empty-state actions focused and status icons meaningful', () {
@@ -501,6 +501,81 @@ void main() {
     final overview = source.substring(start, end);
     expect(overview, contains('TactileInkWell('));
     expect(overview, contains('pressedScale: .985'));
+  });
+
+
+  test('primary action opacity respects the platform reduced-motion setting', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class RaisedActionButton');
+    final end = source.indexOf('BoxDecoration depthDecoration', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final actionSource = source.substring(start, end);
+    expect(actionSource, contains('disableAnimations'));
+    expect(actionSource, contains('duration: reduceMotion'));
+    expect(actionSource, contains('? Duration.zero'));
+  });
+
+  test('home dashboard combines meaningful motion with tactile surfaces', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+    final workStart = source.indexOf('class _HomeWorkRow');
+    final overviewStart = source.indexOf('class _OverviewTile', workStart);
+    final selectorStart = source.indexOf('class _WarningSelector', overviewStart);
+    final scanStart = source.indexOf('class _ScanBanner', selectorStart);
+
+    expect(workStart, greaterThanOrEqualTo(0));
+    expect(overviewStart, greaterThan(workStart));
+    expect(selectorStart, greaterThan(overviewStart));
+    expect(scanStart, greaterThan(selectorStart));
+
+    final work = source.substring(workStart, overviewStart);
+    final overview = source.substring(overviewStart, selectorStart);
+    final scan = source.substring(scanStart);
+
+    expect(work, contains('TactileInkWell('));
+    expect(work, contains('pressedScale: .99'));
+    expect(overview, contains('AnimatedSwitcher('));
+    expect(overview, contains('disableAnimations'));
+    expect(overview, contains('ValueKey<int>(count)'));
+    expect(scan, contains('TactileInkWell('));
+    expect(scan, contains('pressedScale: .985'));
+  });
+
+  test('high-frequency management cards share tactile press feedback', () {
+    final editor = File('lib/ui/editor_screen.dart').readAsStringSync();
+    final attention = File('lib/ui/attention_screen.dart').readAsStringSync();
+    final stats = File('lib/ui/stats_screen.dart').readAsStringSync();
+    final search = File('lib/ui/search_screen.dart').readAsStringSync();
+
+    final supplierStart = editor.indexOf('Widget _supplierField()');
+    final supplierEnd = editor.indexOf('bool _samePersistedFacts', supplierStart);
+    final expiryStart = editor.indexOf('Widget _expiryMode', supplierEnd);
+    final expiryEnd = editor.indexOf('@override\n  Widget build', expiryStart);
+    expect(supplierStart, greaterThanOrEqualTo(0));
+    expect(supplierEnd, greaterThan(supplierStart));
+    expect(expiryStart, greaterThan(supplierEnd));
+    expect(expiryEnd, greaterThan(expiryStart));
+    expect(
+      editor.substring(supplierStart, supplierEnd),
+      contains('TactileInkWell('),
+    );
+    expect(
+      editor.substring(expiryStart, expiryEnd),
+      contains('TactileInkWell('),
+    );
+
+    final taskStart = attention.indexOf('class _AttentionCard');
+    expect(taskStart, greaterThanOrEqualTo(0));
+    expect(attention.substring(taskStart), contains('TactileInkWell('));
+
+    final metricStart = stats.indexOf('class _SnapshotCard');
+    expect(metricStart, greaterThanOrEqualTo(0));
+    expect(stats.substring(metricStart), contains('TactileInkWell('));
+
+    final catalogStart = search.indexOf('class _CatalogCandidateCard');
+    expect(catalogStart, greaterThanOrEqualTo(0));
+    expect(search.substring(catalogStart), contains('TactileInkWell('));
   });
 
 

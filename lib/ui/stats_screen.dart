@@ -288,9 +288,12 @@ class _SnapshotCard extends StatelessWidget {
             ? content
             : Material(
                 color: Colors.transparent,
-                child: InkWell(
+                child: TactileInkWell(
                   onTap: metric.onTap,
                   borderRadius: BorderRadius.circular(22),
+                  splashColor: primary.withValues(alpha: .08),
+                  highlightColor: primary.withValues(alpha: .04),
+                  pressedScale: .99,
                   child: content,
                 ),
               ),
