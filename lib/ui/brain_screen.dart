@@ -1830,8 +1830,8 @@ class _BrainScreenState extends State<BrainScreen> {
   String _sectionReply(AppSection section) => switch (section) {
     AppSection.home => 'Home opened.',
     AppSection.stock => 'Medicine Database opened.',
-    AppSection.ai => 'AI Controller is already open.',
-    AppSection.calculator => 'Calculator opened.',
+    AppSection.ai => 'Aaris Brain is already open.',
+    AppSection.calculator => 'Insights opened.',
     AppSection.profile => 'Profile opened.',
   };
 
