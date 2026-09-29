@@ -641,6 +641,36 @@ class _SearchScreenState extends State<SearchScreen> {
       onPressed: onPressed,
     );
 
+    Widget responsiveActionStrip(
+      List<Widget> actions, {
+      double spacing = 8,
+    }) => LayoutBuilder(
+      builder: (context, constraints) {
+        final stack =
+            constraints.maxWidth < 360 ||
+            MediaQuery.textScalerOf(context).scale(14) > 20;
+        if (stack) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < actions.length; index++) ...[
+                actions[index],
+                if (index != actions.length - 1) SizedBox(height: spacing),
+              ],
+            ],
+          );
+        }
+        return Row(
+          children: [
+            for (var index = 0; index < actions.length; index++) ...[
+              Expanded(child: actions[index]),
+              if (index != actions.length - 1) SizedBox(width: spacing),
+            ],
+          ],
+        );
+      },
+    );
+
     final body = CustomScrollView(
       key: PageStorageKey('search-${widget.scope}-${widget.database}'),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -669,46 +699,42 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 if (widget.database) ...[
-                  Row(
-                    children: [
-                      Expanded(
+                  responsiveActionStrip(
+                    [
+                      blueAction(
+                        icon: Icons.add_rounded,
+                        label: 'Add medicine',
+                        onPressed: _routeOpening
+                            ? null
+                            : () => unawaited(
+                                _runExclusiveRoute(
+                                  () => openEditor(context, controller),
+                                ),
+                              ),
+                      ),
+                      Tooltip(
+                        message: 'Add / Import medicines',
                         child: blueAction(
-                          icon: Icons.add_rounded,
-                          label: 'Add medicine',
+                          icon: Icons.file_upload_outlined,
+                          label: 'Import stock',
                           onPressed: _routeOpening
                               ? null
                               : () => unawaited(
                                   _runExclusiveRoute(
-                                    () => openEditor(context, controller),
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Tooltip(
-                          message: 'Add / Import medicines',
-                          child: blueAction(
-                            icon: Icons.file_upload_outlined,
-                            label: 'Import stock',
-                            onPressed: _routeOpening
-                                ? null
-                                : () => unawaited(
-                                    _runExclusiveRoute(
-                                      () => Navigator.push<void>(
-                                        context,
-                                        MaterialPageRoute<void>(
-                                          builder: (_) => ImportCenterScreen(
-                                            controller: controller,
-                                          ),
+                                    () => Navigator.push<void>(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => ImportCenterScreen(
+                                          controller: controller,
                                         ),
                                       ),
                                     ),
                                   ),
-                          ),
+                                ),
                         ),
                       ),
                     ],
+                    spacing: 10,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -793,33 +819,23 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: blueAction(
-                        icon: Icons.qr_code_scanner_rounded,
-                        label: 'Scan',
-                        onPressed: _routeOpening ? null : _scanner,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: blueAction(
-                        icon: Icons.mic_none_rounded,
-                        label: 'Voice',
-                        onPressed: _routeOpening ? null : _mic,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: blueAction(
-                        icon: Icons.playlist_add_rounded,
-                        label: 'Paste list',
-                        onPressed: _routeOpening ? null : _bulk,
-                      ),
-                    ),
-                  ],
-                ),
+                responsiveActionStrip([
+                  blueAction(
+                    icon: Icons.qr_code_scanner_rounded,
+                    label: 'Scan',
+                    onPressed: _routeOpening ? null : _scanner,
+                  ),
+                  blueAction(
+                    icon: Icons.mic_none_rounded,
+                    label: 'Voice',
+                    onPressed: _routeOpening ? null : _mic,
+                  ),
+                  blueAction(
+                    icon: Icons.playlist_add_rounded,
+                    label: 'Paste list',
+                    onPressed: _routeOpening ? null : _bulk,
+                  ),
+                ]),
                 if (widget.database)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
