@@ -33,6 +33,7 @@ class _VersionHistoryScreenState extends State<VersionHistoryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         title: const Text('Restore this version?'),
         content: Text(
           'Medicine facts will return to the state saved before “${version.label}”. Dashboard, search and Tracking will recalculate immediately.',
