@@ -308,4 +308,32 @@ void main() {
     );
   });
 
+  test('transient feedback replaces stale snackbar queues', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+
+    expect(
+      RegExp(r'clearSnackBars\(\)').allMatches(source).length,
+      greaterThanOrEqualTo(2),
+    );
+  });
+
+  test('high-risk supplier return and backup restore actions are explicit', () {
+    final supplier = File('lib/ui/supplier_screen.dart').readAsStringSync();
+    final backup = File('lib/ui/backup_screen.dart').readAsStringSync();
+
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,220}child:\s*const Text\('Mark returned'\)",
+      ).hasMatch(supplier),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r"backgroundColor:\s*red,[\s\S]{0,260}child:\s*const Text\('Restore backup'\)",
+      ).hasMatch(backup),
+      isTrue,
+    );
+  });
+
+
 }
