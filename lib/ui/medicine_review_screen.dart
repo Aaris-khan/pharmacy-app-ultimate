@@ -654,7 +654,9 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
     final loading = _sourceLoading || _matchLoading;
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm medicine')),
-      body: _sourceLoading
+      body: SafeArea(
+        top: false,
+        child: _sourceLoading
           ? const Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -743,6 +745,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 
