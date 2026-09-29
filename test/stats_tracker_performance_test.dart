@@ -44,7 +44,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final tracker = find.text('Sold Medicine Tracker');
+    final tracker = find.text('Sales tracker');
     await tester.ensureVisible(tracker);
     await tester.pumpAndSettle();
     await tester.tap(tracker);
