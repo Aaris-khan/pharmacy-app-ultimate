@@ -344,7 +344,7 @@ class _ActivityScreenState extends State<ActivityScreen> {
     body: SafeArea(
       top: false,
       child: ActiveListenableBuilder(
-          listenable: controller,
+        listenable: controller,
         rebuildToken: () => controller.snapshot,
         builder: (context, _) {
           final events = controller.snapshot.events;
