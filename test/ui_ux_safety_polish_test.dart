@@ -308,4 +308,52 @@ void main() {
     );
   });
 
+
+  test('stock cards surface operational quantity and unit cost at a glance', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class MedicineCard');
+    final end = source.indexOf('class _ExpiryBorder', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final cardSource = source.substring(start, end);
+
+    expect(cardSource, contains("'Qty ${record.quantity}'"));
+    expect(
+      cardSource,
+      contains("'Cost ${money(record.unitPricePaise!)}'"),
+    );
+    expect(
+      cardSource,
+      contains("'${record.quantity} units in stock'"),
+    );
+  });
+
+  test('latest user feedback replaces stale snackbar feedback', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final feedback = source.substring(source.indexOf('void showError'));
+
+    expect(
+      RegExp(r'removeCurrentSnackBar\(\)').allMatches(feedback).length,
+      greaterThanOrEqualTo(2),
+    );
+  });
+
+  test('supplier fields release the keyboard when the user taps away', () {
+    final source = File('lib/ui/supplier_editor.dart').readAsStringSync();
+
+    expect(
+      RegExp(r'onTapOutside:\s*\(_\)').allMatches(source).length,
+      greaterThanOrEqualTo(3),
+    );
+  });
+
+  test('wide screens keep primary navigation compact and reachable', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(source, contains('constraints: const BoxConstraints(maxWidth: 720)'));
+    expect(source, contains('alignment: Alignment.bottomCenter'));
+    expect(source, contains('Icons.home_outlined'));
+    expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
+  });
+
 }
