@@ -52,6 +52,7 @@ class ScannerView extends StatelessWidget {
       ],
     ),
     body: SafeArea(
+      top: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

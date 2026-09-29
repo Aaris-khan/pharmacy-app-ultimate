@@ -1169,21 +1169,22 @@ class _EditorScreenState extends State<EditorScreen> {
           borderRadius: BorderRadius.circular(18),
           splashColor: primary.withValues(alpha: .10),
           highlightColor: primary.withValues(alpha: .05),
-          child: SizedBox(
-            height: 54,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (selected) ...[
-                  const Icon(Icons.check_rounded, color: primary, size: 20),
-                  const SizedBox(width: 7),
-                ],
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 54),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (selected) ...[
+                    const Icon(Icons.check_rounded, color: primary, size: 20),
+                    const SizedBox(width: 7),
+                  ],
+                  Flexible(
                     child: Text(
                       monthOnly ? 'Month / year' : 'Full date',
-                      maxLines: 1,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: selected ? primaryDeep : ink,
                         fontWeight: selected
@@ -1192,8 +1193,8 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

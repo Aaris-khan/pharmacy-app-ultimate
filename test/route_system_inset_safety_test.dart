@@ -37,6 +37,7 @@ void main() {
       'lib/ui/editor_screen.dart',
       'lib/ui/search_screen.dart',
       'lib/ui/supplier_editor.dart',
+      'lib/ui/scanner_view.dart',
     ];
 
     final topInsetSafety = RegExp(

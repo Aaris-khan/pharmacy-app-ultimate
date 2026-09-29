@@ -119,4 +119,29 @@ void main() {
       contains('floatingLabelBehavior: FloatingLabelBehavior.always'),
     );
   });
+  test('expiry precision controls grow with accessibility text', () {
+    final source = File('lib/ui/editor_screen.dart').readAsStringSync();
+    final start = source.indexOf('Widget _expiryMode');
+    final end = source.indexOf('@override\n  Widget build', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final modeSource = source.substring(start, end);
+
+    expect(modeSource, contains('ConstrainedBox('));
+    expect(modeSource, contains('maxLines: 2'));
+    expect(modeSource, isNot(contains('FittedBox(')));
+  });
+
+  test('today work cards keep actionable text readable', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+    final start = source.indexOf('class _HomeWorkRow');
+    final end = source.indexOf('class _OverviewTile', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final taskSource = source.substring(start, end);
+
+    expect(RegExp(r'maxLines:\s*2').allMatches(taskSource).length, 2);
+    expect(taskSource, isNot(contains('maxLines: 1')));
+  });
+
 }

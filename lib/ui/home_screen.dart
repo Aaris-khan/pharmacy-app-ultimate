@@ -538,7 +538,7 @@ class _HomeWorkRow extends StatelessWidget {
                   children: [
                     Text(
                       task.action,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: color,
@@ -549,7 +549,7 @@ class _HomeWorkRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       task.title,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: ink,
