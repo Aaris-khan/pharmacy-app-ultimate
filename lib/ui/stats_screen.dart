@@ -307,8 +307,10 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Sold Medicine Tracker')),
-    body: ActiveListenableBuilder(
-      listenable: controller,
+    body: SafeArea(
+      top: false,
+      child: ActiveListenableBuilder(
+        listenable: controller,
       rebuildToken: () => controller.salesOverviewEpoch,
       builder: (context, _) {
         final overview = controller.salesOverview;
@@ -383,7 +385,8 @@ class _SoldMedicineTrackerScreen extends StatelessWidget {
             );
           },
         );
-      },
+        },
+      ),
     ),
   );
 }
