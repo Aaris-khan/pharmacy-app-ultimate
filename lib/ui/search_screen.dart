@@ -860,7 +860,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Searching: ${scopeTitle(widget.scope, settings)}${widget.scope == SearchScope.all ? '' : ' only'}',
+                          'Scope · ${scopeTitle(widget.scope, settings)}${widget.scope == SearchScope.all ? '' : ' only'}',
                           style: const TextStyle(
                             fontSize: 12,
                             color: muted,
@@ -879,8 +879,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 if (_scan != null &&
                     widget.database &&
-                    !_catalogLoading &&
-                    _catalogHits.isEmpty)
+                    !_catalogLoading)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: OutlinedButton.icon(
