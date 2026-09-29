@@ -78,5 +78,19 @@ void main() {
     expect(source, contains("'Unit cost (₹)'"));
     expect(source, contains('DropdownButtonFormField<String>'));
     expect(source, contains('bool _matchesOriginalRecord()'));
+    expect(
+      source,
+      contains('floatingLabelBehavior: FloatingLabelBehavior.always'),
+      reason: 'Saved values must not hide their field meaning.',
+    );
+  });
+
+  test('filled date fields keep MFG/EXP meaning visible', () {
+    final source = File('lib/ui/date_field.dart').readAsStringSync();
+
+    expect(
+      source,
+      contains('floatingLabelBehavior: FloatingLabelBehavior.always'),
+    );
   });
 }
