@@ -85,6 +85,32 @@ void main() {
     );
   });
 
+  test('filled app form fields keep their labels after entry', () {
+    final source = File('lib/app.dart').readAsStringSync();
+
+    expect(
+      source,
+      contains('floatingLabelBehavior: FloatingLabelBehavior.auto'),
+    );
+    expect(
+      source,
+      isNot(contains('floatingLabelBehavior: FloatingLabelBehavior.never')),
+    );
+  });
+
+  test('raised action labels honor text scaling instead of shrinking text', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class RaisedActionButton');
+    final end = source.indexOf('BoxDecoration depthDecoration', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final actionSource = source.substring(start, end);
+
+    expect(actionSource, contains('ConstrainedBox('));
+    expect(actionSource, contains('maxLines: 2'));
+    expect(actionSource, isNot(contains('FittedBox(')));
+  });
+
   test('filled date fields keep MFG/EXP meaning visible', () {
     final source = File('lib/ui/date_field.dart').readAsStringSync();
 

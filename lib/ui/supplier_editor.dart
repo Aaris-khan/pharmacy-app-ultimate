@@ -290,6 +290,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       ),
     ),
     body: SafeArea(
+      top: false,
       child: Form(
         key: _formKey,
         child: ListView(

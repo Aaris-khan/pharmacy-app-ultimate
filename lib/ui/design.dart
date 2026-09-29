@@ -398,26 +398,28 @@ class RaisedActionButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(radius),
             splashColor: primary.withValues(alpha: .10),
             highlightColor: primary.withValues(alpha: .05),
-            child: SizedBox(
-              height: height,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: height),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(icon, size: 19, color: primary),
                     const SizedBox(width: 8),
                     Flexible(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          style: const TextStyle(
-                            color: primaryDeep,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                          ),
+                      child: Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: primaryDeep,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),

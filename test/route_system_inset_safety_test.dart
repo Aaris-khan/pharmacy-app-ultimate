@@ -31,4 +31,28 @@ void main() {
       );
     }
   });
+
+  test('dynamic app-bar management routes do not reapply the top inset', () {
+    const routes = <String>[
+      'lib/ui/editor_screen.dart',
+      'lib/ui/search_screen.dart',
+      'lib/ui/supplier_editor.dart',
+    ];
+
+    final topInsetSafety = RegExp(
+      r'body:\s*SafeArea\(\s*top:\s*false',
+      multiLine: true,
+    );
+
+    for (final path in routes) {
+      final source = File(path).readAsStringSync();
+      expect(
+        source,
+        matches(topInsetSafety),
+        reason:
+            '$path is laid out below an AppBar, so its body must not add the '
+            'status-bar inset a second time.',
+      );
+    }
+  });
 }

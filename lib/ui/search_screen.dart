@@ -1124,7 +1124,7 @@ class _SearchScreenState extends State<SearchScreen> {
         ? body
         : Scaffold(
             appBar: AppBar(title: Text(title)),
-            body: SafeArea(child: body),
+            body: SafeArea(top: false, child: body),
           );
   }
 }

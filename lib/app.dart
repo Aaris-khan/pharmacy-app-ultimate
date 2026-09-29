@@ -18,7 +18,8 @@ ThemeData _appTheme() {
   final base = pharmacyTheme();
   return base.copyWith(
     inputDecorationTheme: base.inputDecorationTheme.copyWith(
-      floatingLabelBehavior: FloatingLabelBehavior.never,
+      // Preserve field identity after focus/value entry across every form.
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
       labelStyle: const TextStyle(color: muted),
       floatingLabelStyle: const TextStyle(color: muted),
     ),

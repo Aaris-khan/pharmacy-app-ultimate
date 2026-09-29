@@ -1244,6 +1244,7 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ),
         body: SafeArea(
+          top: false,
           child: Form(
             key: _formKey,
             child: ListView(
