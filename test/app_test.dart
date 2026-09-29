@@ -153,7 +153,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Stock'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add / Import medicines'));
+    await tester.tap(find.byTooltip('Import stock'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add manually'));
     await tester.pumpAndSettle();
@@ -234,6 +234,58 @@ void main() {
       expect(
         find.byWidgetPredicate((widget) => widget is MedicineCard && widget.record.name == 'Drotaverine'),
         findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'expanding a scoped search keeps the query and reveals whole-stock matches',
+    (tester) async {
+      final controller = await seeded();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: pharmacyTheme(),
+          home: SearchScreen(
+            controller: controller,
+            scope: SearchScope.shortExpiry,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final query = find.byType(TextField).first;
+      await tester.enterText(query, 'Pantoprazole');
+      await tester.pump(const Duration(milliseconds: 160));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is MedicineCard && widget.record.name == 'Pantoprazole',
+        ),
+        findsNothing,
+      );
+      final searchAll = find.text('Search all medicines');
+      expect(searchAll, findsOneWidget);
+
+      await tester.tap(searchAll);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is MedicineCard && widget.record.name == 'Pantoprazole',
+        ),
+        findsOneWidget,
+      );
+      final activeQuery = find.byType(TextField).last;
+      expect(
+        tester.widget<TextField>(activeQuery).controller!.text,
+        'Pantoprazole',
       );
       expect(tester.takeException(), isNull);
 

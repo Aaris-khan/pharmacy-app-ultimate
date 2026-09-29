@@ -63,6 +63,44 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('Empty Home shows one clear add action and no empty queue link', (
+    tester,
+  ) async {
+    final controller = PharmacyController(
+      MemoryInventoryStorage(),
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+    final autopilot = AarisAutopilotSupervisor(
+      controller,
+      startImmediately: false,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: pharmacyTheme(),
+        home: Scaffold(
+          body: HomeScreen(
+            controller: controller,
+            autopilot: autopilot,
+            onOpenWorkQueue: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Add medicine'), findsOneWidget);
+    expect(find.byTooltip('Add medicine'), findsNothing);
+    expect(find.text('सभी देखें'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    autopilot.dispose();
+    controller.dispose();
+    await tester.pump();
+  });
+
   test('Text buttons use the app font instead of the default block font', () {
     final style = pharmacyTheme().textButtonTheme.style;
     final textStyle = style?.textStyle?.resolve(const <WidgetState>{});

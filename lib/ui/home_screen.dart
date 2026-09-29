@@ -252,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: 'Sold Medicines',
                   caption: 'Ready to reorder',
                   count: projection.soldCount,
-                  icon: Icons.check_circle_outline_rounded,
+                  icon: Icons.sell_rounded,
                   color: amber,
                   background: warningSoft,
                   onTap: () => _open(context, SearchScope.sold),
@@ -341,12 +341,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                GlassIconButton(
-                  tooltip: 'Add medicine',
-                  onPressed: _edit,
-                  icon: Icons.add_circle_outline_rounded,
-                  size: 48,
-                ),
+                if (!projection.isEmpty)
+                  GlassIconButton(
+                    tooltip: 'Add medicine',
+                    onPressed: _edit,
+                    icon: Icons.add_circle_outline_rounded,
+                    size: 48,
+                  ),
               ],
             ),
           ),
@@ -384,11 +385,13 @@ class _TodayWorkPreview extends StatelessWidget {
         children: [
           SectionHeading(
             'आज के काम',
-            action: TextButton.icon(
-              onPressed: onOpenWorkQueue,
-              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-              label: const Text('सभी देखें'),
-            ),
+            action: emptyInventory
+                ? null
+                : TextButton.icon(
+                    onPressed: onOpenWorkQueue,
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                    label: const Text('सभी देखें'),
+                  ),
           ),
           if (emptyInventory)
             EmptyState(
