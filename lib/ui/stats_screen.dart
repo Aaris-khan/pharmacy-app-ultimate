@@ -297,6 +297,8 @@ class _SnapshotCard extends StatelessWidget {
       label: metric.onTap == null
           ? null
           : '${metric.label}. ${metric.detail}. Open full tracker.',
+      onTap: metric.onTap,
+      excludeSemantics: metric.onTap != null,
       child: GlassPanel(
         radius: 22,
         elevation: 1,
