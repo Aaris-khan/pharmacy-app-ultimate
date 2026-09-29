@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../domain/medicine.dart';
@@ -89,9 +91,50 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
     super.dispose();
   }
 
+  Supplier _draftSupplier(int returnDays) {
+    final old = widget.supplier;
+    return Supplier.fromJson(<String, dynamic>{
+      'id': old?.id ?? newId(),
+      'name': _name.text,
+      'returnBeforeExpiryDays': returnDays,
+      'address': _address.text,
+      'gstin': _gstin.text,
+      'drugLicenceNo': _drugLicenceNo.text,
+      'customFields': [
+        for (final field in _custom)
+          <String, dynamic>{
+            'id': field.id,
+            'label': field.label.text,
+            'value': field.value.text,
+          },
+      ],
+      'revision': (old?.revision ?? 0) + 1,
+    });
+  }
+
+  bool _matchesOriginalSupplier() {
+    final old = widget.supplier;
+    if (old == null) return false;
+    final returnDays = int.tryParse(_returnDays.text.trim());
+    if (returnDays == null || returnDays < 0 || returnDays > 3650) {
+      return false;
+    }
+    try {
+      final draft = _draftSupplier(returnDays);
+      final before = old.toJson()..remove('revision');
+      final after = draft.toJson()..remove('revision');
+      return jsonEncode(before) == jsonEncode(after);
+    } on FormatException {
+      return false;
+    }
+  }
+
   void _markDirty() {
-    if (_dirty || _busy) return;
-    setState(() => _dirty = true);
+    if (_busy) return;
+    final nextDirty =
+        widget.supplier == null || !_matchesOriginalSupplier();
+    if (_dirty == nextDirty) return;
+    setState(() => _dirty = nextDirty);
   }
 
   Future<bool> _confirmDiscard() async =>
@@ -175,8 +218,8 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
           value: TextEditingController(),
         ),
       );
-      _dirty = true;
     });
+    _markDirty();
   }
 
   Future<void> _save() async {
@@ -191,23 +234,8 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
     setState(() => _busy = true);
     try {
       final old = widget.supplier;
-      final supplier = Supplier.fromJson(<String, dynamic>{
-        'id': old?.id ?? newId(),
-        'name': _name.text,
-        'returnBeforeExpiryDays': returnDays,
-        'address': _address.text,
-        'gstin': _gstin.text,
-        'drugLicenceNo': _drugLicenceNo.text,
-        'customFields': [
-          for (final field in _custom)
-            <String, dynamic>{
-              'id': field.id,
-              'label': field.label.text,
-              'value': field.value.text,
-            },
-        ],
-        'revision': (old?.revision ?? 0) + 1,
-      });
+      if (old != null && _matchesOriginalSupplier()) return;
+      final supplier = _draftSupplier(returnDays);
       await widget.controller.saveSupplier(
         supplier,
         expectedRevision: widget.controller.snapshot.revision,
@@ -278,7 +306,9 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
     bottomNavigationBar: SafeArea(
       minimum: const EdgeInsets.fromLTRB(20, 10, 20, 12),
       child: FilledButton.icon(
-        onPressed: _busy ? null : _save,
+        onPressed: _busy || (widget.supplier != null && !_dirty)
+            ? null
+            : _save,
         icon: _busy
             ? const SizedBox(
                 width: 18,
@@ -375,9 +405,10 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
                                   onPressed: _busy
                                       ? null
                                       : () {
-                                          final removed = _custom.removeAt(index);
+                                          final removed = _custom[index];
+                                          setState(() => _custom.removeAt(index));
                                           removed.dispose();
-                                          setState(() => _dirty = true);
+                                          _markDirty();
                                         },
                                   icon: const Icon(Icons.close_rounded),
                                 ),

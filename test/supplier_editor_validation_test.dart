@@ -176,4 +176,65 @@ void main() {
     }
   });
 
+  testWidgets('existing supplier avoids no-op revisions and clears reverted edits', (
+    tester,
+  ) async {
+    const supplier = Supplier(
+      id: 'supplier-semantic-dirty',
+      name: 'ABC Pharma Distributor',
+      returnBeforeExpiryDays: 30,
+      address: 'Palwal',
+      gstin: '22AAAAA0000A1Z5',
+      revision: 4,
+    );
+    final controller = PharmacyController(
+      MemoryInventoryStorage(
+        InventorySnapshot(
+          suppliers: <String, Supplier>{supplier.id: supplier},
+        ),
+      ),
+      clock: () => DateTime(2026, 9, 29, 10),
+      backgroundSearch: false,
+    );
+    await controller.initialize();
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SupplierEditorScreen(
+            controller: controller,
+            supplier: supplier,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final save = find.widgetWithText(FilledButton, 'Save supplier');
+      expect(save, findsOneWidget);
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      final name = find.byType(TextFormField).first;
+      await tester.enterText(name, 'ABC Pharma Distributor Updated');
+      await tester.pump();
+      expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+
+      await tester.enterText(name, '  ABC   Pharma Distributor  ');
+      await tester.pump();
+      expect(
+        tester.widget<FilledButton>(save).onPressed,
+        isNull,
+        reason:
+            'Whitespace-only differences normalize to the persisted supplier facts.',
+      );
+
+      expect(controller.snapshot.revision, 0);
+      expect(controller.snapshot.suppliers[supplier.id]!.revision, 4);
+      expect(tester.takeException(), isNull);
+    } finally {
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
+  });
+
 }
