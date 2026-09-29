@@ -485,7 +485,12 @@ class _EditorScreenState extends State<EditorScreen> {
     return Medicine.fromJson(data);
   }
 
-  Future<bool> _confirm(String title, String message, String action) async =>
+  Future<bool> _confirm(
+    String title,
+    String message,
+    String action, {
+    bool destructive = false,
+  }) async =>
       await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -497,6 +502,12 @@ class _EditorScreenState extends State<EditorScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: destructive
+                  ? FilledButton.styleFrom(
+                      backgroundColor: red,
+                      foregroundColor: Colors.white,
+                    )
+                  : null,
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(action),
             ),
@@ -639,6 +650,7 @@ class _EditorScreenState extends State<EditorScreen> {
       'Remove ${record.name}?',
       'This stock entry will disappear from inventory, search and totals. It remains in removed history and can be restored.',
       'Remove',
+      destructive: true,
     )) {
       return;
     }
@@ -1077,6 +1089,7 @@ class _EditorScreenState extends State<EditorScreen> {
               'Discard unsaved changes?',
               'Your saved inventory will remain as it was.',
               'Discard',
+              destructive: true,
             ) &&
             context.mounted) {
           setState(() => _allowPop = true);
