@@ -33,6 +33,8 @@ Future<void> openMedicineCapture(
     final choice = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
       builder: (context) => SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
