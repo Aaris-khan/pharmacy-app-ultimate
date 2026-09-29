@@ -421,8 +421,10 @@ void main() {
 
   test('active AI route remains readable instead of being forced to one line', () {
     final source = File('lib/ui/ai_screen.dart').readAsStringSync();
-    final start = source.indexOf('_configuration.key.isNotEmpty');
-    final end = source.indexOf('else if (_configuration.key.isNotEmpty)', start);
+    final label = source.indexOf('Aaris Brain · On-device');
+    expect(label, greaterThanOrEqualTo(0));
+    final start = source.lastIndexOf('child: Text(', label);
+    final end = source.indexOf('else if (_configuration.key.isNotEmpty)', label);
 
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
