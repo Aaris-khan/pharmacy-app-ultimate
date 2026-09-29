@@ -175,11 +175,13 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Row(
             children: [
-              const DepthIcon(
-                Icons.add_rounded,
-                color: primarySoft,
-                background: primary,
+              GlassIconButton(
+                tooltip: 'Add medicine',
+                onPressed: _edit,
+                icon: Icons.add_rounded,
                 size: 46,
+                tint: primary,
+                color: primarySoft,
               ),
               const SizedBox(width: 12),
               Expanded(
