@@ -290,8 +290,12 @@ void main() {
     expect(source, contains('builder: (ctx) => StatefulBuilder('));
     expect(source, contains('scrollable: true'));
     expect(source, contains('autofocus: true'));
-    expect(source, contains('onPressed: draft.trim().isEmpty'));
-    expect(source, contains('Navigator.pop(ctx, draft.trim())'));
+    expect(source, contains('onChanged: (value) => draft = value'));
+    expect(
+      source,
+      contains("'Paste at least one medicine name before searching.'"),
+    );
+    expect(source, contains('Navigator.pop(ctx, clean)'));
     expect(source, contains('textInputAction: TextInputAction.newline'));
   });
 
