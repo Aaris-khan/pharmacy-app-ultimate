@@ -201,7 +201,7 @@ class _ShellState extends State<_Shell> {
       },
     );
 
-    return Scaffold(
+    final shell = Scaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -275,39 +275,51 @@ class _ShellState extends State<_Shell> {
                 selectedIndex: tab,
                 onDestinationSelected: _selectTab,
                 destinations: [
-                  const NavigationDestination(
-                    icon: Icon(Icons.home_outlined),
-                    selectedIcon: Icon(Icons.home_rounded),
+                  NavigationDestination(
+                    icon: _AnimatedNavigationIcon(
+                      icon: Icons.home_outlined,
+                      selectedIcon: Icons.home_rounded,
+                      selected: tab == 0,
+                      reduceMotion: reduceMotion,
+                    ),
                     label: 'Home',
                   ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.inventory_2_outlined),
-                    selectedIcon: Icon(Icons.inventory_2_rounded),
+                  NavigationDestination(
+                    icon: _AnimatedNavigationIcon(
+                      icon: Icons.inventory_2_outlined,
+                      selectedIcon: Icons.inventory_2_rounded,
+                      selected: tab == 1,
+                      reduceMotion: reduceMotion,
+                    ),
                     label: 'Stock',
                   ),
                   NavigationDestination(
-                    icon: _AnimatedBrainNavigationIcon(
+                    icon: _AnimatedNavigationIcon(
                       icon: Icons.psychology_outlined,
-                      badgeCount: badgeCount,
-                      showBadge: issues > 0,
-                      reduceMotion: reduceMotion,
-                    ),
-                    selectedIcon: _AnimatedBrainNavigationIcon(
-                      icon: Icons.psychology_rounded,
+                      selectedIcon: Icons.psychology_rounded,
+                      selected: tab == 2,
                       badgeCount: badgeCount,
                       showBadge: issues > 0,
                       reduceMotion: reduceMotion,
                     ),
                     label: 'Aaris Brain',
                   ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.insights_outlined),
-                    selectedIcon: Icon(Icons.insights_rounded),
+                  NavigationDestination(
+                    icon: _AnimatedNavigationIcon(
+                      icon: Icons.insights_outlined,
+                      selectedIcon: Icons.insights_rounded,
+                      selected: tab == 3,
+                      reduceMotion: reduceMotion,
+                    ),
                     label: 'Insights',
                   ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.person_outline_rounded),
-                    selectedIcon: Icon(Icons.person_rounded),
+                  NavigationDestination(
+                    icon: _AnimatedNavigationIcon(
+                      icon: Icons.person_outline_rounded,
+                      selectedIcon: Icons.person_rounded,
+                      selected: tab == 4,
+                      reduceMotion: reduceMotion,
+                    ),
                     label: 'Profile',
                   ),
                 ],
@@ -319,40 +331,60 @@ class _ShellState extends State<_Shell> {
         ),
       ),
     );
+
+    return PopScope(
+      canPop: tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && tab != 0) _selectTab(0);
+      },
+      child: shell,
+    );
   }
 }
 
-class _AnimatedBrainNavigationIcon extends StatelessWidget {
-  const _AnimatedBrainNavigationIcon({
+class _AnimatedNavigationIcon extends StatelessWidget {
+  const _AnimatedNavigationIcon({
     required this.icon,
-    required this.badgeCount,
-    required this.showBadge,
+    required this.selectedIcon,
+    required this.selected,
     required this.reduceMotion,
+    this.badgeCount = 0,
+    this.showBadge = false,
   });
 
-  final IconData icon;
+  final IconData icon, selectedIcon;
+  final bool selected;
   final int badgeCount;
   final bool showBadge;
   final bool reduceMotion;
 
   @override
-  Widget build(BuildContext context) => AnimatedSwitcher(
-    duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
-    switchInCurve: Curves.easeOutCubic,
-    switchOutCurve: Curves.easeInCubic,
-    transitionBuilder: (child, animation) => FadeTransition(
-      opacity: animation,
-      child: ScaleTransition(
-        scale: Tween<double>(begin: .92, end: 1).animate(animation),
-        child: child,
+  Widget build(BuildContext context) {
+    final currentIcon = selected ? selectedIcon : icon;
+    return AnimatedSwitcher(
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: .92, end: 1).animate(animation),
+          child: child,
+        ),
       ),
-    ),
-    child: Badge.count(
-      key: ValueKey((icon.codePoint, badgeCount, showBadge)),
-      count: badgeCount,
-      isLabelVisible: showBadge,
-      child: Icon(icon),
-    ),
-  );
+      child: Badge.count(
+        key: ValueKey((
+          selected,
+          currentIcon.codePoint,
+          badgeCount,
+          showBadge,
+        )),
+        count: badgeCount,
+        isLabelVisible: showBadge,
+        child: Icon(currentIcon),
+      ),
+    );
+  }
 }
-

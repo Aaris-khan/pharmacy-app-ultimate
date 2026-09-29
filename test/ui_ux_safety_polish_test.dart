@@ -738,26 +738,43 @@ void main() {
   });
 
 
-  test('primary navigation uses a conventional Home glyph and motion-safe Brain badge', () {
-    final source = File('lib/app.dart').readAsStringSync();
+  test(
+    'primary navigation animates destination glyphs and returns home on system back',
+    () {
+      final source = File('lib/app.dart').readAsStringSync();
 
-    expect(source, contains('Icons.home_outlined'));
-    expect(source, contains('Icons.home_rounded'));
-    expect(source, isNot(contains('Icons.dashboard_outlined')));
+      expect(source, contains('Icons.home_outlined'));
+      expect(source, contains('Icons.home_rounded'));
+      expect(source, isNot(contains('Icons.dashboard_outlined')));
+      expect(
+        RegExp(r'_AnimatedNavigationIcon\(').allMatches(source).length,
+        greaterThanOrEqualTo(6),
+      );
 
-    final start = source.indexOf('class _AnimatedBrainNavigationIcon');
-    expect(start, greaterThanOrEqualTo(0));
-    final icon = source.substring(start);
-    expect(icon, contains('AnimatedSwitcher('));
-    expect(
-      icon,
-      contains(
-        'duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180)',
-      ),
-    );
-    expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
-    expect(icon, contains('ValueKey((icon.codePoint, badgeCount, showBadge))'));
-  });
+      expect(source, contains('final shell = Scaffold('));
+      expect(source, contains('return PopScope('));
+      expect(source, contains('canPop: tab == 0'));
+      expect(source, contains('if (!didPop && tab != 0) _selectTab(0);'));
+
+      final start = source.indexOf('class _AnimatedNavigationIcon');
+      expect(start, greaterThanOrEqualTo(0));
+      final icon = source.substring(start);
+      expect(icon, contains('final currentIcon = selected ? selectedIcon : icon;'));
+      expect(icon, contains('AnimatedSwitcher('));
+      expect(
+        icon,
+        contains(
+          'duration: reduceMotion\n'
+          '          ? Duration.zero\n'
+          '          : const Duration(milliseconds: 180)',
+        ),
+      );
+      expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
+      expect(icon, contains('ValueKey(('));
+      expect(icon, contains('currentIcon.codePoint'));
+      expect(icon, contains('child: Icon(currentIcon)'));
+    },
+  );
 
   test('Aaris Brain names the current Insights destination in navigation replies', () {
     final source = File('lib/ui/brain_screen.dart').readAsStringSync();
