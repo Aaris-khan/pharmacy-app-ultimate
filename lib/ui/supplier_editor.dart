@@ -141,6 +141,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
           title: const Text('Discard unsaved supplier changes?'),
           content: const Text(
             'Your saved supplier details will remain as they were.',
@@ -151,6 +152,10 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
               child: const Text('Keep editing'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: red,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Discard'),
             ),
@@ -167,6 +172,7 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
+          scrollable: true,
           title: const Text('Add supplier field'),
           content: TextField(
             controller: label,
@@ -177,6 +183,9 @@ class _SupplierEditorScreenState extends State<SupplierEditorScreen> {
               hintText: 'e.g. State code',
               errorText: error.isEmpty ? null : error,
             ),
+            onChanged: (_) {
+              if (error.isNotEmpty) setDialogState(() => error = '');
+            },
             onSubmitted: (_) {
               final clean = label.text.replaceAll(RegExp(r'\s+'), ' ').trim();
               final issue = _supplierCustomFieldLabelError(clean);
