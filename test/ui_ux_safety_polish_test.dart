@@ -353,8 +353,28 @@ void main() {
 
     expect(source, contains('constraints: const BoxConstraints(maxWidth: 720)'));
     expect(source, contains('alignment: Alignment.bottomCenter'));
-    expect(source, contains('Icons.home_outlined'));
-    expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
+    expect(source, contains('Icons.dashboard_outlined'));
+    expect(source, contains('selectedIcon: Icon(Icons.dashboard_rounded)'));
+  });
+
+  test('home keeps empty-state actions focused and status icons meaningful', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+
+    expect(source, contains('if (!projection.isEmpty)'));
+    expect(source, contains('action: emptyInventory'));
+    expect(source, contains('icon: Icons.sell_rounded'));
+  });
+
+  test('scoped search carries the active query into whole-inventory search', () {
+    final source = File('lib/ui/search_screen.dart').readAsStringSync();
+
+    expect(source, contains("this.initialQuery = ''"));
+    expect(source, contains('this.initialBulkQuery'));
+    expect(source, contains('initialQuery: _bulkQuery == null'));
+    expect(source, contains('? _query.text'));
+    expect(source, contains('initialBulkQuery: _bulkQuery'));
+    expect(source, contains("message: 'Import stock'"));
+    expect(source, isNot(contains("message: 'Add / Import medicines'")));
   });
 
   test('high-risk supplier return and backup restore actions are explicit', () {

@@ -20,10 +20,14 @@ class SearchScreen extends StatefulWidget {
     required this.scope,
     this.database = false,
     this.embedded = false,
+    this.initialQuery = '',
+    this.initialBulkQuery,
   });
   final PharmacyController controller;
   final SearchScope scope;
   final bool database, embedded;
+  final String initialQuery;
+  final String? initialBulkQuery;
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
@@ -61,6 +65,12 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    final initialBulkQuery = widget.initialBulkQuery?.trim();
+    if (initialBulkQuery != null && initialBulkQuery.isNotEmpty) {
+      _bulkQuery = initialBulkQuery;
+    } else if (widget.initialQuery.isNotEmpty) {
+      _query.text = widget.initialQuery;
+    }
     _observedSnapshot = widget.controller.snapshot;
     _observedRecords = widget.controller.snapshot.records;
     _observedSearchEpoch = widget.controller.searchProjectionEpoch;
@@ -744,7 +754,7 @@ class _SearchScreenState extends State<SearchScreen> {
                               ),
                       ),
                       Tooltip(
-                        message: 'Add / Import medicines',
+                        message: 'Import stock',
                         child: blueAction(
                           icon: Icons.file_upload_outlined,
                           label: 'Import stock',
@@ -1075,6 +1085,10 @@ class _SearchScreenState extends State<SearchScreen> {
                                     builder: (_) => SearchScreen(
                                       controller: controller,
                                       scope: SearchScope.all,
+                                      initialQuery: _bulkQuery == null
+                                          ? _query.text
+                                          : '',
+                                      initialBulkQuery: _bulkQuery,
                                     ),
                                   ),
                                 ),

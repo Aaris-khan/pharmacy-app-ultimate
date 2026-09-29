@@ -268,8 +268,8 @@ class _ShellState extends State<_Shell> {
                 onDestinationSelected: _selectTab,
                 destinations: [
                   const NavigationDestination(
-                    icon: Icon(Icons.home_outlined),
-                    selectedIcon: Icon(Icons.home_rounded),
+                    icon: Icon(Icons.dashboard_outlined),
+                    selectedIcon: Icon(Icons.dashboard_rounded),
                     label: 'Home',
                   ),
                   const NavigationDestination(
