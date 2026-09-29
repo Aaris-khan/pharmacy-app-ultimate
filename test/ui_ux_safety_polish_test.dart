@@ -779,7 +779,8 @@ void main() {
     final tactile = source.substring(start, end);
 
     expect(source, contains("import 'dart:async';"));
-    expect(tactile, contains('final bool hapticFeedback;'));
+    expect(source, contains('final bool hapticFeedback;'));
+    expect(source, contains('this.hapticFeedback = true'));
     expect(tactile, contains('unawaited(HapticFeedback.selectionClick())'));
     expect(tactile, contains('onTap: enabled ? _handleTap : null'));
   });
