@@ -225,7 +225,12 @@ class _ShellState extends State<_Shell> {
       bottomNavigationBar: SafeArea(
         top: false,
         minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-        child: GlassPanel(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: 1,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: GlassPanel(
           tint: Colors.white,
           radius: 24,
           elevation: .65,
@@ -298,6 +303,8 @@ class _ShellState extends State<_Shell> {
                 ],
               );
             },
+          ),
+            ),
           ),
         ),
       ),
