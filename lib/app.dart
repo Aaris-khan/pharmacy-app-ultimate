@@ -276,8 +276,8 @@ class _ShellState extends State<_Shell> {
                 onDestinationSelected: _selectTab,
                 destinations: [
                   const NavigationDestination(
-                    icon: Icon(Icons.dashboard_outlined),
-                    selectedIcon: Icon(Icons.dashboard_rounded),
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home_rounded),
                     label: 'Home',
                   ),
                   const NavigationDestination(
@@ -286,15 +286,17 @@ class _ShellState extends State<_Shell> {
                     label: 'Stock',
                   ),
                   NavigationDestination(
-                    icon: Badge.count(
-                      count: badgeCount,
-                      isLabelVisible: issues > 0,
-                      child: const Icon(Icons.psychology_outlined),
+                    icon: _AnimatedBrainNavigationIcon(
+                      icon: Icons.psychology_outlined,
+                      badgeCount: badgeCount,
+                      showBadge: issues > 0,
+                      reduceMotion: reduceMotion,
                     ),
-                    selectedIcon: Badge.count(
-                      count: badgeCount,
-                      isLabelVisible: issues > 0,
-                      child: const Icon(Icons.psychology_rounded),
+                    selectedIcon: _AnimatedBrainNavigationIcon(
+                      icon: Icons.psychology_rounded,
+                      badgeCount: badgeCount,
+                      showBadge: issues > 0,
+                      reduceMotion: reduceMotion,
                     ),
                     label: 'Aaris Brain',
                   ),
@@ -319,3 +321,38 @@ class _ShellState extends State<_Shell> {
     );
   }
 }
+
+class _AnimatedBrainNavigationIcon extends StatelessWidget {
+  const _AnimatedBrainNavigationIcon({
+    required this.icon,
+    required this.badgeCount,
+    required this.showBadge,
+    required this.reduceMotion,
+  });
+
+  final IconData icon;
+  final int badgeCount;
+  final bool showBadge;
+  final bool reduceMotion;
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+    switchInCurve: Curves.easeOutCubic,
+    switchOutCurve: Curves.easeInCubic,
+    transitionBuilder: (child, animation) => FadeTransition(
+      opacity: animation,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: .92, end: 1).animate(animation),
+        child: child,
+      ),
+    ),
+    child: Badge.count(
+      key: ValueKey((icon.codePoint, badgeCount, showBadge)),
+      count: badgeCount,
+      isLabelVisible: showBadge,
+      child: Icon(icon),
+    ),
+  );
+}
+
