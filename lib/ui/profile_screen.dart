@@ -341,8 +341,10 @@ class _ActivityScreenState extends State<ActivityScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Activity & Undo')),
-    body: ActiveListenableBuilder(
-      listenable: controller,
+    body: SafeArea(
+      top: false,
+      child: ActiveListenableBuilder(
+        listenable: controller,
       rebuildToken: () => controller.snapshot,
       builder: (context, _) {
         final events = controller.snapshot.events;
@@ -426,7 +428,8 @@ class _ActivityScreenState extends State<ActivityScreen> {
             );
           },
         );
-      },
+        },
+      ),
     ),
   );
 }
