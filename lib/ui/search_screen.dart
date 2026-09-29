@@ -559,32 +559,42 @@ class _SearchScreenState extends State<SearchScreen> {
     await _runExclusiveRoute(() async {
       result = await showDialog<String>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Search a medicine list'),
-          content: SizedBox(
-            width: 500,
-            child: TextFormField(
-              initialValue: draft,
-              onChanged: (value) => draft = value,
-              minLines: 6,
-              maxLines: 12,
-              maxLength: 30000,
-              decoration: const InputDecoration(
-                hintText:
-                    'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: const Text('Search a medicine list'),
+            scrollable: true,
+            content: SizedBox(
+              width: 500,
+              child: TextFormField(
+                initialValue: draft,
+                autofocus: true,
+                onChanged: (value) {
+                  draft = value;
+                  setDialogState(() {});
+                },
+                minLines: 6,
+                maxLines: 12,
+                maxLength: 30000,
+                textInputAction: TextInputAction.newline,
+                decoration: const InputDecoration(
+                  hintText:
+                      'Paste text from an invoice or a medicine list. Put each medicine on its own line.',
+                ),
               ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: draft.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(ctx, draft.trim()),
+                child: const Text('Find medicines'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, draft),
-              child: const Text('Find medicines'),
-            ),
-          ],
         ),
       );
     });
