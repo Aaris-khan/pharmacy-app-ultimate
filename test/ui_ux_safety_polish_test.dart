@@ -317,14 +317,14 @@ void main() {
     expect(end, greaterThan(start));
     final cardSource = source.substring(start, end);
 
-    expect(cardSource, contains("'Qty ${record.quantity}'"));
+    expect(cardSource, contains(r"'Qty ${record.quantity}'"));
     expect(
       cardSource,
-      contains("'Cost ${money(record.unitPricePaise!)}'"),
+      contains(r"'Cost ${money(record.unitPricePaise!)}'"),
     );
     expect(
       cardSource,
-      contains("'${record.quantity} units in stock'"),
+      contains(r"'${record.quantity} units in stock'"),
     );
   });
 
