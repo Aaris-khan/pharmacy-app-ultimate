@@ -176,7 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               const DepthIcon(
-                Icons.add_rounded,
+                Icons.local_pharmacy_rounded,
                 color: primarySoft,
                 background: primary,
                 size: 46,

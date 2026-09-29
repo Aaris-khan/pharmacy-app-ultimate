@@ -210,9 +210,11 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Add / Import')),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
-          children: [
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(22, 8, 22, 30),
+            children: [
             const ScreenIntro(
               title: 'Add your medicines',
               message:
@@ -297,8 +299,9 @@ class _ImportCenterScreenState extends State<ImportCenterScreen> {
                       },
                 child: Text(_cancelRequested ? 'Cancelling…' : 'Cancel'),
               ),
+              ],
             ],
-          ],
+          ),
         ),
       );
 }

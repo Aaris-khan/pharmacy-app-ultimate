@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -450,6 +451,12 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  bool _samePersistedFacts(Medicine before, Medicine after) {
+    final beforeJson = before.toJson()..remove('revision');
+    final afterJson = after.toJson()..remove('revision');
+    return jsonEncode(beforeJson) == jsonEncode(afterJson);
+  }
+
   Medicine _draft() {
     final old = widget.record;
     final quantityText = fields['quantity']!.text.trim();
@@ -514,6 +521,12 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _busy = true);
     try {
       var draft = _draft();
+      if (!sold &&
+          widget.record != null &&
+          _samePersistedFacts(widget.record!, draft)) {
+        _finishAndPop('No changes were needed.');
+        return;
+      }
       if (sold) {
         if (!await _confirm(
           'Mark this stock sold?',
@@ -964,11 +977,13 @@ class _EditorScreenState extends State<EditorScreen> {
     int lines = 1,
     TextInputType? keyboard,
     int? max,
+    bool autofocus = false,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: _raisedFieldSurface(
       TextFormField(
         controller: fields[key],
+        autofocus: autofocus,
         autovalidateMode: AutovalidateMode.onUserInteraction,
         validator: key == 'name'
             ? (value) => (value?.trim().isEmpty ?? true)
@@ -1090,7 +1105,9 @@ class _EditorScreenState extends State<EditorScreen> {
         bottomNavigationBar: SafeArea(
           minimum: const EdgeInsets.fromLTRB(20, 10, 20, 12),
           child: FilledButton.icon(
-            onPressed: _busy ? null : () => _save(),
+            onPressed: _busy || (record != null && !_dirty)
+                ? null
+                : () => _save(),
             icon: _busy
                 ? const SizedBox(
                     width: 18,
@@ -1194,6 +1211,12 @@ class _EditorScreenState extends State<EditorScreen> {
                         'name',
                         'Medicine name *',
                         hint: 'e.g. Paracetamol',
+                        autofocus:
+                            record == null &&
+                            widget.seed == null &&
+                            widget.scanDraft == null &&
+                            widget.barcode.trim().isEmpty &&
+                            widget.ocrText.trim().isEmpty,
                       ),
                       _saltField(),
                       for (var i = 0; i < _extraSaltControllers.length; i++)
