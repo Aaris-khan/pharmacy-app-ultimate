@@ -401,4 +401,35 @@ void main() {
   });
 
 
+
+  test('long selection sheets can expand on compact or large-text layouts', () {
+    final order = File('lib/ui/order_screen.dart').readAsStringSync();
+    final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
+
+    final orderStart = order.indexOf('showModalBottomSheet<String>');
+    expect(orderStart, greaterThanOrEqualTo(0));
+    final orderSheet = order.substring(orderStart, order.indexOf('if (selected == null', orderStart));
+    expect(orderSheet, contains('isScrollControlled: true'));
+    expect(orderSheet, contains('showDragHandle: true'));
+
+    final aiStart = ai.indexOf('showModalBottomSheet<AiHubQuickAction>');
+    expect(aiStart, greaterThanOrEqualTo(0));
+    final aiSheet = ai.substring(aiStart, ai.indexOf('if (action != null', aiStart));
+    expect(aiSheet, contains('isScrollControlled: true'));
+    expect(aiSheet, contains('showDragHandle: true'));
+  });
+
+  test('active AI route remains readable instead of being forced to one line', () {
+    final source = File('lib/ui/ai_screen.dart').readAsStringSync();
+    final start = source.indexOf('_configuration.key.isNotEmpty');
+    final end = source.indexOf('else if (_configuration.key.isNotEmpty)', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final routeBanner = source.substring(start, end);
+    expect(routeBanner, contains('maxLines: 2'));
+    expect(routeBanner, isNot(contains('maxLines: 1')));
+  });
+
+
 }
