@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:camera_android/camera_android.dart';
 
 import 'app.dart';
@@ -9,6 +10,7 @@ import 'ui/design.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(pharmacySystemUiOverlayStyle);
   // The Android Camera2 implementation supplies the NV21 format ML Kit expects.
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
     AndroidCamera.registerWith();

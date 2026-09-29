@@ -1293,6 +1293,7 @@ class _AiHubHeader extends StatelessWidget {
             color: Colors.transparent,
             child: TactileInkWell(
               onTap: onSettings,
+              tooltip: configured ? 'AI settings · Connected' : 'AI settings',
               borderRadius: BorderRadius.circular(18),
               child: Container(
                 width: 48,
@@ -1689,6 +1690,7 @@ class _AiComposer extends StatelessWidget {
             color: Colors.transparent,
             child: TactileInkWell(
               onTap: busy ? null : onSend,
+              tooltip: busy ? 'AI is working' : 'Run command',
               borderRadius: BorderRadius.circular(24),
               child: Container(
                 width: 48,
@@ -1709,12 +1711,9 @@ class _AiComposer extends StatelessWidget {
                           strokeWidth: 2,
                         ),
                       )
-                    : const Tooltip(
-                        message: 'Run command',
-                        child: Icon(
-                          Icons.arrow_upward_rounded,
-                          color: Colors.white,
-                        ),
+                    : const Icon(
+                        Icons.arrow_upward_rounded,
+                        color: Colors.white,
                       ),
               ),
             ),

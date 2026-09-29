@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../domain/date_input.dart';
 import '../domain/inventory.dart';
@@ -20,6 +21,15 @@ const amber = Color(0xFF90600C);
 const successSoft = Color(0xFFEDF7F1);
 const warningSoft = Color(0xFFFFF5E3);
 const errorSoft = Color(0xFFFFEFF1);
+
+const pharmacySystemUiOverlayStyle = SystemUiOverlayStyle(
+  statusBarColor: Colors.transparent,
+  statusBarIconBrightness: Brightness.dark,
+  statusBarBrightness: Brightness.light,
+  systemNavigationBarColor: canvas,
+  systemNavigationBarIconBrightness: Brightness.dark,
+  systemNavigationBarDividerColor: Colors.transparent,
+);
 
 /// Formats a persisted instant for the device's local wall clock.
 ///
@@ -329,6 +339,7 @@ class TactileInkWell extends StatefulWidget {
     required this.child,
     this.splashColor,
     this.highlightColor,
+    this.tooltip,
     this.pressedScale = .985,
   });
 
@@ -337,6 +348,7 @@ class TactileInkWell extends StatefulWidget {
   final Widget child;
   final Color? splashColor;
   final Color? highlightColor;
+  final String? tooltip;
   final double pressedScale;
 
   @override
@@ -362,7 +374,7 @@ class _TactileInkWellState extends State<TactileInkWell> {
     final reduceMotion =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final enabled = widget.onTap != null;
-    return AnimatedScale(
+    final control = AnimatedScale(
       scale: enabled && _pressed && !reduceMotion ? widget.pressedScale : 1,
       duration: reduceMotion
           ? Duration.zero
@@ -377,6 +389,9 @@ class _TactileInkWellState extends State<TactileInkWell> {
         child: widget.child,
       ),
     );
+    final tooltip = widget.tooltip?.trim();
+    if (tooltip == null || tooltip.isEmpty) return control;
+    return Tooltip(message: tooltip, child: control);
   }
 }
 
@@ -783,6 +798,7 @@ ThemeData pharmacyTheme() => ThemeData(
     scrolledUnderElevation: 4,
     shadowColor: ink.withValues(alpha: .10),
     surfaceTintColor: Colors.transparent,
+    systemOverlayStyle: pharmacySystemUiOverlayStyle,
     titleTextStyle: const TextStyle(
       fontFamily: 'Manrope',
       fontFamilyFallback: ['NotoSansDevanagari'],
@@ -1098,6 +1114,8 @@ class MedicineCard extends StatelessWidget {
       child: Semantics(
         label: semanticLabel,
         button: true,
+        onTap: onTap,
+        excludeSemantics: true,
         child: CustomPaint(
           foregroundPainter: _ExpiryBorder(
             timeline
