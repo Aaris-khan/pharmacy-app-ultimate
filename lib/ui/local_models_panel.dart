@@ -497,7 +497,7 @@ class _LocalModelsPanelState extends State<LocalModelsPanel> {
               ),
           ],
           const SizedBox(height: 4),
-          InkWell(
+          TactileInkWell(
             onTap: () => setState(() => advancedOpen = !advancedOpen),
             borderRadius: BorderRadius.circular(14),
             child: Padding(

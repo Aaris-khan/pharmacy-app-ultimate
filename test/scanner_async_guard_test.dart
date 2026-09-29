@@ -112,6 +112,45 @@ void main() {
     );
   });
 
+  test('rapid capture finish unlocks only after a durable queue acknowledgement', () {
+    expect(
+      scannerHasUsableResult(
+        rapidCapture: true,
+        queuedCaptures: 0,
+        text: '',
+        barcode: '',
+      ),
+      isFalse,
+    );
+    expect(
+      scannerHasUsableResult(
+        rapidCapture: true,
+        queuedCaptures: 1,
+        text: '',
+        barcode: '',
+      ),
+      isTrue,
+    );
+    expect(
+      scannerHasUsableResult(
+        rapidCapture: false,
+        queuedCaptures: 0,
+        text: 'Paracetamol 650 mg',
+        barcode: '',
+      ),
+      isTrue,
+    );
+    expect(
+      scannerHasUsableResult(
+        rapidCapture: false,
+        queuedCaptures: 0,
+        text: '',
+        barcode: '8901234567890',
+      ),
+      isTrue,
+    );
+  });
+
   test('scanner lifecycle drains share one deadline without cancelling work', () async {
     final capture = Completer<void>();
     final frame = Completer<bool>();

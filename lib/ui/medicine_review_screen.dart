@@ -1088,7 +1088,7 @@ class _MedicineReviewScreenState extends State<MedicineReviewScreen> {
       padding: const EdgeInsets.only(bottom: 9),
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
+        child: TactileInkWell(
           onTap: _leaving || _busy
               ? null
               : () => unawaited(_openSavedMatch(record, scanDraft)),

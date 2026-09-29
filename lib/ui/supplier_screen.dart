@@ -130,7 +130,7 @@ class _SupplierScreenState extends State<SupplierScreen> {
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Card(
                   elevation: 0,
-                  child: InkWell(
+                  child: TactileInkWell(
                     borderRadius: BorderRadius.circular(24),
                     onTap: _routeOpening
                         ? null

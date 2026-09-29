@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/autopilot_supervisor.dart';
+import 'design.dart';
 
 /// A compact global signal for urgent pharmacist work.
 ///
@@ -56,8 +57,12 @@ class AarisAutopilotBeacon extends StatelessWidget {
               elevation: 0,
               borderRadius: BorderRadius.circular(16),
               clipBehavior: Clip.antiAlias,
-              child: InkWell(
+              child: TactileInkWell(
                 onTap: onOpenWorkQueue,
+                borderRadius: BorderRadius.circular(16),
+                splashColor: accent.withValues(alpha: .08),
+                highlightColor: accent.withValues(alpha: .04),
+                pressedScale: .99,
                 child: Container(
                   padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
                   decoration: BoxDecoration(

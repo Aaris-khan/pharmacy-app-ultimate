@@ -542,6 +542,30 @@ void main() {
     expect(scan, contains('pressedScale: .985'));
   });
 
+  test('remaining high-frequency cards share tactile interaction semantics', () {
+    for (final path in <String>[
+      'lib/ui/ai_screen.dart',
+      'lib/ui/autopilot_beacon.dart',
+      'lib/ui/local_models_panel.dart',
+      'lib/ui/medicine_review_screen.dart',
+      'lib/ui/supplier_screen.dart',
+    ]) {
+      final source = File(path).readAsStringSync();
+      expect(source, contains('TactileInkWell('), reason: path);
+      expect(RegExp(r'\\bInkWell\\(').hasMatch(source), isFalse, reason: path);
+    }
+
+    final ai = File('lib/ui/ai_screen.dart').readAsStringSync();
+    final quickStart = ai.indexOf('class _AiQuickActionChip');
+    final quickEnd = ai.indexOf('class _AiHubAction', quickStart);
+    expect(quickStart, greaterThanOrEqualTo(0));
+    expect(quickEnd, greaterThan(quickStart));
+    final quick = ai.substring(quickStart, quickEnd);
+    expect(quick, contains('disableAnimations'));
+    expect(quick, contains('duration: reduceMotion'));
+    expect(quick, contains('? Duration.zero'));
+  });
+
   test('high-frequency management cards share tactile press feedback', () {
     final editor = File('lib/ui/editor_screen.dart').readAsStringSync();
     final attention = File('lib/ui/attention_screen.dart').readAsStringSync();

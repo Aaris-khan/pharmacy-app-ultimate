@@ -73,6 +73,16 @@ bool scannerCaptureBlockedByDetachedReader({
   required bool hasTrackedFrame,
 }) => readerBusy && !hasTrackedFrame;
 
+@visibleForTesting
+bool scannerHasUsableResult({
+  required bool rapidCapture,
+  required int queuedCaptures,
+  required String text,
+  required String barcode,
+}) => rapidCapture
+    ? queuedCaptures > 0
+    : text.isNotEmpty || barcode.isNotEmpty;
+
 class ScanResult {
   const ScanResult({
     this.barcode = '',
@@ -114,6 +124,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   int _generation = 0;
   int _scanSequence = 0;
   int _captureAttempts = 0;
+  int _queuedCaptures = 0;
   String _text = '', _barcode = '', _error = '';
   String _qualityHint = '';
   final List<ScanEvidence> _evidence = <ScanEvidence>[];
@@ -467,12 +478,17 @@ class _ScannerScreenState extends State<ScannerScreen>
       if (!current()) return;
       if (widget.onCaptureQueued != null) {
         await widget.onCaptureQueued!(photo.path);
+        // Only a successful durable queue acknowledgement unlocks Finish.
+        // Keep this count independent from OCR sequencing so lifecycle pauses
+        // cannot make an unsaved capture look complete.
+        final queued = ++_queuedCaptures;
         // A durable queue acknowledgement remains valid across app pause; only
         // the camera session was retired, not the already-saved photo.
         if (mounted && !_closed && !_leaving) {
           setState(() {
-            _text =
-                '${++_scanSequence} photos queued. Capture the next pack. Review in AI Hub.';
+            _text = queued == 1
+                ? '1 photo queued. Capture the next pack. Review in AI Hub.'
+                : '$queued photos queued. Capture the next pack. Review in AI Hub.';
             _error = '';
           });
         }
@@ -644,6 +660,12 @@ class _ScannerScreenState extends State<ScannerScreen>
     final cameraReady = _camera?.value.isInitialized == true;
     final canCapture =
         !_capturing && !_starting && _foreground && _bootstrapped && !_leaving;
+    final hasUsableResult = scannerHasUsableResult(
+      rapidCapture: widget.onCaptureQueued != null,
+      queuedCaptures: _queuedCaptures,
+      text: _text,
+      barcode: _barcode,
+    );
     return ScannerView(
       preview: cameraReady ? CameraPreview(_camera!) : null,
       cameraReady: cameraReady,
@@ -662,12 +684,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           : cameraReady
           ? _capture
           : _restartCamera,
-      onUseScan:
-          _capturing ||
-              _leaving ||
-              (widget.onCaptureQueued == null &&
-                  _text.isEmpty &&
-                  _barcode.isEmpty)
+      onUseScan: _capturing || _leaving || !hasUsableResult
           ? null
           : _finishScan,
       onTorch: cameraReady && canCapture ? _toggleTorch : null,

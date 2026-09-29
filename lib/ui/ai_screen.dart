@@ -1291,7 +1291,7 @@ class _AiHubHeader extends StatelessWidget {
           ),
           Material(
             color: Colors.transparent,
-            child: InkWell(
+            child: TactileInkWell(
               onTap: onSettings,
               borderRadius: BorderRadius.circular(18),
               child: Container(
@@ -1687,7 +1687,7 @@ class _AiComposer extends StatelessWidget {
           ),
           Material(
             color: Colors.transparent,
-            child: InkWell(
+            child: TactileInkWell(
               onTap: busy ? null : onSend,
               borderRadius: BorderRadius.circular(24),
               child: Container(
@@ -1865,13 +1865,18 @@ class _AiQuickActionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 140),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
       opacity: onTap == null ? .45 : 1,
       child: Material(
         color: dark ? const Color(0xFF1B2130) : Colors.white.withAlpha(238),
         borderRadius: BorderRadius.circular(999),
-        child: InkWell(
+        child: TactileInkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
           child: Container(
@@ -2081,7 +2086,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
               const SizedBox(height: 14),
               Material(
                 color: Colors.transparent,
-                child: InkWell(
+                child: TactileInkWell(
                   onTap: busy
                       ? null
                       : () => Navigator.pop(
@@ -2144,7 +2149,7 @@ class _AiConnectionsSheetState extends State<_AiConnectionsSheet> {
                 ),
                 child: Column(
                   children: [
-                    InkWell(
+                    TactileInkWell(
                       onTap: busy
                           ? null
                           : () => setState(() => apiExpanded = !apiExpanded),
