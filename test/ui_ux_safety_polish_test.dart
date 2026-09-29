@@ -639,4 +639,102 @@ void main() {
     expect(card, contains('Tween<double>(begin: .96, end: 1)'));
   });
 
+
+  test('shared tactile controls can label the complete touch target', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class TactileInkWell');
+    final end = source.indexOf('class GlassIconButton', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final tactile = source.substring(start, end);
+    expect(tactile, contains('final String? tooltip;'));
+    expect(tactile, contains('widget.tooltip?.trim()'));
+    expect(
+      tactile,
+      contains('return Tooltip(message: tooltip, child: control);'),
+    );
+  });
+
+  test('AI custom icon controls label their full tactile targets', () {
+    final source = File('lib/ui/ai_screen.dart').readAsStringSync();
+
+    final headerStart = source.indexOf('class _AiHubHeader');
+    final headerEnd = source.indexOf('class _AiChatMessage', headerStart);
+    expect(headerStart, greaterThanOrEqualTo(0));
+    expect(headerEnd, greaterThan(headerStart));
+    final header = source.substring(headerStart, headerEnd);
+    expect(
+      header,
+      contains(
+        "tooltip: configured ? 'AI settings · Connected' : 'AI settings'",
+      ),
+    );
+
+    final composerStart = source.indexOf('class _AiComposer');
+    final composerEnd = source.indexOf('class _AiQuickActions', composerStart);
+    expect(composerStart, greaterThanOrEqualTo(0));
+    expect(composerEnd, greaterThan(composerStart));
+    final composer = source.substring(composerStart, composerEnd);
+    expect(
+      composer,
+      contains("tooltip: busy ? 'AI is working' : 'Run command'"),
+    );
+    expect(
+      composer,
+      isNot(
+        contains(
+          "message: 'Run command',\n"
+          '                        child: Icon(',
+        ),
+      ),
+    );
+  });
+
+  test('composite tappable surfaces expose one atomic screen-reader action', () {
+    final design = File('lib/ui/design.dart').readAsStringSync();
+    final medicineStart = design.indexOf('class MedicineCard');
+    final medicineEnd = design.indexOf('class _ExpiryBorder', medicineStart);
+    expect(medicineStart, greaterThanOrEqualTo(0));
+    expect(medicineEnd, greaterThan(medicineStart));
+    final medicine = design.substring(medicineStart, medicineEnd);
+    expect(medicine, contains('onTap: onTap'));
+    expect(medicine, contains('excludeSemantics: true'));
+
+    final stats = File('lib/ui/stats_screen.dart').readAsStringSync();
+    final snapshotStart = stats.indexOf('class _SnapshotCard');
+    final snapshotEnd = stats.indexOf(
+      'class _SoldMedicineTrackerScreen',
+      snapshotStart,
+    );
+    expect(snapshotStart, greaterThanOrEqualTo(0));
+    expect(snapshotEnd, greaterThan(snapshotStart));
+    final snapshot = stats.substring(snapshotStart, snapshotEnd);
+    expect(snapshot, contains('onTap: metric.onTap'));
+    expect(snapshot, contains('excludeSemantics: metric.onTap != null'));
+
+    final beacon = File('lib/ui/autopilot_beacon.dart').readAsStringSync();
+    expect(beacon, contains('onTap: onOpenWorkQueue'));
+    expect(beacon, contains('excludeSemantics: true'));
+  });
+
+  test('system bars follow the pharmacy surface contract', () {
+    final design = File('lib/ui/design.dart').readAsStringSync();
+    final main = File('lib/main.dart').readAsStringSync();
+
+    expect(design, contains('const pharmacySystemUiOverlayStyle'));
+    expect(design, contains('statusBarColor: Colors.transparent'));
+    expect(design, contains('systemNavigationBarColor: canvas'));
+    expect(
+      design,
+      contains('systemOverlayStyle: pharmacySystemUiOverlayStyle'),
+    );
+    expect(
+      main,
+      contains(
+        'SystemChrome.setSystemUIOverlayStyle(pharmacySystemUiOverlayStyle);',
+      ),
+    );
+  });
+
 }
