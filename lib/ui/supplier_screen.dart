@@ -264,6 +264,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               child: const Text('अभी नहीं'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: red,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Mark returned'),
             ),
