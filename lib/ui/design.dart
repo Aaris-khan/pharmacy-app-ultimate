@@ -445,8 +445,13 @@ class RaisedActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 150),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
       opacity: enabled ? 1 : .55,
       child: GlassPanel(
         tint: const Color(0xFFF0F5FF),
