@@ -785,17 +785,39 @@ void main() {
     expect(tactile, contains('onTap: enabled ? _handleTap : null'));
   });
 
-  test('scanner chrome and success reticle stay legible and motion-safe', () {
+  test('scanner chrome and success feedback stay legible and motion-safe', () {
     final design = File('lib/ui/design.dart').readAsStringSync();
     final scanner = File('lib/ui/scanner_view.dart').readAsStringSync();
+    final scannerLogic = File('lib/ui/scanner_screen.dart').readAsStringSync();
 
-    expect(design, contains('pharmacyDarkSystemUiOverlayStyle'));
-    expect(design, contains('statusBarIconBrightness: Brightness.light'));
-    expect(scanner, contains('systemOverlayStyle: pharmacyDarkSystemUiOverlayStyle'));
+    final darkStyleStart = design.indexOf(
+      'const pharmacyDarkSystemUiOverlayStyle',
+    );
+    final darkStyleEnd = design.indexOf(');', darkStyleStart);
+    expect(darkStyleStart, greaterThanOrEqualTo(0));
+    expect(darkStyleEnd, greaterThan(darkStyleStart));
+    final darkStyle = design.substring(darkStyleStart, darkStyleEnd);
+
+    expect(darkStyle, contains('statusBarIconBrightness: Brightness.light'));
+    expect(darkStyle, contains('systemNavigationBarColor: ink'));
+    expect(
+      darkStyle,
+      contains('systemNavigationBarIconBrightness: Brightness.light'),
+    );
+    expect(
+      scanner,
+      contains('systemOverlayStyle: pharmacyDarkSystemUiOverlayStyle'),
+    );
     expect(scanner, contains('AnimatedContainer('));
+    expect(scanner, contains('AnimatedSwitcher('));
+    expect(scanner, contains('liveRegion: true'));
+    expect(scanner, contains('background:'));
+    expect(scanner, contains('? successSoft'));
     expect(scanner, contains('?.disableAnimations ??'));
     expect(scanner, contains('? green'));
     expect(scanner, contains('const Duration(milliseconds: 220)'));
+    expect(scannerLogic, contains('HapticFeedback.mediumImpact()'));
+    expect(scannerLogic, contains('HapticFeedback.lightImpact()'));
   });
 
 }
