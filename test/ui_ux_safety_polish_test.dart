@@ -353,8 +353,13 @@ void main() {
 
     expect(source, contains('constraints: const BoxConstraints(maxWidth: 720)'));
     expect(source, contains('alignment: Alignment.bottomCenter'));
-    expect(source, contains('Icons.dashboard_outlined'));
-    expect(source, contains('selectedIcon: Icon(Icons.dashboard_rounded)'));
+    expect(source, contains('Icons.home_outlined'));
+    expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
+    expect(source, contains('HapticFeedback.selectionClick()'));
+    expect(
+      source,
+      contains('animationDuration: const Duration(milliseconds: 260)'),
+    );
   });
 
   test('home keeps empty-state actions focused and status icons meaningful', () {
@@ -451,6 +456,51 @@ void main() {
     final routeBanner = source.substring(start, end);
     expect(routeBanner, contains('maxLines: 2'));
     expect(routeBanner, isNot(contains('maxLines: 1')));
+  });
+
+
+  test('shared touch surfaces compress subtly and respect reduced motion', () {
+    final source = File('lib/ui/design.dart').readAsStringSync();
+    final start = source.indexOf('class TactileInkWell');
+    final end = source.indexOf('class GlassIconButton', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final tactile = source.substring(start, end);
+    expect(tactile, contains('AnimatedScale('));
+    expect(tactile, contains('onHighlightChanged: enabled ? _setPressed : null'));
+    expect(tactile, contains('disableAnimations'));
+    expect(tactile, contains('pressedScale'));
+    expect(
+      RegExp(r'TactileInkWell\(').allMatches(source).length,
+      greaterThanOrEqualTo(4),
+    );
+  });
+
+  test('stock quick actions use per-action width before stacking', () {
+    final source = File('lib/ui/search_screen.dart').readAsStringSync();
+    final start = source.indexOf('Widget responsiveActionStrip');
+    final end = source.indexOf('final body = CustomScrollView', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final strip = source.substring(start, end);
+    expect(strip, contains('final gapWidth = spacing * (actions.length - 1)'));
+    expect(strip, contains('(constraints.maxWidth - gapWidth) / actions.length'));
+    expect(strip, contains('cellWidth < 96'));
+    expect(strip, isNot(contains('constraints.maxWidth < 360')));
+  });
+
+  test('dashboard overview cards use the shared tactile interaction', () {
+    final source = File('lib/ui/home_screen.dart').readAsStringSync();
+    final start = source.indexOf('class _OverviewTile');
+    final end = source.indexOf('class _WarningSelector', start);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final overview = source.substring(start, end);
+    expect(overview, contains('TactileInkWell('));
+    expect(overview, contains('pressedScale: .985'));
   });
 
 
