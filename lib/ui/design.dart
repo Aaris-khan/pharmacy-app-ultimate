@@ -363,7 +363,7 @@ class _TactileInkWellState extends State<TactileInkWell> {
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final enabled = widget.onTap != null;
     return AnimatedScale(
-      scale: enabled && _pressed ? widget.pressedScale : 1,
+      scale: enabled && _pressed && !reduceMotion ? widget.pressedScale : 1,
       duration: reduceMotion
           ? Duration.zero
           : Duration(milliseconds: _pressed ? 70 : 150),
