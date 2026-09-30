@@ -174,6 +174,24 @@ void main() {
     expect(seed.form, 'Tablet');
   });
 
+  test('RxNorm keeps both salts but abstains if one combination dose is absent', () {
+    final seed = RxNormProvider.parseResults(
+      [
+        {
+          'rxcui': '9002',
+          'rank': '1',
+          'score': '12',
+          'name': 'alpha 10 MG / beta Oral Tablet [Combo]',
+        },
+      ],
+      queryText: 'Combo alpha beta 10 mg',
+    ).single.seed;
+
+    expect(seed.salt.toLowerCase(), 'alpha + beta');
+    expect(seed.strength, isEmpty);
+    expect(seed.form, 'Tablet');
+  });
+
   test('scan-aware catalogue ranking demotes conflicting strength and form', () async {
     final provider = _FakeProvider([
       const MedicineCatalogCandidate(
