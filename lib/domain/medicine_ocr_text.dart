@@ -408,6 +408,20 @@ String _canonicalMedicineOcrSurface(String value) {
     return '$prefix ${match[2]}';
   });
 
+  // Recover a no-whitespace ingredient conjunction before dose-boundary
+  // repair. This turns PARACETAMOL500MGWITHCAFFEINE65MG into two independent
+  // unit-owned doses, after which the ordinary glued-dose rule can safely split
+  // both ingredient names from their numbers.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedCombinationSeparator,
+    (match) {
+      if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      return '${match[1]} + ';
+    },
+  );
+
   // Recover a lost boundary such as "Paracetamol5O0MG" or "CALPOL500MG".
   // Traceability context remains fused on purpose so its internal digits cannot
   // become competing strength evidence downstream.
@@ -495,18 +509,6 @@ String _canonicalMedicineOcrSurface(String value) {
         ? '${match[1]}/$unit'
         : '${match[1]}/$denominator $unit';
   });
-
-  // Recover the no-whitespace form of the same evidence before applying the
-  // ordinary separator rule. The dose on both sides is the safety proof.
-  result = result.replaceAllMapped(
-    _medicineOcrGluedCombinationSeparator,
-    (match) {
-      if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
-        return match[0]!;
-      }
-      return '${match[1]} + ';
-    },
-  );
 
   // Map only semantically constrained ingredient-dose separators onto the one
   // '+' grammar consumed by the unlabeled composition resolver. A machine field
