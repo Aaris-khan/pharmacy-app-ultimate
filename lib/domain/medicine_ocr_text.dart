@@ -392,6 +392,17 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]} ',
   );
   result = result.replaceAllMapped(_medicineOcrGluedTraceabilityLabel, (match) {
+    // LOT is also the prefix of legitimate dosage-form tokens such as LOTION
+    // and OCR aliases such as LOTN. Preserve the whole token as medicine-form
+    // evidence; only non-form tokens such as LOT100 are traceability labels.
+    final token = RegExp(r'^[A-Za-z0-9-]+')
+        .firstMatch(result.substring(match.start))
+        ?.group(0)
+        ?.toLowerCase();
+    if (token != null && medicineFormAliases.containsKey(token)) {
+      return match[0]!;
+    }
+
     // A token such as LOT100 can itself be the alphanumeric value of an already
     // explicit Batch/Lot role. Do not reinterpret an owned value as a new role.
     if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
