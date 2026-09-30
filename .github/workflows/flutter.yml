@@ -30,6 +30,8 @@ jobs:
           cache: true
       - name: Resolve pinned dependencies
         run: flutter pub get
+      - name: Catalogue transform checks
+        run: python -m unittest tool/test_build_medicine_catalog_pack.py
       - name: Static checks
         run: dart analyze lib test tool third_party/lib_llama_cpp/lib
       - name: Domain, persistence and UI checks
