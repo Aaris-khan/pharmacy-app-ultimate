@@ -65,5 +65,50 @@ void main() {
       expect(resolved.form, 'Tablet');
       expect(resolved.needsReview, isFalse);
     });
+
+    test('public OCR candidate needs three channels without exact barcode', () {
+      const product = CanonicalMedicineProduct(
+        productId: 'public:test:montek-lc',
+        revision: 9002,
+        name: 'Montek LC',
+        brand: 'Montek LC',
+        salt: 'Montelukast Sodium + Levocetirizine Hydrochloride',
+        strength: '10 mg + 5 mg',
+        form: 'Tablet',
+        manufacturer: 'Example Pharma',
+        source: 'public:openfda_ndc_cc0',
+        verified: true,
+        priorWeight: .58,
+      );
+      final draft = MedicineScanDraft(
+        fields: <String, ExtractedMedicineField>{
+          'name': _field('MONTEKLC'),
+          'brand': _field('MONTEKLC'),
+          'strength': _field('10 mg + 5 mg'),
+        },
+        rawText: 'MONTEKLC\n10 mg + 5 mg',
+        searchKeywords: 'monteklc 10 mg 5 mg',
+        frameSequences: const <int>[0],
+        overallConfidence: .93,
+      );
+
+      final result = MedicineProductResolverV2(
+        localKnowledge: const <MedicineKnowledgeEntry>[],
+        catalogue: const <CanonicalMedicineProduct>[product],
+      ).reconcile(
+        MedicineUnderstandingResult(drafts: <MedicineScanDraft>[draft]),
+        const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 0,
+            quality: .97,
+            text: 'MONTEKLC\n10 mg + 5 mg',
+          ),
+        ],
+      );
+
+      final resolved = result.drafts.single;
+      expect(resolved.name, 'MONTEKLC');
+      expect(resolved.salt, isEmpty);
+    });
   });
 }
