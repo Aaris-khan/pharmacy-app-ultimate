@@ -151,7 +151,7 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
         "aliases": aliases,
         "aliases_ocr": [],
         "barcodes": upcs,
-        "source": "openFDA NDC CC0",
+        "source": "public:openfda_ndc_cc0",
         "verified": True,
         # Source provenance is authoritative; product content remains
         # labeler-submitted and is therefore only a moderate prior.
@@ -267,7 +267,7 @@ def write_pack(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": {
             "name": "openFDA Drug NDC",
-            "product_source": "openFDA NDC CC0",
+            "product_source": "public:openfda_ndc_cc0",
             "source_url": SOURCE_URL,
             "download_index": DOWNLOAD_INDEX,
             "export_date": export_date,
