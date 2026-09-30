@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../domain/medicine.dart';
 import '../domain/medicine_discovery.dart';
+import '../domain/medicine_ocr_text.dart';
 import '../domain/medicine_resolution_v2.dart';
 import '../domain/medicine_strength.dart';
 import '../domain/medicine_understanding.dart';
@@ -149,6 +150,7 @@ class MedicineCatalogService {
           candidates,
           draft,
           barcode,
+          rawText: text,
         );
       }
     }
@@ -188,6 +190,7 @@ class MedicineCatalogService {
       ),
       draft,
       barcode,
+      rawText: text,
     );
     if (_scanReleaseMatchIsDecisive(releaseRanked)) {
       return releaseRanked;
@@ -207,7 +210,12 @@ class MedicineCatalogService {
       <List<MedicineCatalogCandidate>>[release, ...fallback],
       boundedLimit,
     );
-    return _rerankCatalogCandidatesForScan(combined, draft, barcode);
+    return _rerankCatalogCandidatesForScan(
+      combined,
+      draft,
+      barcode,
+      rawText: text,
+    );
   }
 
   bool _scanReleaseMatchIsDecisive(
@@ -726,8 +734,14 @@ String _normalizeCatalogStrength(String raw) {
   return value.trim();
 }
 
+String _catalogOcrSurface(String raw) => raw
+    .split(RegExp(r'[\r\n]+'))
+    .map(normalizeMedicineOcrLine)
+    .where((line) => line.isNotEmpty)
+    .join(' ');
+
 String _catalogFormFromText(String raw) {
-  final normalized = normalize(raw);
+  final normalized = normalize(_catalogOcrSurface(raw));
   if (normalized.isEmpty) return '';
   final aliases = medicineFormAliases.entries
       .where((entry) => entry.key != 'other')
@@ -812,8 +826,9 @@ double _catalogStrengthSimilarity(String left, String right) {
 List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
   List<MedicineCatalogCandidate> candidates,
   MedicineScanDraft draft,
-  String scanBarcode,
-) {
+  String scanBarcode, {
+  String rawText = '',
+}) {
   final ranked = <MedicineCatalogCandidate>[];
   final scanBarcodeKey = _catalogBarcodeKey(scanBarcode);
 
@@ -874,7 +889,17 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
       conflictConfidence: .72,
     );
 
-    final observedForm = draft.field('form');
+    var observedForm = draft.field('form');
+    if (observedForm.isEmpty) {
+      final recoveredForm = _catalogFormFromText(rawText);
+      if (recoveredForm.isNotEmpty) {
+        observedForm = ExtractedMedicineField(
+          value: recoveredForm,
+          confidence: .76,
+          support: 1,
+        );
+      }
+    }
     final canonicalForm = normalizeForm(seed.form);
     if (!observedForm.isEmpty && canonicalForm.isNotEmpty && canonicalForm != 'Other') {
       final observedCanonical = normalizeForm(observedForm.value);
@@ -973,7 +998,7 @@ String _catalogQuery(String raw) {
   // Stock-specific date lines must never influence public identity lookup.
   // Remove common labelled EXP/MFG fragments before general normalization, and
   // then discard standalone date-shaped tokens as a second line of defence.
-  var withoutStockDates = raw.replaceAll(
+  var withoutStockDates = _catalogOcrSurface(raw).replaceAll(
     RegExp(
       r'\b(?:exp(?:iry|ires)?|use\s*by|use\s*before|mfg|mfd|manufactured)\b\s*[:.-]?\s*\d{1,4}(?:[./-]\d{1,4}){1,2}',
       caseSensitive: false,
