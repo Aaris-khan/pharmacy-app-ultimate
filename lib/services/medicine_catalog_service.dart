@@ -741,7 +741,7 @@ String _catalogOcrSurface(String raw) => raw
     .join(' ');
 
 String _catalogFormFromText(String raw) {
-  final normalized = normalize(_catalogOcrSurface(raw));
+  final normalized = normalize(raw);
   if (normalized.isEmpty) return '';
   final aliases = medicineFormAliases.entries
       .where((entry) => entry.key != 'other')
@@ -774,7 +774,7 @@ String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
   // The semantic draft can intentionally abstain from a weak standalone form
   // line. A literal known form printed anywhere in the same scan is still safe
   // identity evidence for public-catalog retrieval, so preserve that signal.
-  add(_catalogFormFromText(fallback));
+  add(_catalogFormFromText(_catalogOcrSurface(fallback)));
   if (parts.isEmpty) return fallback;
   final joined = parts.join(' ');
   return joined.length <= 420 ? joined : joined.substring(0, 420);
@@ -1118,8 +1118,104 @@ String _repairCatalogFragments(String value) {
       }
     }
 
+    final compactDose = RegExp(
+      r'^(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)    if (gluedDose != null) {
+      output.add(gluedDose.group(1)!);
+      output.add(gluedDose.group(2)!);
+      output.add(gluedDose.group(3)!);
+      index++;
+      continue;
+    }
+
+    output.add(parts[index]);
+    index++;
+  }
+  return output.join(' ');
+}
+
+List<String> _searchTerms(String value) {
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+,
+    ).firstMatch(parts[index]);
+    if (compactDose != null) {
+      output.add(compactDose.group(1)!);
+      output.add(compactDose.group(2)!);
+      index++;
+      continue;
+    }
+
     final gluedDose = RegExp(
-      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)    if (gluedDose != null) {
+      output.add(gluedDose.group(1)!);
+      output.add(gluedDose.group(2)!);
+      output.add(gluedDose.group(3)!);
+      index++;
+      continue;
+    }
+
+    output.add(parts[index]);
+    index++;
+  }
+  return output.join(' ');
+}
+
+List<String> _searchTerms(String value) {
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+,
     ).firstMatch(parts[index]);
     if (gluedDose != null) {
       output.add(gluedDose.group(1)!);
