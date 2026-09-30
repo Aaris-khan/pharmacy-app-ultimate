@@ -79,7 +79,23 @@ class _SearchScreenState extends State<SearchScreen> {
       widget.controller.settings.shortDays,
       widget.controller.settings.months,
     );
-    unawaited(_search());
+
+    if (widget.database && widget.embedded) {
+      // Stock is a lazily-created primary tab. Paint its controls first so the
+      // tap-to-frame path never waits behind the one-time search isolate startup
+      // and initial immutable-dataset handoff. The browse begins immediately
+      // after that frame and keeps the existing loading/result semantics.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_controllerListening) {
+          _refreshWhenActive = true;
+          return;
+        }
+        unawaited(_search());
+      });
+    } else {
+      unawaited(_search());
+    }
   }
 
   @override
