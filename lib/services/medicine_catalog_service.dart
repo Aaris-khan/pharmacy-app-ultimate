@@ -5,7 +5,10 @@ import 'package:http/http.dart' as http;
 
 import '../domain/medicine.dart';
 import '../domain/medicine_discovery.dart';
+import '../domain/medicine_understanding.dart';
 import '../domain/search.dart';
+import 'canonical_medicine_catalog_service.dart';
+import 'catalog_release_sync_service.dart';
 
 abstract interface class MedicineCatalogProvider {
   Future<List<MedicineCatalogCandidate>> search({
@@ -31,6 +34,7 @@ class MedicineCatalogService {
            : List<MedicineCatalogProvider>.of(providers) {
     if (_providers.isEmpty) {
       _providers.addAll([
+        ReleaseCatalogProvider(),
         OpenFdaNdcProvider(_client),
         RxNormProvider(_client),
       ]);
@@ -139,6 +143,88 @@ class _CatalogCacheEntry {
 
   final List<MedicineCatalogCandidate> values;
   final DateTime expiresAt;
+}
+
+/// The user's Online Search lane first consults the versioned Aaris catalogue.
+///
+/// A refresh is best-effort and deliberately short. If a large new Release pack
+/// is still downloading, live public providers can answer this search while the
+/// verified pack continues warming the local catalogue for the next lookup.
+class ReleaseCatalogProvider implements MedicineCatalogProvider {
+  @override
+  Future<List<MedicineCatalogCandidate>> search({
+    required String barcode,
+    required String text,
+    required int limit,
+  }) async {
+    try {
+      await CatalogReleaseSyncService.instance
+          .syncIfNeeded()
+          .timeout(const Duration(milliseconds: 1800));
+    } catch (_) {
+      // Online discovery must remain usable when GitHub is slow or unavailable.
+      // The synchronizer keeps its single in-flight refresh and the already
+      // verified local catalogue remains safe to query.
+    }
+
+    final evidence = <MedicineFrameEvidence>[
+      MedicineFrameEvidence(
+        barcode: barcode,
+        text: text,
+        source: 'Online catalogue lookup',
+      ),
+    ];
+    final products = await CanonicalMedicineCatalogService.instance
+        .candidatesForEvidence(
+          evidence,
+          limit: min(max(limit * 3, 24), 48),
+        );
+    final query = _catalogQuery(text);
+    return products
+        .map((product) {
+          final seed = MedicineDraftSeed(
+            name: product.displayName,
+            brand: product.brand,
+            manufacturer: product.manufacturer,
+            salt: product.salt,
+            strength: product.strength,
+            form: product.form,
+            barcode: barcode.trim().isNotEmpty &&
+                    product.barcodes.any(
+                      (value) =>
+                          _catalogBarcodeKey(value) ==
+                          _catalogBarcodeKey(barcode),
+                    )
+                ? barcode.trim()
+                : '',
+            source: product.source,
+            sourceId: product.productId,
+          );
+          final exactBarcode = seed.barcode.isNotEmpty;
+          final score = exactBarcode
+              ? 1.0
+              : _candidateScore(seed, query, providerFloor: .70);
+          return MedicineCatalogCandidate(
+            seed: seed,
+            score: score,
+            provider: 'Aaris catalogue',
+            reason: exactBarcode
+                ? 'Exact verified catalogue barcode'
+                : 'Versioned release catalogue',
+          );
+        })
+        .where((candidate) => candidate.seed.name.trim().isNotEmpty)
+        .take(limit)
+        .toList(growable: false);
+  }
+}
+
+String _catalogBarcodeKey(String value) {
+  final digits = value.replaceAll(RegExp(r'\D'), '');
+  if (const <int>{8, 12, 13, 14}.contains(digits.length)) {
+    return digits.padLeft(14, '0');
+  }
+  return value.trim().toLowerCase();
 }
 
 class OpenFdaNdcProvider implements MedicineCatalogProvider {
@@ -459,7 +545,7 @@ String _catalogQuery(String raw) {
     RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
     ' ',
   );
-  final value = searchText(withoutStockDates);
+  final value = _repairCatalogFragments(searchText(withoutStockDates));
   if (value.isEmpty) return '';
   const noise = {
     'exp',
@@ -496,6 +582,210 @@ String _catalogQuery(String raw) {
       .take(14)
       .toList();
   return tokens.join(' ');
+}
+
+/// Repairs only high-signal OCR fragmentation before public catalogue lookup.
+///
+/// It joins alphabetic single-character runs (D O L O -> dolo) and numeric
+/// runs only when a medicine unit follows (6 5 0 mg -> 650 mg). It never joins
+/// arbitrary full words, so packaging prose cannot silently become a medicine.
+String _repairCatalogFragments(String value) {
+  final parts = value
+      .split(' ')
+      .where((part) => part.isNotEmpty)
+      .take(80)
+      .toList(growable: false);
+  final output = <String>[];
+  var index = 0;
+  while (index < parts.length) {
+    if (parts[index].length == 1 &&
+        RegExp(r'^[a-z]
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^[a-z]
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(parts[end]) &&
+          joined.length < 20) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (joined.length >= 3) {
+        output.add(joined.toString());
+        index = end;
+        continue;
+      }
+    }
+
+    if (parts[index].length == 1 &&
+        RegExp(r'^\d
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^\d
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(parts[end]) &&
+          joined.length < 5) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (joined.length >= 2 &&
+          end < parts.length &&
+          RegExp(r'^(?:mcg|mg|g|ml|iu|units?)
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(parts[end])) {
+        output.add(joined.toString());
+        output.add(parts[end]);
+        index = end + 1;
+        continue;
+      }
+    }
+
+    output.add(parts[index]);
+    index++;
+  }
+  return output.join(' ');
 }
 
 List<String> _searchTerms(String value) {
