@@ -324,7 +324,7 @@ class _CatalogManifest {
         source is! Map ||
         sourceMap['redistributable'] != true ||
         !snapshot ||
-        productSource.isEmpty ||
+        !productSource.startsWith('public:') ||
         productSource.length > 80 ||
         rawShards is! List ||
         rawShards.isEmpty ||
