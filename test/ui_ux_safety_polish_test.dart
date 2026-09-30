@@ -895,6 +895,15 @@ void main() {
       expect(initSource, contains('if (!_controllerListening)'));
       expect(initSource, contains('_refreshWhenActive = true'));
       expect(initSource, contains('unawaited(_search())'));
+
+      expect(stock, contains('MedicineCatalogService? _catalog;'));
+      expect(stock, contains('_catalog ??= MedicineCatalogService()'));
+      expect(stock, contains('_catalog?.close()'));
+      expect(
+        stock,
+        isNot(contains('final _catalog = MedicineCatalogService();')),
+        reason: 'Offline Stock must not eagerly construct online HTTP providers.',
+      );
     },
   );
 
