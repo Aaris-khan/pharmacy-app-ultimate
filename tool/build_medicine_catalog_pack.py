@@ -18,7 +18,7 @@ DOWNLOAD_INDEX = "https://api.fda.gov/download.json"
 SOURCE_URL = "https://open.fda.gov/apis/drug/ndc/"
 LICENSE_URL = "https://open.fda.gov/license/"
 MAX_SHARD_RECORDS = 20_000
-MAX_SHARD_BYTES = 20 * 1024 * 1024
+MAX_SHARD_BYTES = 8 * 1024 * 1024
 
 
 def fetch(url: str, timeout: int = 120) -> bytes:
