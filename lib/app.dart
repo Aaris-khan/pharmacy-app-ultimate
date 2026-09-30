@@ -375,9 +375,14 @@ class _AnimatedNavigationIcon extends StatelessWidget {
           child: child,
         ),
       ),
-      child: Icon(
-        currentIcon,
-        key: ValueKey<int>(currentIcon.codePoint),
+      child: SizedBox.square(
+        dimension: 32,
+        child: Center(
+          child: Icon(
+            currentIcon,
+            key: ValueKey<int>(currentIcon.codePoint),
+          ),
+        ),
       ),
     );
 
@@ -386,12 +391,12 @@ class _AnimatedNavigationIcon extends StatelessWidget {
     // destination-selection motion. Selection itself gets a restrained physical
     // lift, while Reduce Motion collapses every transition to a static state.
     return AnimatedScale(
-      scale: selected && !reduceMotion ? 1.08 : 1,
+      scale: selected && !reduceMotion ? 1.035 : 1,
       duration: duration,
       curve: Curves.easeOutCubic,
       child: AnimatedSlide(
         offset: selected && !reduceMotion
-            ? const Offset(0, -.06)
+            ? const Offset(0, -.04)
             : Offset.zero,
         duration: duration,
         curve: Curves.easeOutCubic,
