@@ -887,7 +887,7 @@ ThemeData pharmacyTheme() => ThemeData(
       minimumSize: const Size(48, 52),
       foregroundColor: primaryDeep,
       backgroundColor: Colors.white,
-      side: BorderSide(color: primary.withValues(alpha: .18)),
+      side: const BorderSide(color: controlOutline),
       shadowColor: ink.withValues(alpha: .24),
       elevation: 5,
       textStyle: const TextStyle(
@@ -942,7 +942,7 @@ ThemeData pharmacyTheme() => ThemeData(
   chipTheme: ChipThemeData(
     backgroundColor: Colors.white,
     selectedColor: primarySoft,
-    side: BorderSide(color: primary.withValues(alpha: .10)),
+    side: const BorderSide(color: controlOutline),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     labelStyle: const TextStyle(
       fontFamily: 'Manrope',
@@ -1000,10 +1000,13 @@ ThemeData pharmacyTheme() => ThemeData(
   dividerTheme: DividerThemeData(color: ink.withValues(alpha: .08), thickness: 1, space: 1),
   progressIndicatorTheme: const ProgressIndicatorThemeData(color: primary),
   navigationBarTheme: NavigationBarThemeData(
-    backgroundColor: Colors.white.withValues(alpha: .92),
+    // The shell's outer GlassPanel owns the navigation surface and depth.
+    // Keeping NavigationBar itself transparent avoids a double-painted face,
+    // duplicate shadow work and a visually heavier bottom chrome.
+    backgroundColor: Colors.transparent,
     surfaceTintColor: Colors.transparent,
-    elevation: 8,
-    shadowColor: ink.withValues(alpha: .12),
+    elevation: 0,
+    shadowColor: Colors.transparent,
     height: 72,
     indicatorColor: primarySoft,
     indicatorShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
