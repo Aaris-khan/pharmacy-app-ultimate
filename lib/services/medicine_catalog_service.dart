@@ -1035,6 +1035,25 @@ bool _catalogSaltLiterallyPresent(String compactRaw, String canonicalSalt) {
       components.every((component) => compactRaw.contains(component));
 }
 
+bool _catalogStrengthLiterallyPresent(
+  String rawText,
+  String canonicalStrength,
+) {
+  if (canonicalStrength.trim().isEmpty) return false;
+  final surface = _catalogOcrSurface(rawText);
+  var inspected = 0;
+  for (final match in medicineStrengthPattern.allMatches(surface)) {
+    final observed = match.group(0)?.trim() ?? '';
+    if (observed.isNotEmpty &&
+        _catalogStrengthSimilarity(observed, canonicalStrength) >= .995) {
+      return true;
+    }
+    inspected++;
+    if (inspected >= 8) break;
+  }
+  return false;
+}
+
 List<String> _catalogPhysicalEvidenceLabels(
   MedicineCatalogCandidate candidate,
   MedicineScanDraft draft,
@@ -1066,10 +1085,14 @@ List<String> _catalogPhysicalEvidenceLabels(
   }
 
   final observedStrength = draft.field('strength');
-  if (!observedStrength.isEmpty &&
-      seed.strength.trim().isNotEmpty &&
-      _catalogStrengthSimilarity(observedStrength.value, seed.strength) >=
-          .995) {
+  if ((!observedStrength.isEmpty &&
+          seed.strength.trim().isNotEmpty &&
+          _catalogStrengthSimilarity(
+                observedStrength.value,
+                seed.strength,
+              ) >=
+              .995) ||
+      _catalogStrengthLiterallyPresent(rawText, seed.strength)) {
     labels.add('strength');
   }
 
