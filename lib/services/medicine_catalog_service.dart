@@ -206,11 +206,16 @@ class MedicineCatalogService {
         text: text,
         limit: boundedLimit,
       );
-      return _rerankCatalogCandidatesForScan(
+      final ranked = _rerankCatalogCandidatesForScan(
         candidates,
         draft,
         barcode,
         rawText: rawText,
+      );
+      return _reconcileCatalogCandidatesWithScan(
+        ranked,
+        baselineDraft: draft,
+        evidence: evidence,
       );
     }
 
@@ -235,14 +240,18 @@ class MedicineCatalogService {
             text: text,
             limit: boundedLimit,
           );
-    final releaseRanked = _rerankCatalogCandidatesForScan(
-      _rankCandidates(
-        <List<MedicineCatalogCandidate>>[release],
-        boundedLimit,
+    final releaseRanked = _reconcileCatalogCandidatesWithScan(
+      _rerankCatalogCandidatesForScan(
+        _rankCandidates(
+          <List<MedicineCatalogCandidate>>[release],
+          boundedLimit,
+        ),
+        draft,
+        barcode,
+        rawText: rawText,
       ),
-      draft,
-      barcode,
-      rawText: rawText,
+      baselineDraft: draft,
+      evidence: evidence,
     );
     if (_scanReleaseMatchIsDecisive(releaseRanked)) {
       return releaseRanked;
@@ -264,12 +273,149 @@ class MedicineCatalogService {
       <List<MedicineCatalogCandidate>>[release, ...fallback],
       boundedLimit,
     );
-    return _rerankCatalogCandidatesForScan(
+    final ranked = _rerankCatalogCandidatesForScan(
       combined,
       draft,
       barcode,
       rawText: rawText,
     );
+    return _reconcileCatalogCandidatesWithScan(
+      ranked,
+      baselineDraft: draft,
+      evidence: evidence,
+    );
+  }
+
+  /// Reuses the intake V2 product resolver as a bounded second-stage verifier
+  /// after retrieval. Provider scores choose what enters the candidate set, but
+  /// they are deliberately NOT passed into the resolver. A public candidate can
+  /// therefore improve ranking only when the physical scan itself supplies the
+  /// independent identity/strength/form/composition evidence required by V2's
+  /// contradiction, ambiguity and counterfactual-variant gates.
+  List<MedicineCatalogCandidate> _reconcileCatalogCandidatesWithScan(
+    List<MedicineCatalogCandidate> candidates, {
+    required MedicineScanDraft baselineDraft,
+    required List<MedicineFrameEvidence> evidence,
+  }) {
+    if (candidates.isEmpty || evidence.isEmpty) return candidates;
+    if (candidates.first.reason.startsWith('Exact catalogue barcode')) {
+      return candidates;
+    }
+
+    try {
+      final products = <CanonicalMedicineProduct>[];
+      for (var index = 0;
+          index < candidates.length &&
+              index < maxCanonicalMedicineCandidates;
+          index++) {
+        final candidate = candidates[index];
+        final seed = candidate.seed;
+        final displayName = seed.name.trim().isNotEmpty
+            ? seed.name.trim()
+            : seed.brand.trim();
+        if (displayName.isEmpty) continue;
+
+        final aliases = <String>[];
+        final seenAliases = <String>{};
+        for (final alias in <String>[seed.name, seed.brand]) {
+          final clean = alias.trim();
+          final key = searchText(clean);
+          if (key.isEmpty || !seenAliases.add(key)) continue;
+          aliases.add(clean);
+        }
+
+        products.add(
+          CanonicalMedicineProduct(
+            productId: 'online-scan:$index',
+            revision: 1,
+            name: displayName,
+            brand: seed.brand,
+            salt: seed.salt,
+            strength: seed.strength,
+            form: seed.form,
+            manufacturer: seed.manufacturer,
+            aliases: aliases,
+            barcodes: <String>[
+              if (seed.barcode.trim().isNotEmpty) seed.barcode.trim(),
+            ],
+            // Every built-in online provider is an audited public source. Keep
+            // it in the stricter public tier and give it zero prior authority:
+            // only observed pack evidence may authorize a coherent promotion.
+            source: _catalogResolverSource(candidate),
+            verified: true,
+            priorWeight: 0,
+          ),
+        );
+      }
+      if (products.isEmpty) return candidates;
+
+      final understood = MedicineUnderstandingResult.fromMessage(
+        understandMedicineEvidenceV2Message(<String, Object?>{
+          'evidence': evidence
+              .take(maxMedicineEvidenceFrames)
+              .map((value) => value.toMessage())
+              .toList(growable: false),
+          'knowledge': const <Object?>[],
+          'catalog': products
+              .map((value) => value.toMessage())
+              .toList(growable: false),
+        }),
+      );
+      if (understood.drafts.length != 1) return candidates;
+      final resolved = understood.drafts.single;
+
+      // If the second pass did not acquire any new canonical authority, the
+      // ordinary scan-aware reranker already expresses all available evidence.
+      // This prevents a catalogue from boosting itself merely by being present.
+      if (!_catalogDraftGainedAuthority(baselineDraft, resolved)) {
+        return candidates;
+      }
+
+      MedicineCatalogCandidate? winner;
+      List<String> winnerLabels = const <String>[];
+      for (final candidate in candidates) {
+        final labels = _coherentCatalogCandidateLabels(candidate, resolved);
+        if (labels.length < 3) continue;
+        if (winner != null &&
+            winner.seed.identityKey != candidate.seed.identityKey) {
+          // Two materially different candidates still fit the resolver output.
+          // Preserve review ordering instead of manufacturing a winner.
+          return candidates;
+        }
+        winner = candidate;
+        winnerLabels = labels;
+      }
+      if (winner == null) return candidates;
+
+      final proofCount = winnerLabels.toSet().length;
+      final floor = proofCount >= 5
+          ? .975
+          : proofCount >= 4
+          ? .965
+          : .94;
+      final promoted = <MedicineCatalogCandidate>[
+        for (final candidate in candidates)
+          if (candidate.seed.identityKey == winner.seed.identityKey)
+            MedicineCatalogCandidate(
+              seed: candidate.seed,
+              score: max(candidate.score, floor).clamp(.40, 1.0).toDouble(),
+              provider: candidate.provider,
+              reason: 'Coherent scan match: ${winnerLabels.toSet().join(', ')}',
+            )
+          else
+            candidate,
+      ];
+      promoted.sort((a, b) {
+        final byScore = b.score.compareTo(a.score);
+        if (byScore != 0) return byScore;
+        return searchText(a.seed.name).compareTo(searchText(b.seed.name));
+      });
+      return promoted;
+    } catch (_) {
+      // Public discovery remains fail-open. The first-stage deterministic
+      // reranker is already safe and useful if the coherent verifier cannot run.
+      return candidates;
+    }
   }
 
   bool _scanReleaseMatchIsDecisive(
@@ -278,22 +424,25 @@ class MedicineCatalogService {
     if (candidates.isEmpty) return false;
     final first = candidates.first;
     if (first.reason.startsWith('Exact catalogue barcode')) return true;
+    final coherent = first.reason.startsWith('Coherent scan match:');
     if (first.score < .90 ||
         first.reason.startsWith('Check scan conflict:') ||
-        !first.reason.startsWith('Scan agrees:')) {
+        (!coherent && !first.reason.startsWith('Scan agrees:'))) {
       return false;
     }
 
-    final evidence = first.reason.substring('Scan agrees:'.length).trim();
-    final independentAgreements = evidence.isEmpty
-        ? 0
-        : evidence
-              .split(',')
-              .map((value) => value.trim())
-              .where((value) => value.isNotEmpty)
-              .toSet()
-              .length;
-    if (independentAgreements < 2) return false;
+    if (!coherent) {
+      final evidence = first.reason.substring('Scan agrees:'.length).trim();
+      final independentAgreements = evidence.isEmpty
+          ? 0
+          : evidence
+                .split(',')
+                .map((value) => value.trim())
+                .where((value) => value.isNotEmpty)
+                .toSet()
+                .length;
+      if (independentAgreements < 2) return false;
+    }
 
     if (candidates.length > 1) {
       final runnerUp = candidates[1];
@@ -989,6 +1138,461 @@ double _catalogStrengthSimilarity(String left, String right) {
     medicineStrengthKey(_normalizeCatalogStrength(left)),
     medicineStrengthKey(_normalizeCatalogStrength(right)),
   );
+}
+
+String _catalogResolverSource(MedicineCatalogCandidate candidate) {
+  final existing = candidate.seed.source.trim();
+  if (existing.startsWith('public:')) {
+    return existing.length <= 40 ? existing : existing.substring(0, 40);
+  }
+  var key = searchText(candidate.provider)
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+
+  MedicineScanDraft draft,
+  String scanBarcode, {
+  String rawText = '',
+}) {
+  final ranked = <MedicineCatalogCandidate>[];
+  final scanBarcodeKey = _catalogBarcodeKey(scanBarcode);
+
+  for (final candidate in candidates) {
+    final seed = candidate.seed;
+    var mass = 0.0;
+    var agreement = 0.0;
+    final agreed = <String>[];
+    final conflicts = <String>[];
+
+    void observe({
+      required String label,
+      required ExtractedMedicineField observed,
+      required String canonical,
+      required double weight,
+      required double Function(String, String) similarity,
+      double conflictFloor = .56,
+      double conflictConfidence = .80,
+    }) {
+      if (observed.isEmpty || canonical.trim().isEmpty) return;
+      final score = similarity(observed.value, canonical);
+      mass += weight;
+      agreement += score * weight;
+      if (score >= .86) agreed.add(label);
+      if (!observed.conflicted &&
+          observed.confidence >= conflictConfidence &&
+          score < conflictFloor) {
+        conflicts.add(label);
+      }
+    }
+
+    final observedIdentity =
+        draft.field('brand').isEmpty ? draft.field('name') : draft.field('brand');
+    final canonicalIdentity =
+        seed.brand.trim().isNotEmpty ? seed.brand : seed.name;
+    observe(
+      label: 'brand',
+      observed: observedIdentity,
+      canonical: canonicalIdentity,
+      weight: .32,
+      similarity: _catalogTextSimilarity,
+    );
+    observe(
+      label: 'salt',
+      observed: draft.field('salt'),
+      canonical: seed.salt,
+      weight: .28,
+      similarity: _catalogSaltSimilarity,
+      conflictFloor: .54,
+    );
+    observe(
+      label: 'strength',
+      observed: draft.field('strength'),
+      canonical: seed.strength,
+      weight: .26,
+      similarity: _catalogStrengthSimilarity,
+      conflictFloor: .74,
+      conflictConfidence: .72,
+    );
+
+    var observedForm = draft.field('form');
+    if (observedForm.isEmpty) {
+      final recoveredForm = _catalogFormFromText(_catalogOcrSurface(rawText));
+      if (recoveredForm.isNotEmpty) {
+        observedForm = ExtractedMedicineField(
+          value: recoveredForm,
+          confidence: .76,
+          support: 1,
+        );
+      }
+    }
+    final canonicalForm = normalizeForm(seed.form);
+    if (!observedForm.isEmpty && canonicalForm.isNotEmpty && canonicalForm != 'Other') {
+      final observedCanonical = normalizeForm(observedForm.value);
+      final formScore =
+          observedCanonical.isNotEmpty && observedCanonical == canonicalForm ? 1.0 : 0.0;
+      mass += .14;
+      agreement += formScore * .14;
+      if (formScore == 1) agreed.add('form');
+      if (!observedForm.conflicted && observedForm.confidence >= .78 && formScore == 0) {
+        conflicts.add('form');
+      }
+    }
+
+    final candidateBarcodeKey = _catalogBarcodeKey(seed.barcode);
+    final exactBarcode =
+        scanBarcodeKey.isNotEmpty &&
+        candidateBarcodeKey.isNotEmpty &&
+        scanBarcodeKey == candidateBarcodeKey;
+
+    var score = candidate.score;
+    if (mass > 0) {
+      final structuredAgreement = (agreement / mass).clamp(0, 1).toDouble();
+      score = candidate.score * .64 + structuredAgreement * .36;
+      if (agreed.length >= 2) score += min(.045, agreed.length * .012);
+      if (conflicts.isNotEmpty) score -= min(.42, conflicts.length * .21);
+    }
+    if (exactBarcode) score = 1.0;
+    score = score.clamp(.40, 1.0).toDouble();
+
+    final reason = exactBarcode
+        ? 'Exact catalogue barcode'
+        : conflicts.isNotEmpty
+        ? 'Check scan conflict: ${conflicts.join(', ')}'
+        : agreed.isNotEmpty
+        ? 'Scan agrees: ${agreed.toSet().join(', ')}'
+        : candidate.reason;
+
+    ranked.add(MedicineCatalogCandidate(
+      seed: candidate.seed,
+      score: score,
+      provider: candidate.provider,
+      reason: reason,
+    ));
+  }
+
+  ranked.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    return byScore != 0
+        ? byScore
+        : searchText(a.seed.name).compareTo(searchText(b.seed.name));
+  });
+  return ranked;
+}
+
+double _candidateScore(
+  MedicineDraftSeed seed,
+  String queryText, {
+  required double providerFloor,
+}) {
+  final query = searchText(queryText);
+  if (query.isEmpty) return providerFloor;
+  final document = searchText([
+    seed.name,
+    seed.brand,
+    seed.salt,
+    seed.strength,
+    seed.form,
+    seed.manufacturer,
+  ].join(' '));
+  final queryTokens = query
+      .split(' ')
+      .where((token) => token.length >= 2)
+      .toList();
+  final docTokens = document
+      .split(' ')
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (queryTokens.isEmpty || docTokens.isEmpty) return providerFloor;
+
+  var exact = 0;
+  var best = 0.0;
+  for (final token in queryTokens.take(12)) {
+    if (docTokens.contains(token)) exact++;
+    for (final candidate in docTokens.take(28)) {
+      best = max(best, orderedSimilarity(token, candidate));
+    }
+  }
+  final exactFraction = exact / queryTokens.length;
+  return (providerFloor + exactFraction * .20 + best * .13)
+      .clamp(providerFloor, .97)
+      .toDouble();
+}
+
+String _catalogQuery(String raw) {
+  if (raw.trim().isEmpty) return '';
+  // Stock-specific date lines must never influence public identity lookup.
+  // Remove common labelled EXP/MFG fragments before general normalization, and
+  // then discard standalone date-shaped tokens as a second line of defence.
+  var withoutStockDates = _catalogOcrSurface(raw).replaceAll(
+    RegExp(
+      r'\b(?:exp(?:iry|ires)?|use\s*by|use\s*before|mfg|mfd|manufactured)\b\s*[:.-]?\s*\d{1,4}(?:[./-]\d{1,4}){1,2}',
+      caseSensitive: false,
+    ),
+    ' ',
+  );
+  withoutStockDates = withoutStockDates.replaceAll(
+    RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
+    ' ',
+  );
+  final recoveredForm = _catalogFormFromText(withoutStockDates);
+  final value = _repairCatalogFragments(searchText(withoutStockDates));
+  if (value.isEmpty && recoveredForm.isEmpty) return '';
+  const noise = {
+    'exp',
+    'expiry',
+    'expires',
+    'mfg',
+    'mfd',
+    'manufactured',
+    'batch',
+    'batchno',
+    'lot',
+    'mrp',
+    'price',
+    'rs',
+    'inr',
+    'use',
+    'before',
+    'after',
+    'schedule',
+    'store',
+    'storage',
+    'keep',
+    'away',
+    'children',
+    'tablets',
+    'tablet',
+    'capsules',
+    'capsule',
+  };
+  final tokens = value
+      .split(' ')
+      .where((token) => token.isNotEmpty)
+      .where((token) => !noise.contains(token))
+      .take(recoveredForm.isEmpty ? 14 : 13)
+      .toList();
+  final formToken = searchText(recoveredForm);
+  if (formToken.isNotEmpty && !tokens.contains(formToken)) {
+    tokens.add(formToken);
+  }
+  return tokens.take(14).join(' ');
+}
+
+String _repairCatalogFragments(String value) {
+  final parts = value
+      .split(' ')
+      .where((part) => part.isNotEmpty)
+      .take(80)
+      .toList(growable: false);
+  final output = <String>[];
+  var index = 0;
+  while (index < parts.length) {
+    if (parts[index].length == 1 &&
+        RegExp(r'^[a-z]$').hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^[a-z]$').hasMatch(parts[end]) &&
+          joined.length < 20) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (joined.length >= 3) {
+        output.add(joined.toString());
+        index = end;
+        continue;
+      }
+    }
+
+    if (parts[index].length == 1 &&
+        RegExp(r'^\d$').hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^\d$').hasMatch(parts[end]) &&
+          joined.length < 5) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (end < parts.length) {
+        final plainUnit = RegExp(
+          r'^(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.length >= 2 && plainUnit != null) {
+          output.add(joined.toString());
+          output.add(parts[end]);
+          index = end + 1;
+          continue;
+        }
+
+        // searchText may already compact the final digit with its unit:
+        // "6 5 0 mg" -> "6 5 0mg". Join only this tightly-bounded shape.
+        final digitUnit = RegExp(
+          r'^(\d)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.isNotEmpty &&
+            digitUnit != null &&
+            joined.length < 5) {
+          output.add('${joined.toString()}${digitUnit.group(1)!}');
+          output.add(digitUnit.group(2)!);
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+
+    final compactDose = RegExp(
+      r'^(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+    ).firstMatch(parts[index]);
+    if (compactDose != null) {
+      output.add(compactDose.group(1)!);
+      output.add(compactDose.group(2)!);
+      index++;
+      continue;
+    }
+
+    final gluedDose = RegExp(
+      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+    ).firstMatch(parts[index]);
+    if (gluedDose != null) {
+      output.add(gluedDose.group(1)!);
+      output.add(gluedDose.group(2)!);
+      output.add(gluedDose.group(3)!);
+      index++;
+      continue;
+    }
+
+    output.add(parts[index]);
+    index++;
+  }
+  return output.join(' ');
+}
+
+List<String> _searchTerms(String value) {
+  final tokens = searchText(value)
+      .split(' ')
+      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
+      .where(
+        (token) =>
+            !const {
+              'tablet',
+              'tablets',
+              'capsule',
+              'capsules',
+              'syrup',
+              'injection',
+              'cream',
+              'ointment',
+              'medicine',
+              'mg',
+              'ml',
+              'manufactured',
+              'manufacturer',
+            }.contains(token),
+      )
+      .toList();
+  tokens.sort((a, b) => b.length.compareTo(a.length));
+  return tokens;
+}
+
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+), '');
+  if (key.isEmpty) key = 'online_catalog';
+  final value = 'public:$key';
+  return value.length <= 40 ? value : value.substring(0, 40);
+}
+
+bool _catalogDraftGainedAuthority(
+  MedicineScanDraft before,
+  MedicineScanDraft after,
+) {
+  for (final key in const <String>[
+    'name',
+    'brand',
+    'salt',
+    'strength',
+    'form',
+    'manufacturer',
+  ]) {
+    final previous = before.field(key);
+    final current = after.field(key);
+    if (current.isEmpty || current.conflicted || current.confidence < .82) {
+      continue;
+    }
+    if (previous.isEmpty) return true;
+    if (!_sameCatalogFieldValue(key, previous.value, current.value) &&
+        previous.confidence < .78) {
+      return true;
+    }
+    if (current.confidence - previous.confidence >= .035) return true;
+  }
+  return false;
+}
+
+bool _sameCatalogFieldValue(String key, String left, String right) {
+  if (left.trim().isEmpty || right.trim().isEmpty) return false;
+  if (key == 'strength') {
+    return _catalogStrengthSimilarity(left, right) >= .995;
+  }
+  if (key == 'form') {
+    final a = normalizeForm(left), b = normalizeForm(right);
+    return a.isNotEmpty && a != 'Other' && a == b;
+  }
+  if (key == 'salt') return _catalogSaltSimilarity(left, right) >= .92;
+  return _catalogTextSimilarity(left, right) >= .92;
+}
+
+List<String> _coherentCatalogCandidateLabels(
+  MedicineCatalogCandidate candidate,
+  MedicineScanDraft resolved,
+) {
+  final labels = <String>[];
+  bool reliable(String key, {double minimum = .82}) {
+    final field = resolved.field(key);
+    return !field.isEmpty && !field.conflicted && field.confidence >= minimum;
+  }
+
+  final seed = candidate.seed;
+  final expectedIdentity = seed.brand.trim().isNotEmpty
+      ? seed.brand
+      : seed.name;
+  final observedIdentity = reliable('brand')
+      ? resolved.brand
+      : reliable('name')
+      ? resolved.name
+      : '';
+  if (expectedIdentity.trim().isNotEmpty &&
+      observedIdentity.trim().isNotEmpty &&
+      _catalogTextSimilarity(observedIdentity, expectedIdentity) >= .92) {
+    labels.add('brand');
+  }
+
+  if (seed.salt.trim().isNotEmpty &&
+      reliable('salt') &&
+      _catalogSaltSimilarity(resolved.salt, seed.salt) >= .92) {
+    labels.add('salt');
+  }
+  if (seed.strength.trim().isNotEmpty &&
+      reliable('strength') &&
+      _catalogStrengthSimilarity(resolved.strength, seed.strength) >= .995) {
+    labels.add('strength');
+  }
+
+  final expectedForm = normalizeForm(seed.form);
+  if (expectedForm.isNotEmpty &&
+      expectedForm != 'Other' &&
+      reliable('form') &&
+      normalizeForm(resolved.form) == expectedForm) {
+    labels.add('form');
+  }
+
+  if (seed.manufacturer.trim().isNotEmpty &&
+      reliable('manufacturer') &&
+      _catalogTextSimilarity(resolved.manufacturer, seed.manufacturer) >= .92) {
+    labels.add('manufacturer');
+  }
+  return labels;
 }
 
 List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
