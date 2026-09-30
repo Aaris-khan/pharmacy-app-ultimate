@@ -30,6 +30,7 @@ abstract interface class MedicineScanAwareCatalogProvider
   Future<List<MedicineCatalogCandidate>> searchScanEvidence({
     required String barcode,
     required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
     required int limit,
   });
 }
@@ -165,6 +166,7 @@ class MedicineCatalogService {
             barcode: barcode,
             text: smartText,
             rawText: text,
+            evidence: evidence,
             draft: draft,
             limit: limit,
           );
@@ -193,6 +195,7 @@ class MedicineCatalogService {
     required String barcode,
     required String text,
     required String rawText,
+    required List<MedicineFrameEvidence> evidence,
     required MedicineScanDraft draft,
     required int limit,
   }) async {
@@ -223,6 +226,7 @@ class MedicineCatalogService {
             releaseProvider,
             barcode: barcode,
             queries: queryVariants,
+            evidence: evidence,
             limit: boundedLimit,
           )
         : await _searchProvider(
@@ -356,6 +360,7 @@ class MedicineCatalogService {
     MedicineScanAwareCatalogProvider provider, {
     required String barcode,
     required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
     required int limit,
   }) async {
     try {
@@ -363,6 +368,7 @@ class MedicineCatalogService {
           .searchScanEvidence(
             barcode: barcode,
             queries: queries,
+            evidence: evidence,
             limit: limit,
           )
           .timeout(const Duration(seconds: 5));
@@ -439,6 +445,7 @@ class ReleaseCatalogProvider implements MedicineScanAwareCatalogProvider {
   }) => searchScanEvidence(
     barcode: barcode,
     queries: <String>[text],
+    evidence: const <MedicineFrameEvidence>[],
     limit: limit,
   );
 
@@ -446,6 +453,7 @@ class ReleaseCatalogProvider implements MedicineScanAwareCatalogProvider {
   Future<List<MedicineCatalogCandidate>> searchScanEvidence({
     required String barcode,
     required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
     required int limit,
   }) async {
     try {
@@ -469,25 +477,29 @@ class ReleaseCatalogProvider implements MedicineScanAwareCatalogProvider {
       return const <MedicineCatalogCandidate>[];
     }
 
-    final evidence = boundedQueries.isEmpty
-        ? <MedicineFrameEvidence>[
-            MedicineFrameEvidence(
-              barcode: barcode,
-              source: 'Online catalogue lookup',
-            ),
-          ]
-        : <MedicineFrameEvidence>[
-            for (var index = 0; index < boundedQueries.length; index++)
-              MedicineFrameEvidence(
-                barcode: index == 0 ? barcode : '',
-                text: boundedQueries[index],
-                sequence: index,
-                source: 'Online catalogue lookup · view ${index + 1}',
-              ),
-          ];
+    // Raw OCR is allowed only into this already-local mirror. Keep a bounded
+    // slice of the physical scan so late/cut identity fragments can nominate a
+    // candidate even when the semantic draft omitted them. Synthetic structured
+    // views are appended as independent retrieval hints; neither source can
+    // directly write fields.
+    final localEvidence = <MedicineFrameEvidence>[
+      ...evidence.take(12),
+      if (boundedQueries.isEmpty && evidence.isEmpty)
+        MedicineFrameEvidence(
+          barcode: barcode,
+          source: 'Online catalogue lookup',
+        ),
+      for (var index = 0; index < boundedQueries.length; index++)
+        MedicineFrameEvidence(
+          barcode: index == 0 ? barcode : '',
+          text: boundedQueries[index],
+          sequence: 1000 + index,
+          source: 'Online catalogue lookup · view ${index + 1}',
+        ),
+    ];
     final products = await CanonicalMedicineCatalogService.instance
         .candidatesForEvidence(
-          evidence,
+          localEvidence,
           limit: min(max(limit * 3, 24), 48),
         );
 
