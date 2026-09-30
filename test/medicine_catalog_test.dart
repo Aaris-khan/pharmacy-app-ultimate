@@ -509,6 +509,84 @@ void main() {
     expect(fallback.calls, 0);
     expect(results.first.reason, contains('Scan agrees'));
   });
+
+  test('scan-aware release mirror receives a bounded query lattice', () async {
+    final release = _FakeScanAwareProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '1%',
+          form: 'Lotion',
+        ),
+        score: .94,
+        provider: 'release-lattice',
+      ),
+    ]);
+    final fallback = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(name: 'Wrong fallback'),
+        score: .99,
+        provider: 'network',
+      ),
+    ]);
+    final service = MedicineCatalogService(
+      providers: <MedicineCatalogProvider>[release, fallback],
+      releaseFirst: true,
+    );
+    addTearDown(service.close);
+
+    final results = await service.searchScan(
+      text:
+          'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1% w/v\nCANDIDLOTION\nB.No AB12 MRP 98',
+      evidence: const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 41,
+          quality: .98,
+          text:
+              'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1% w/v\nCANDIDLOTION\nB.No AB12 MRP 98',
+        ),
+      ],
+    );
+
+    expect(results, isNotEmpty);
+    expect(results.first.seed.name, 'Candid');
+    expect(results.first.seed.salt, 'Clotrimazole');
+    expect(results.first.seed.form, 'Lotion');
+    expect(release.scanCalls, 1);
+    expect(release.genericCalls, 0);
+    expect(release.lastEvidence, isNotEmpty);
+    expect(
+      release.lastEvidence.any(
+        (frame) => frame.text.toLowerCase().contains('candidlotion'),
+      ),
+      isTrue,
+    );
+    expect(release.lastQueries.length, greaterThanOrEqualTo(3));
+    expect(
+      release.lastQueries.any(
+        (value) => value.toLowerCase().contains('candid'),
+      ),
+      isTrue,
+    );
+    expect(
+      release.lastQueries.any(
+        (value) => value.toLowerCase().contains('clotrimazole'),
+      ),
+      isTrue,
+    );
+    expect(
+      release.lastQueries.any(
+        (value) => value.toLowerCase().contains('lotion'),
+      ),
+      isTrue,
+    );
+    // A coherent mirrored answer stays private; extra OCR views are not sent
+    // to the live fallback provider.
+    expect(fallback.calls, 0);
+  });
+
 }
 
 class _FakeProvider implements MedicineCatalogProvider {
@@ -526,6 +604,41 @@ class _FakeProvider implements MedicineCatalogProvider {
   }) async {
     calls++;
     lastText = text;
+    return results;
+  }
+}
+
+
+class _FakeScanAwareProvider implements MedicineScanAwareCatalogProvider {
+  _FakeScanAwareProvider(this.results);
+
+  final List<MedicineCatalogCandidate> results;
+  int genericCalls = 0;
+  int scanCalls = 0;
+  List<String> lastQueries = const <String>[];
+  List<MedicineFrameEvidence> lastEvidence =
+      const <MedicineFrameEvidence>[];
+
+  @override
+  Future<List<MedicineCatalogCandidate>> search({
+    required String barcode,
+    required String text,
+    required int limit,
+  }) async {
+    genericCalls++;
+    return results;
+  }
+
+  @override
+  Future<List<MedicineCatalogCandidate>> searchScanEvidence({
+    required String barcode,
+    required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
+    required int limit,
+  }) async {
+    scanCalls++;
+    lastQueries = List<String>.unmodifiable(queries);
+    lastEvidence = List<MedicineFrameEvidence>.unmodifiable(evidence);
     return results;
   }
 }

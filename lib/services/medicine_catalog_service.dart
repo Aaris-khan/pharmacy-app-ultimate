@@ -21,6 +21,20 @@ abstract interface class MedicineCatalogProvider {
   });
 }
 
+/// Optional scan-aware extension for providers that can consume several bounded
+/// identity views in one retrieval pass. The GitHub Release mirror implements
+/// this locally; live public APIs deliberately keep the single compact query so
+/// raw OCR variants are never multiplied across third-party requests.
+abstract interface class MedicineScanAwareCatalogProvider
+    implements MedicineCatalogProvider {
+  Future<List<MedicineCatalogCandidate>> searchScanEvidence({
+    required String barcode,
+    required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
+    required int limit,
+  });
+}
+
 /// Public-catalog discovery used only after the local pharmacy database cannot
 /// confidently identify a scan.
 ///
@@ -151,6 +165,8 @@ class MedicineCatalogService {
         : await _searchProvidersForScan(
             barcode: barcode,
             text: smartText,
+            rawText: text,
+            evidence: evidence,
             draft: draft,
             limit: limit,
           );
@@ -178,6 +194,8 @@ class MedicineCatalogService {
   Future<List<MedicineCatalogCandidate>> _searchProvidersForScan({
     required String barcode,
     required String text,
+    required String rawText,
+    required List<MedicineFrameEvidence> evidence,
     required MedicineScanDraft draft,
     required int limit,
   }) async {
@@ -192,16 +210,31 @@ class MedicineCatalogService {
         candidates,
         draft,
         barcode,
-        rawText: text,
+        rawText: rawText,
       );
     }
 
-    final release = await _searchProvider(
-      _providers.first,
-      barcode: barcode,
-      text: text,
-      limit: boundedLimit,
-    );
+    // Retrieval and decision are deliberately separate. The mirrored catalogue
+    // gets a bounded query lattice (semantic identity, trade presentation,
+    // composition presentation and cleaned OCR) in one local SQLite pass. That
+    // improves recall for clipped/glued OCR without weakening the downstream
+    // brand/salt/strength/form contradiction gates.
+    final releaseProvider = _providers.first;
+    final queryVariants = _catalogScanQueryVariants(draft, rawText);
+    final release = releaseProvider is MedicineScanAwareCatalogProvider
+        ? await _searchScanProvider(
+            releaseProvider,
+            barcode: barcode,
+            queries: queryVariants,
+            evidence: evidence,
+            limit: boundedLimit,
+          )
+        : await _searchProvider(
+            releaseProvider,
+            barcode: barcode,
+            text: text,
+            limit: boundedLimit,
+          );
     final releaseRanked = _rerankCatalogCandidatesForScan(
       _rankCandidates(
         <List<MedicineCatalogCandidate>>[release],
@@ -209,12 +242,14 @@ class MedicineCatalogService {
       ),
       draft,
       barcode,
-      rawText: text,
+      rawText: rawText,
     );
     if (_scanReleaseMatchIsDecisive(releaseRanked)) {
       return releaseRanked;
     }
 
+    // Only one compact semantic query reaches live public providers. The extra
+    // OCR views above are local to the verified Release mirror.
     final fallback = await Future.wait(
       _providers.skip(1).map(
         (provider) => _searchProvider(
@@ -233,7 +268,7 @@ class MedicineCatalogService {
       combined,
       draft,
       barcode,
-      rawText: text,
+      rawText: rawText,
     );
   }
 
@@ -321,6 +356,27 @@ class MedicineCatalogService {
     return _rankCandidates(groups, limit);
   }
 
+  Future<List<MedicineCatalogCandidate>> _searchScanProvider(
+    MedicineScanAwareCatalogProvider provider, {
+    required String barcode,
+    required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
+    required int limit,
+  }) async {
+    try {
+      return await provider
+          .searchScanEvidence(
+            barcode: barcode,
+            queries: queries,
+            evidence: evidence,
+            limit: limit,
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      return <MedicineCatalogCandidate>[];
+    }
+  }
+
   Future<List<MedicineCatalogCandidate>> _searchProvider(
     MedicineCatalogProvider provider, {
     required String barcode,
@@ -380,11 +436,24 @@ class _CatalogCacheEntry {
 }
 
 /// Release-backed local catalogue used only from explicit Online Search.
-class ReleaseCatalogProvider implements MedicineCatalogProvider {
+class ReleaseCatalogProvider implements MedicineScanAwareCatalogProvider {
   @override
   Future<List<MedicineCatalogCandidate>> search({
     required String barcode,
     required String text,
+    required int limit,
+  }) => searchScanEvidence(
+    barcode: barcode,
+    queries: <String>[text],
+    evidence: const <MedicineFrameEvidence>[],
+    limit: limit,
+  );
+
+  @override
+  Future<List<MedicineCatalogCandidate>> searchScanEvidence({
+    required String barcode,
+    required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
     required int limit,
   }) async {
     try {
@@ -396,18 +465,49 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
       // and other public providers when GitHub is slow or unavailable.
     }
 
+    final boundedQueries = <String>[];
+    final seen = <String>{};
+    for (final raw in queries.take(6)) {
+      final clean = _catalogQuery(raw);
+      final key = searchText(clean);
+      if (key.isEmpty || !seen.add(key)) continue;
+      boundedQueries.add(clean);
+    }
+    final hasRawEvidence = evidence.any(
+      (frame) => frame.text.trim().isNotEmpty || frame.allBarcodes.isNotEmpty,
+    );
+    if (boundedQueries.isEmpty &&
+        barcode.trim().isEmpty &&
+        !hasRawEvidence) {
+      return const <MedicineCatalogCandidate>[];
+    }
+
+    // Raw OCR is allowed only into this already-local mirror. Keep a bounded
+    // slice of the physical scan so late/cut identity fragments can nominate a
+    // candidate even when the semantic draft omitted them. Synthetic structured
+    // views are appended as independent retrieval hints; neither source can
+    // directly write fields.
+    final localEvidence = <MedicineFrameEvidence>[
+      ...evidence.take(12),
+      if (boundedQueries.isEmpty && evidence.isEmpty)
+        MedicineFrameEvidence(
+          barcode: barcode,
+          source: 'Online catalogue lookup',
+        ),
+      for (var index = 0; index < boundedQueries.length; index++)
+        MedicineFrameEvidence(
+          barcode: index == 0 ? barcode : '',
+          text: boundedQueries[index],
+          sequence: 1000 + index,
+          source: 'Online catalogue lookup · view ${index + 1}',
+        ),
+    ];
     final products = await CanonicalMedicineCatalogService.instance
         .candidatesForEvidence(
-          <MedicineFrameEvidence>[
-            MedicineFrameEvidence(
-              barcode: barcode,
-              text: text,
-              source: 'Online catalogue lookup',
-            ),
-          ],
+          localEvidence,
           limit: min(max(limit * 3, 24), 48),
         );
-    final query = _catalogQuery(text);
+
     return products
         .map((product) {
           final exactBarcode =
@@ -427,11 +527,29 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
             source: product.source,
             sourceId: product.productId,
           );
+
+          var best = .70;
+          var supportingViews = 0;
+          for (final query in boundedQueries) {
+            final score = _candidateScore(
+              seed,
+              query,
+              providerFloor: .70,
+            );
+            best = max(best, score);
+            if (score >= .82) supportingViews++;
+          }
+          // Consensus is a small retrieval prior only. It can improve ordering,
+          // never override the later structured contradiction checks.
+          final consensusBonus =
+              min(.03, max(0, supportingViews - 1) * .01).toDouble();
+          final lexicalScore = (best + consensusBonus)
+              .clamp(.70, .98)
+              .toDouble();
+
           return MedicineCatalogCandidate(
             seed: seed,
-            score: exactBarcode
-                ? 1.0
-                : _candidateScore(seed, query, providerFloor: .70),
+            score: exactBarcode ? 1.0 : lexicalScore,
             provider: 'Aaris catalogue',
             reason: exactBarcode
                 ? 'Exact verified catalogue barcode'
@@ -774,6 +892,32 @@ String _catalogFormFromText(String raw) {
     }
   }
   return '';
+}
+
+List<String> _catalogScanQueryVariants(
+  MedicineScanDraft draft,
+  String rawText,
+) {
+  final variants = <String>[];
+  final seen = <String>{};
+
+  void add(String value) {
+    final clean = _catalogQuery(value);
+    final key = searchText(clean);
+    if (key.isEmpty || !seen.add(key)) return;
+    variants.add(clean.length <= 420 ? clean : clean.substring(0, 420));
+  }
+
+  final identity = draft.brand.trim().isNotEmpty
+      ? draft.brand
+      : draft.name;
+  add(_catalogScanQuery(draft, rawText));
+  add(<String>[identity, draft.strength, draft.form].join(' '));
+  add(<String>[draft.salt, draft.strength, draft.form].join(' '));
+  add(<String>[draft.brand, draft.salt, draft.form].join(' '));
+  add(rawText);
+
+  return variants.take(5).toList(growable: false);
 }
 
 String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
