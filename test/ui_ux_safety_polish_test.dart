@@ -862,22 +862,20 @@ void main() {
       final app = File('lib/app.dart').readAsStringSync();
       final stock = File('lib/ui/search_screen.dart').readAsStringSync();
 
-      expect(app, contains("import 'package:flutter/scheduler.dart';"));
       expect(
         app,
-        contains('Timer(const Duration(milliseconds: 300)'),
+        contains('Timer(const Duration(milliseconds: 700)'),
         reason:
-            'Initial input needs a bounded grace window before full-data work.',
-      );
-      expect(app, contains('SchedulerBinding.instance'));
-      expect(app, contains('Priority.idle'));
-      expect(
-        app,
-        contains('Timer(const Duration(seconds: 2), launch)'),
-        reason: 'Idle scheduling must retain a bounded starvation fallback.',
+            'Initial input and navigation animation need a bounded grace window.',
       );
       expect(app, contains('_startupAutopilotGrace?.cancel()'));
-      expect(app, contains('_startupAutopilotFallback?.cancel()'));
+      expect(app, isNot(contains("package:flutter/scheduler.dart")));
+      expect(app, isNot(contains('SchedulerBinding.instance.scheduleTask')));
+      expect(
+        app,
+        isNot(contains('_startupAutopilotFallback')),
+        reason: 'Startup deferral must stay fully cancelable.',
+      );
 
       final initStart = stock.indexOf('void initState()');
       final dependenciesStart = stock.indexOf(
