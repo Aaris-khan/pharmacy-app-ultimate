@@ -206,10 +206,15 @@ class MedicineCatalogService {
         text: text,
         limit: boundedLimit,
       );
-      return _rerankCatalogCandidatesForScan(
+      final ranked = _rerankCatalogCandidatesForScan(
         candidates,
         draft,
         barcode,
+        rawText: rawText,
+      );
+      return _promoteUniquePhysicalCatalogMatch(
+        ranked,
+        draft: draft,
         rawText: rawText,
       );
     }
@@ -235,13 +240,17 @@ class MedicineCatalogService {
             text: text,
             limit: boundedLimit,
           );
-    final releaseRanked = _rerankCatalogCandidatesForScan(
-      _rankCandidates(
-        <List<MedicineCatalogCandidate>>[release],
-        boundedLimit,
+    final releaseRanked = _promoteUniquePhysicalCatalogMatch(
+      _rerankCatalogCandidatesForScan(
+        _rankCandidates(
+          <List<MedicineCatalogCandidate>>[release],
+          boundedLimit,
+        ),
+        draft,
+        barcode,
+        rawText: rawText,
       ),
-      draft,
-      barcode,
+      draft: draft,
       rawText: rawText,
     );
     if (_scanReleaseMatchIsDecisive(releaseRanked)) {
@@ -264,10 +273,15 @@ class MedicineCatalogService {
       <List<MedicineCatalogCandidate>>[release, ...fallback],
       boundedLimit,
     );
-    return _rerankCatalogCandidatesForScan(
+    final ranked = _rerankCatalogCandidatesForScan(
       combined,
       draft,
       barcode,
+      rawText: rawText,
+    );
+    return _promoteUniquePhysicalCatalogMatch(
+      ranked,
+      draft: draft,
       rawText: rawText,
     );
   }
@@ -989,6 +1003,172 @@ double _catalogStrengthSimilarity(String left, String right) {
     medicineStrengthKey(_normalizeCatalogStrength(left)),
     medicineStrengthKey(_normalizeCatalogStrength(right)),
   );
+}
+
+String _catalogCompactEvidenceSurface(String raw) {
+  return searchText(_catalogOcrSurface(raw)).replaceAll(' ', '');
+}
+
+bool _catalogCompactLiteralPresent(
+  String compactRaw,
+  String canonical, {
+  int minimumLength = 5,
+}) {
+  final compactCanonical = searchText(canonical).replaceAll(' ', '');
+  return compactCanonical.length >= minimumLength &&
+      compactRaw.contains(compactCanonical);
+}
+
+bool _catalogSaltLiterallyPresent(String compactRaw, String canonicalSalt) {
+  final components = canonicalSalt
+      .split(
+        RegExp(
+          r'\s*(?:\+|;|\band\b|\bwith\b)\s*',
+          caseSensitive: false,
+        ),
+      )
+      .map((part) => searchText(part).replaceAll(' ', ''))
+      .where((part) => part.length >= 5)
+      .take(6)
+      .toList(growable: false);
+  return components.isNotEmpty &&
+      components.every((component) => compactRaw.contains(component));
+}
+
+List<String> _catalogPhysicalEvidenceLabels(
+  MedicineCatalogCandidate candidate,
+  MedicineScanDraft draft,
+  String rawText,
+) {
+  final labels = <String>[];
+  final seed = candidate.seed;
+  final compactRaw = _catalogCompactEvidenceSurface(rawText);
+
+  final observedIdentity =
+      draft.field('brand').isEmpty ? draft.field('name') : draft.field('brand');
+  final canonicalIdentity =
+      seed.brand.trim().isNotEmpty ? seed.brand : seed.name;
+  if ((!observedIdentity.isEmpty &&
+          _catalogTextSimilarity(
+                observedIdentity.value,
+                canonicalIdentity,
+              ) >=
+              .90) ||
+      _catalogCompactLiteralPresent(compactRaw, canonicalIdentity)) {
+    labels.add('brand');
+  }
+
+  final observedSalt = draft.field('salt');
+  if ((!observedSalt.isEmpty &&
+          _catalogSaltSimilarity(observedSalt.value, seed.salt) >= .90) ||
+      _catalogSaltLiterallyPresent(compactRaw, seed.salt)) {
+    labels.add('salt');
+  }
+
+  final observedStrength = draft.field('strength');
+  if (!observedStrength.isEmpty &&
+      seed.strength.trim().isNotEmpty &&
+      _catalogStrengthSimilarity(observedStrength.value, seed.strength) >=
+          .995) {
+    labels.add('strength');
+  }
+
+  var observedForm = draft.field('form');
+  if (observedForm.isEmpty) {
+    final recovered = _catalogFormFromText(_catalogOcrSurface(rawText));
+    if (recovered.isNotEmpty) {
+      observedForm = ExtractedMedicineField(
+        value: recovered,
+        confidence: .76,
+        support: 1,
+      );
+    }
+  }
+  final canonicalForm = normalizeForm(seed.form);
+  if (!observedForm.isEmpty &&
+      canonicalForm.isNotEmpty &&
+      canonicalForm != 'Other' &&
+      normalizeForm(observedForm.value) == canonicalForm) {
+    labels.add('form');
+  }
+
+  return labels.toSet().toList(growable: false);
+}
+
+bool _catalogPhysicalProofIsStrong(List<String> labels) {
+  final unique = labels.toSet();
+  if (unique.length < 3) return false;
+  final hasIdentity = unique.contains('brand') || unique.contains('salt');
+  final hasDiscriminator =
+      unique.contains('strength') || unique.contains('form');
+  return hasIdentity && hasDiscriminator;
+}
+
+/// A catalogue is allowed to complete missing canonical identity only after the
+/// physical pack independently makes one candidate uniquely coherent.
+///
+/// This is intentionally different from feeding catalogue values back into the
+/// scan resolver: a candidate never proves its own salt/brand. The proof labels
+/// below come only from OCR-derived fields or literal pack text. If two sibling
+/// products fit the same strongest physical evidence, no confidence promotion
+/// happens and normal public fallback/review remains in control.
+List<MedicineCatalogCandidate> _promoteUniquePhysicalCatalogMatch(
+  List<MedicineCatalogCandidate> candidates, {
+  required MedicineScanDraft draft,
+  required String rawText,
+}) {
+  if (candidates.isEmpty ||
+      candidates.first.reason.startsWith('Exact catalogue barcode')) {
+    return candidates;
+  }
+
+  MedicineCatalogCandidate? winner;
+  List<String> winnerLabels = const <String>[];
+  var winnerProofCount = 0;
+  var strongestIsAmbiguous = false;
+
+  for (final candidate in candidates) {
+    if (candidate.reason.startsWith('Check scan conflict:')) continue;
+    final labels = _catalogPhysicalEvidenceLabels(candidate, draft, rawText);
+    if (!_catalogPhysicalProofIsStrong(labels)) continue;
+
+    final proofCount = labels.length;
+    if (winner == null || proofCount > winnerProofCount) {
+      winner = candidate;
+      winnerLabels = labels;
+      winnerProofCount = proofCount;
+      strongestIsAmbiguous = false;
+      continue;
+    }
+    if (proofCount == winnerProofCount &&
+        winner.seed.identityKey != candidate.seed.identityKey) {
+      strongestIsAmbiguous = true;
+    }
+  }
+
+  if (winner == null || strongestIsAmbiguous) return candidates;
+
+  final floor = winnerProofCount >= 4 ? .965 : .94;
+  final promoted = <MedicineCatalogCandidate>[
+    for (final candidate in candidates)
+      if (candidate.seed.identityKey == winner.seed.identityKey)
+        MedicineCatalogCandidate(
+          seed: candidate.seed,
+          score: max(candidate.score, floor).clamp(.40, 1.0).toDouble(),
+          provider: candidate.provider,
+          reason: 'Scan agrees: ${winnerLabels.join(', ')}',
+        )
+      else
+        candidate,
+  ];
+
+  promoted.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    return byScore != 0
+        ? byScore
+        : searchText(a.seed.name).compareTo(searchText(b.seed.name));
+  });
+  return promoted;
 }
 
 List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
