@@ -24,6 +24,7 @@ class CanonicalMedicineCatalogService {
       CanonicalMedicineCatalogService._();
 
   static const int _schemaVersion = 1;
+  static const int _retrievalIndexVersion = 2;
   static const int _maxDeltaBytes = 24 * 1024 * 1024;
   static const int _maxDeltaLines = 50000;
   static const int _maxCandidateRows = maxCanonicalMedicineCandidates;
@@ -121,6 +122,61 @@ CREATE TABLE catalog_deletes (
       },
     );
     _database = db;
+    await _upgradeRetrievalIndexIfNeeded();
+  }
+
+  /// Adds bounded anchors for long OCR-collapsed identity tokens without
+  /// invalidating the already-downloaded catalogue. This is a local derived
+  /// index migration only; source records and their revisions remain intact.
+  Future<void> _upgradeRetrievalIndexIfNeeded() async {
+    final database = _database;
+    if (database == null) return;
+    final rows = await database.query(
+      'catalog_meta',
+      columns: const <String>['value'],
+      where: 'key = ?',
+      whereArgs: const <Object?>['retrieval_index_version'],
+      limit: 1,
+    );
+    final current = rows.isEmpty
+        ? 0
+        : int.tryParse('${rows.first['value']}') ?? 0;
+    if (current >= _retrievalIndexVersion) return;
+
+    await database.transaction((txn) async {
+      // Existing catalog_terms already contain the long normalized OCR alias.
+      // Sample four deterministic 12-character windows directly in SQLite so
+      // upgrades do not need to re-download or materialize the full catalogue.
+      const anchorStatements = <String>[
+        '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
+           SELECT product_id, substr(term, 1, 12), weight * 0.74
+           FROM catalog_terms WHERE length(term) > 28''',
+        '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
+           SELECT product_id,
+                  substr(term, CAST((length(term) - 12) / 3 AS INTEGER) + 1, 12),
+                  weight * 0.74
+           FROM catalog_terms WHERE length(term) > 28''',
+        '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
+           SELECT product_id,
+                  substr(term, CAST(((length(term) - 12) * 2) / 3 AS INTEGER) + 1, 12),
+                  weight * 0.74
+           FROM catalog_terms WHERE length(term) > 28''',
+        '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
+           SELECT product_id, substr(term, length(term) - 11, 12), weight * 0.74
+           FROM catalog_terms WHERE length(term) > 28''',
+      ];
+      for (final statement in anchorStatements) {
+        await txn.execute(statement);
+      }
+      await txn.insert(
+        'catalog_meta',
+        <String, Object?>{
+          'key': 'retrieval_index_version',
+          'value': '$_retrievalIndexVersion',
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
   }
 
   Future<int> get lastAppliedRevision async {
@@ -733,6 +789,14 @@ Map<String, double> _catalogTerms(CanonicalMedicineProduct product) {
       final folded = _ocrFoldToken(token);
       result[token] = max(result[token] ?? 0, weight);
       result[folded] = max(result[folded] ?? 0, weight * .98);
+      for (final anchor in boundedOcrAnchors(token)) {
+        result[anchor] = max(result[anchor] ?? 0, weight * .74);
+      }
+      if (folded != token) {
+        for (final anchor in boundedOcrAnchors(folded)) {
+          result[anchor] = max(result[anchor] ?? 0, weight * .72);
+        }
+      }
     }
 
     // OCR often collapses multi-word brands or ingredients into one token.
@@ -782,6 +846,16 @@ Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
       if (withoutDose.length >= 4 && withoutDose.length <= 48) {
         result.add(withoutDose);
         result.add(_ocrFoldToken(withoutDose));
+      }
+
+      for (final anchor in boundedOcrAnchors(token)) {
+        result.add(anchor);
+      }
+      final folded = _ocrFoldToken(token);
+      if (folded != token) {
+        for (final anchor in boundedOcrAnchors(folded)) {
+          result.add(anchor);
+        }
       }
     }
 
