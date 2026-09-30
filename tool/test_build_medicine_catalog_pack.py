@@ -38,6 +38,16 @@ class CatalogBuilderTest(unittest.TestCase):
             "montelukastsodiumlevocetirizinehydrochloride",
             aliases,
         )
+        self.assertIn("monteklctablet", aliases)
+        self.assertIn(
+            "monteklcmontelukastsodiumlevocetirizinehydrochloride",
+            aliases,
+        )
+        self.assertIn(
+            "monteklcmontelukastsodium10mglevo"
+            "cetirizinehydrochloride5mgtablet",
+            aliases,
+        )
 
     def test_rxnorm_lotion_parses_brand_salt_strength_and_form(self):
         product = builder.transform_rxnorm_concept(
