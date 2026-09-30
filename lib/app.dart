@@ -247,12 +247,16 @@ class _ShellState extends State<_Shell> {
                       // not a full bottom-navigation rebuild on every tab.
                       rebuildToken: () {
                         final digest = widget.autopilot.digest;
-                        final issues = digest.isReady ? digest.navigationBadgeCount : 0;
+                        final issues = digest.isReady
+                            ? digest.navigationBadgeCount
+                            : 0;
                         return issues > 99 ? 99 : issues;
                       },
                       builder: (context, _) {
                         final digest = widget.autopilot.digest;
-                        final issues = digest.isReady ? digest.navigationBadgeCount : 0;
+                        final issues = digest.isReady
+                            ? digest.navigationBadgeCount
+                            : 0;
                         final badgeCount = issues > 99 ? 99 : issues;
                         // Use the width the navigation bar actually receives after
                         // SafeArea margins and the 720px shell cap. Screen width can be
@@ -261,21 +265,24 @@ class _ShellState extends State<_Shell> {
                         final navigationLabelHeight =
                             MediaQuery.textScalerOf(context).scale(11);
                         final compactNavigation =
-                            navigationWidth < 380 || navigationLabelHeight > 15;
+                            navigationWidth < 380 ||
+                            navigationLabelHeight > 15;
                         final navigationHeight =
                             72.0 +
                             (navigationLabelHeight - 11)
                                 .clamp(0.0, 24.0)
                                 .toDouble();
                         final reduceMotion =
-                            MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+                            MediaQuery.maybeOf(context)?.disableAnimations ??
+                            false;
                         return NavigationBar(
                           height: navigationHeight,
                           animationDuration: reduceMotion
                               ? Duration.zero
                               : const Duration(milliseconds: 260),
                           labelBehavior: compactNavigation
-                              ? NavigationDestinationLabelBehavior.onlyShowSelected
+                              ? NavigationDestinationLabelBehavior
+                                    .onlyShowSelected
                               : NavigationDestinationLabelBehavior.alwaysShow,
                           selectedIndex: tab,
                           onDestinationSelected: _selectTab,
@@ -286,50 +293,50 @@ class _ShellState extends State<_Shell> {
                                 selectedIcon: Icons.home_rounded,
                                 selected: tab == 0,
                                 reduceMotion: reduceMotion,
-                    ),
-                    label: 'Home',
-                  ),
-                  NavigationDestination(
-                    icon: _AnimatedNavigationIcon(
-                      icon: Icons.medication_outlined,
-                      selectedIcon: Icons.medication_rounded,
-                      selected: tab == 1,
-                      reduceMotion: reduceMotion,
-                    ),
-                    label: 'Stock',
-                  ),
-                  NavigationDestination(
-                    icon: _AnimatedNavigationIcon(
-                      icon: Icons.psychology_outlined,
-                      selectedIcon: Icons.psychology_rounded,
-                      selected: tab == 2,
-                      badgeCount: badgeCount,
-                      showBadge: issues > 0,
-                      reduceMotion: reduceMotion,
-                    ),
-                    label: 'Aaris Brain',
-                  ),
-                  NavigationDestination(
-                    icon: _AnimatedNavigationIcon(
-                      icon: Icons.insights_outlined,
-                      selectedIcon: Icons.insights_rounded,
-                      selected: tab == 3,
-                      reduceMotion: reduceMotion,
-                    ),
-                    label: 'Insights',
-                  ),
-                  NavigationDestination(
-                    icon: _AnimatedNavigationIcon(
-                      icon: Icons.person_outline_rounded,
-                      selectedIcon: Icons.person_rounded,
-                      selected: tab == 4,
-                      reduceMotion: reduceMotion,
-                    ),
-                    label: 'Profile',
-                  ),
-                ],
-              );
-            },
+                              ),
+                              label: 'Home',
+                            ),
+                            NavigationDestination(
+                              icon: _AnimatedNavigationIcon(
+                                icon: Icons.medication_outlined,
+                                selectedIcon: Icons.medication_rounded,
+                                selected: tab == 1,
+                                reduceMotion: reduceMotion,
+                              ),
+                              label: 'Stock',
+                            ),
+                            NavigationDestination(
+                              icon: _AnimatedNavigationIcon(
+                                icon: Icons.psychology_outlined,
+                                selectedIcon: Icons.psychology_rounded,
+                                selected: tab == 2,
+                                badgeCount: badgeCount,
+                                showBadge: issues > 0,
+                                reduceMotion: reduceMotion,
+                              ),
+                              label: 'Aaris Brain',
+                            ),
+                            NavigationDestination(
+                              icon: _AnimatedNavigationIcon(
+                                icon: Icons.insights_outlined,
+                                selectedIcon: Icons.insights_rounded,
+                                selected: tab == 3,
+                                reduceMotion: reduceMotion,
+                              ),
+                              label: 'Insights',
+                            ),
+                            NavigationDestination(
+                              icon: _AnimatedNavigationIcon(
+                                icon: Icons.person_outline_rounded,
+                                selectedIcon: Icons.person_rounded,
+                                selected: tab == 4,
+                                reduceMotion: reduceMotion,
+                              ),
+                              label: 'Profile',
+                            ),
+                          ],
+                        );
+                      },
                     ),
               ),
             ),
