@@ -150,6 +150,30 @@ void main() {
     expect(seed.form, 'Lotion');
   });
 
+  test('RxNorm preserves aligned multi-ingredient composition and doses', () {
+    final seed = RxNormProvider.parseResults(
+      [
+        {
+          'rxcui': '9001',
+          'rank': '1',
+          'score': '12',
+          'name':
+              'montelukast sodium 10 MG / levocetirizine hydrochloride 5 MG Oral Tablet [Montek LC]',
+        },
+      ],
+      queryText: 'Montek LC montelukast levocetirizine 10 mg 5 mg',
+    ).single.seed;
+
+    expect(seed.name, 'Montek LC');
+    expect(seed.brand, 'Montek LC');
+    expect(
+      seed.salt.toLowerCase(),
+      'montelukast sodium + levocetirizine hydrochloride',
+    );
+    expect(seed.strength.toLowerCase(), '10 mg + 5 mg');
+    expect(seed.form, 'Tablet');
+  });
+
   test('scan-aware catalogue ranking demotes conflicting strength and form', () async {
     final provider = _FakeProvider([
       const MedicineCatalogCandidate(
@@ -267,6 +291,72 @@ void main() {
     await service.search(text: 'Dolo 650');
 
     expect(provider.calls, 1);
+  });
+
+  test('release-first search does not leak a strong mirrored query to fallback', () async {
+    final release = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Dolo',
+          brand: 'Dolo',
+          salt: 'Paracetamol',
+          strength: '650 mg',
+          form: 'Tablet',
+        ),
+        score: .94,
+        provider: 'release',
+      ),
+    ]);
+    final fallback = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(name: 'Other'),
+        score: .99,
+        provider: 'network',
+      ),
+    ]);
+    final service = MedicineCatalogService(
+      providers: [release, fallback],
+      releaseFirst: true,
+    );
+    addTearDown(service.close);
+
+    final results = await service.search(text: 'Dolo 650');
+    expect(results.single.seed.name, 'Dolo');
+    expect(release.calls, 1);
+    expect(fallback.calls, 0);
+  });
+
+  test('release-first search uses public fallback when mirror evidence is weak', () async {
+    final release = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(name: 'Dolo'),
+        score: .72,
+        provider: 'release',
+      ),
+    ]);
+    final fallback = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Dolo',
+          brand: 'Dolo',
+          salt: 'Paracetamol',
+          strength: '650 mg',
+          form: 'Tablet',
+        ),
+        score: .95,
+        provider: 'network',
+      ),
+    ]);
+    final service = MedicineCatalogService(
+      providers: [release, fallback],
+      releaseFirst: true,
+    );
+    addTearDown(service.close);
+
+    final results = await service.search(text: 'Dolo 650');
+    expect(results.first.score, .95);
+    expect(release.calls, 1);
+    expect(fallback.calls, 1);
   });
 }
 
