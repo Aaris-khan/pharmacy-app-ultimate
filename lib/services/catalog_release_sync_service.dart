@@ -31,7 +31,7 @@ class CatalogReleaseSyncService {
 
   static const _repo = 'Aaris-khan/pharmacy-app-ultimate';
   static const _maxManifestBytes = 256 * 1024;
-  static const _maxShardBytes = 24 * 1024 * 1024;
+  static const _maxShardBytes = 10 * 1024 * 1024;
   static const _successInterval = Duration(hours: 6);
   static const _failureBackoff = Duration(minutes: 10);
 
@@ -170,20 +170,37 @@ class CatalogReleaseSyncService {
     if (asset.bytes <= 0 || asset.bytes > maxBytes) {
       throw const FormatException('Catalogue asset exceeds the safety limit.');
     }
+    final request = http.Request('GET', asset.url)
+      ..headers['User-Agent'] = 'Aaris-Pharmacy-Catalog/1';
     final response = await _client
-        .get(
-          asset.url,
-          headers: const {'User-Agent': 'Aaris-Pharmacy-Catalog/1'},
-        )
+        .send(request)
         .timeout(const Duration(seconds: 12));
     if (response.statusCode != 200) {
+      await response.stream.drain<void>();
       throw StateError('Catalogue asset returned HTTP ${response.statusCode}.');
     }
-    if (response.bodyBytes.length != asset.bytes ||
-        response.bodyBytes.length > maxBytes) {
+    final declared = response.contentLength;
+    if (declared != null &&
+        (declared != asset.bytes || declared > maxBytes)) {
+      await response.stream.drain<void>();
       throw const FormatException('Catalogue asset size mismatch.');
     }
-    return Uint8List.fromList(response.bodyBytes);
+
+    final builder = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in response.stream.timeout(
+      const Duration(seconds: 12),
+    )) {
+      received += chunk.length;
+      if (received > maxBytes || received > asset.bytes) {
+        throw const FormatException('Catalogue asset exceeds its declared size.');
+      }
+      builder.add(chunk);
+    }
+    if (received != asset.bytes) {
+      throw const FormatException('Catalogue asset size mismatch.');
+    }
+    return builder.takeBytes();
   }
 }
 
