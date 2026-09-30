@@ -587,6 +587,117 @@ void main() {
     expect(fallback.calls, 0);
   });
 
+  test(
+    'unique physical pack proof promotes missing catalogue salt without self-proof',
+    () async {
+      final provider = _FakeProvider([
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Candid',
+            brand: 'Candid',
+            salt: 'Clotrimazole',
+            strength: '10 mg/mL',
+            form: 'Lotion',
+          ),
+          score: .72,
+          provider: 'release-identity',
+        ),
+      ]);
+      final service = MedicineCatalogService(providers: [provider]);
+      addTearDown(service.close);
+
+      const scanText = 'PRODUCT NAME CANDID\n1% w/v\nLOTION';
+      final results = await service.searchScan(
+        text: scanText,
+        evidence: const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 71,
+            quality: .99,
+            text: scanText,
+          ),
+        ],
+      );
+
+      expect(results, hasLength(1));
+      expect(results.single.seed.salt, 'Clotrimazole');
+      expect(results.single.score, greaterThanOrEqualTo(.94));
+      expect(results.single.reason, startsWith('Scan agrees:'));
+      expect(results.single.reason, contains('brand'));
+      expect(results.single.reason, contains('strength'));
+      expect(results.single.reason, contains('form'));
+      expect(
+        results.single.reason.split(',').any(
+          (part) => part.trim() == 'salt',
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'same-brand sibling salts stay ambiguous when pack lacks salt evidence',
+    () async {
+      final release = _FakeProvider([
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Examplex',
+            brand: 'Examplex',
+            salt: 'Alpha Salt',
+            strength: '10 mg',
+            form: 'Tablet',
+          ),
+          score: .72,
+          provider: 'release-alpha',
+        ),
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Examplex',
+            brand: 'Examplex',
+            salt: 'Beta Salt',
+            strength: '10 mg',
+            form: 'Tablet',
+          ),
+          score: .71,
+          provider: 'release-beta',
+        ),
+      ]);
+      final fallback = _FakeProvider([
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(name: 'Public fallback'),
+          score: .91,
+          provider: 'network',
+        ),
+      ]);
+      final service = MedicineCatalogService(
+        providers: [release, fallback],
+        releaseFirst: true,
+      );
+      addTearDown(service.close);
+
+      const scanText = 'PRODUCT NAME EXAMPLEX\n10 mg\nTABLETS';
+      final results = await service.searchScan(
+        text: scanText,
+        evidence: const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 72,
+            quality: .99,
+            text: scanText,
+          ),
+        ],
+      );
+
+      expect(release.calls, 1);
+      expect(fallback.calls, 1);
+      expect(results, isNotEmpty);
+      expect(
+        results
+            .where((candidate) => candidate.provider.startsWith('release-'))
+            .every((candidate) => candidate.score < .90),
+        isTrue,
+      );
+    },
+  );
+
 }
 
 class _FakeProvider implements MedicineCatalogProvider {
