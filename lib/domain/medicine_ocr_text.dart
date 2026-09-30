@@ -1,4 +1,5 @@
 import 'medicine.dart';
+import 'medicine_form_recognition.dart';
 
 final _medicineOcrPresentationArtifacts = RegExp(
   r'[\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]',
@@ -399,7 +400,7 @@ String _canonicalMedicineOcrSurface(String value) {
         .firstMatch(result.substring(match.start))
         ?.group(0)
         ?.toLowerCase();
-    if (token != null && medicineFormAliases.containsKey(token)) {
+    if (token != null && recognizeMedicineFormFromText(token).isNotEmpty) {
       return match[0]!;
     }
 
