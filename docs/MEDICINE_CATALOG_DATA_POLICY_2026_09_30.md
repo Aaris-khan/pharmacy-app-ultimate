@@ -13,6 +13,10 @@ Automated mirrored sources are deliberately narrow:
 
 Do not mirror proprietary medicine databases, scrape sites that prohibit redistribution, or copy the full RxNorm monthly/weekly release. Full RxNorm includes third-party source vocabularies with different licence terms; CPC is a separate deliberately redistributable subset.
 
+### Permission-required sources
+
+- **PMBI / Jan Aushadhi product portfolio** is **not mirrored today**. PMBI's published copyright policy says portal material may be reproduced free of charge only after obtaining permission by email. Treat this source as `permission_required`; do not scrape, clone, publish, or add it to automated Releases unless written permission (or a later explicit open-data licence) is recorded in the repository and the source allow-list is deliberately updated.
+
 ## Safety boundary
 
 Catalogue records may contain product identity only: medicine/trade name, brand, active ingredients, strength, dosage form, manufacturer/labeler, public identifiers, and bounded OCR aliases. They must never provide MFG, EXP, batch, pharmacy quantity, price, supplier, shelf location, or private user data.
