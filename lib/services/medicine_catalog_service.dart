@@ -613,13 +613,30 @@ String _repairCatalogFragments(String value) {
         joined.write(parts[end]);
         end++;
       }
-      if (joined.length >= 2 &&
-          end < parts.length &&
-          RegExp(r'^(?:mcg|mg|g|ml|iu|units?)$').hasMatch(parts[end])) {
-        output.add(joined.toString());
-        output.add(parts[end]);
-        index = end + 1;
-        continue;
+      if (end < parts.length) {
+        final plainUnit = RegExp(
+          r'^(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.length >= 2 && plainUnit != null) {
+          output.add(joined.toString());
+          output.add(parts[end]);
+          index = end + 1;
+          continue;
+        }
+
+        // searchText may already compact the final digit with its unit:
+        // "6 5 0 mg" -> "6 5 0mg". Join only this tightly-bounded shape.
+        final digitUnit = RegExp(
+          r'^(\d)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.isNotEmpty &&
+            digitUnit != null &&
+            joined.length < 5) {
+          output.add('${joined.toString()}${digitUnit.group(1)!}');
+          output.add(digitUnit.group(2)!);
+          index = end + 1;
+          continue;
+        }
       }
     }
 
