@@ -380,7 +380,7 @@ class _TactileInkWellState extends State<TactileInkWell> {
     final onTap = widget.onTap;
     if (onTap == null) return;
     if (widget.hapticFeedback) {
-      unawaited(HapticFeedback.selectionClick());
+      unawaited(HapticFeedback.selectionClick().catchError((Object _) {}));
     }
     onTap();
   }
