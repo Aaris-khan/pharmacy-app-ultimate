@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:aaris_pharmacy/domain/medicine_discovery.dart';
 import 'package:aaris_pharmacy/domain/medicine_understanding.dart';
@@ -253,7 +257,66 @@ void main() {
     expect(provider.lastText, contains('dolo'));
     expect(provider.lastText, contains('montelukastsodium 10 mg'));
     expect(provider.lastText, contains('650 mg'));
-    expect(provider.lastText, isNot(contains('tablets')));
+    expect(provider.lastText, contains('tablets'));
+  });
+
+  test('openFDA fuses diverse identity probes instead of first-hit bias', () async {
+    final searches = <String>[];
+    final client = MockClient((request) async {
+      final search = request.url.queryParameters['search'] ?? '';
+      searches.add(search);
+
+      final row = search.contains('clotrimazole')
+          ? <String, Object?>{
+              'brand_name': 'Candid',
+              'generic_name': 'Clotrimazole',
+              'labeler_name': 'Example Pharma',
+              'dosage_form': 'LOTION',
+              'product_ndc': '22222-222',
+              'active_ingredients': <Object?>[
+                <String, Object?>{'name': 'CLOTRIMAZOLE', 'strength': '1%'},
+              ],
+            }
+          : <String, Object?>{
+              'brand_name': 'Candid',
+              'generic_name': 'Unrelated ingredient',
+              'labeler_name': 'Example Pharma',
+              'dosage_form': 'CREAM',
+              'product_ndc': '11111-111',
+              'active_ingredients': <Object?>[
+                <String, Object?>{
+                  'name': 'UNRELATED INGREDIENT',
+                  'strength': '2%',
+                },
+              ],
+            };
+      return http.Response(
+        jsonEncode(<String, Object?>{
+          'results': <Object?>[row],
+        }),
+        200,
+        headers: const <String, String>{'content-type': 'application/json'},
+      );
+    });
+    addTearDown(client.close);
+
+    final provider = OpenFdaNdcProvider(client);
+    final results = await provider.search(
+      barcode: '',
+      text: 'candid clotrimazole lotion',
+      limit: 12,
+    );
+
+    expect(searches, hasLength(2));
+    expect(searches.first, contains('brand_name:candid*'));
+    expect(
+      searches.any((value) => value.contains('brand_name:clotrimazole*')),
+      isTrue,
+    );
+    expect(searches.every((value) => !value.contains('lotion')), isTrue);
+    expect(results, hasLength(2));
+    expect(results.first.seed.salt, 'CLOTRIMAZOLE');
+    expect(results.first.seed.form, 'Lotion');
   });
 
   test('catalog service deduplicates identity and keeps stronger result', () async {
