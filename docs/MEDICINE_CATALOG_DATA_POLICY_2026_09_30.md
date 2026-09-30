@@ -29,4 +29,14 @@ A source record being accepted into the catalogue means its provenance and trans
 
 ## Contributions
 
-New datasets may be added only after recording the source URL, licence/redistribution terms, transformation version, and validation checks. User-confirmed local recognition memory stays on-device and is never silently uploaded to the shared catalogue.
+New datasets may be added only after recording the source URL, licence/redistribution terms, transformation version, and validation checks. A public website being searchable does **not** imply permission to clone or redistribute its database. India-specific or commercial catalogues must therefore remain excluded from mirrored Releases until their redistribution terms are explicit and compatible.
+
+The shared catalogue must be built from sourced records, not AI-invented medicine facts. New Aaris-owned records require a reviewable provenance trail (source, observed identity fields, licence basis, transform version, validation result) before publication.
+
+User-confirmed local recognition memory stays on-device and is never silently uploaded to the shared catalogue.
+
+## Retrieval policy
+
+Online retrieval is multi-signal rather than first-hit. Brand/name, composition, strength and dosage form may all contribute to ranking. Dosage-form words such as Tablet, Capsule, Cream or Lotion are retained as discriminating evidence, but generic form words are never used as the primary public-API probe.
+
+For noisy OCR, Aaris may issue a small bounded set of independent identity probes and fuse the returned candidates. A single token match cannot override contradictory strength, form or multi-ingredient composition evidence.
