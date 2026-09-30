@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aaris_pharmacy/domain/medicine_discovery.dart';
+import 'package:aaris_pharmacy/domain/medicine_understanding.dart';
 import 'package:aaris_pharmacy/services/medicine_catalog_service.dart';
 
 void main() {
@@ -27,11 +28,32 @@ void main() {
     expect(seed.name, 'Dolo');
     expect(seed.brand, 'Dolo');
     expect(seed.salt, 'PARACETAMOL');
-    expect(seed.strength, '650 mg/1');
+    expect(seed.strength, '650 mg');
     expect(seed.form, 'Tablet');
     expect(seed.manufacturer, 'Micro Labs');
     expect(seed.barcode, isEmpty);
     expect(seed.source, 'openFDA NDC');
+  });
+
+  test('openFDA combination strength abstains when one component dose is missing', () {
+    final seed = OpenFdaNdcProvider.parseResults(
+      [
+        {
+          'brand_name': 'Combo',
+          'generic_name': 'Alpha and Beta',
+          'dosage_form': 'TABLET',
+          'active_ingredients': [
+            {'name': 'ALPHA', 'strength': '10 mg/1'},
+            {'name': 'BETA', 'strength': ''},
+          ],
+        },
+      ],
+      queryText: 'Combo alpha beta',
+      barcode: '',
+    ).single.seed;
+
+    expect(seed.salt, 'ALPHA + BETA');
+    expect(seed.strength, isEmpty);
   });
 
   test('exact catalog barcode is carried into the review draft', () {
@@ -106,6 +128,75 @@ void main() {
     expect(suspension.strength.toLowerCase(), '250 mg/5 ml');
     expect(solution.form, 'Solution');
     expect(solution.strength.toLowerCase(), '1 mg/ml');
+  });
+
+  test('RxNorm uses shared dosage-form vocabulary including lotion', () {
+    final seed = RxNormProvider.parseResults(
+      [
+        {
+          'rxcui': '303',
+          'rank': '1',
+          'score': '11',
+          'name': 'clotrimazole 10 MG/ML Topical Lotion [Candid]',
+        },
+      ],
+      queryText: 'Candid clotrimazole lotion',
+    ).single.seed;
+
+    expect(seed.name, 'Candid');
+    expect(seed.brand, 'Candid');
+    expect(seed.salt.toLowerCase(), 'clotrimazole');
+    expect(seed.strength.toLowerCase(), '10 mg/ml');
+    expect(seed.form, 'Lotion');
+  });
+
+  test('scan-aware catalogue ranking demotes conflicting strength and form', () async {
+    final provider = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '2%',
+          form: 'Cream',
+        ),
+        score: .95,
+        provider: 'lexical-wrong',
+      ),
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '1%',
+          form: 'Lotion',
+        ),
+        score: .72,
+        provider: 'scan-correct',
+      ),
+    ]);
+    final service = MedicineCatalogService(providers: [provider]);
+    addTearDown(service.close);
+
+    final results = await service.searchScan(
+      text: 'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+      evidence: const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 1,
+          quality: .98,
+          text:
+              'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+        ),
+      ],
+    );
+
+    expect(results, hasLength(2));
+    expect(results.first.provider, 'scan-correct');
+    expect(results.first.seed.form, 'Lotion');
+    expect(results.first.reason, contains('Scan agrees'));
+    expect(provider.lastText, contains('candid'));
+    expect(provider.lastText, contains('clotrimazole'));
+    expect(provider.lastText, contains('lotion'));
   });
 
   test('catalog service repairs fragmented and glued OCR before lookup', () async {

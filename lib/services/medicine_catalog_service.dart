@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 
 import '../domain/medicine.dart';
 import '../domain/medicine_discovery.dart';
+import '../domain/medicine_resolution_v2.dart';
+import '../domain/medicine_strength.dart';
 import '../domain/medicine_understanding.dart';
 import '../domain/search.dart';
 import 'canonical_medicine_catalog_service.dart';
@@ -88,6 +90,53 @@ class MedicineCatalogService {
     });
     _inflight[key] = future;
     return future;
+  }
+
+  /// Scan-aware public lookup. OCR is first reduced by the same deterministic
+  /// V2 semantic pipeline used by intake, then providers receive a compact
+  /// identity query instead of an arbitrary slice of packaging text. Results
+  /// are re-ranked against observed brand/salt/strength/form evidence; hard
+  /// contradictions are demoted but never silently rewritten.
+  Future<List<MedicineCatalogCandidate>> searchScan({
+    String barcode = '',
+    String text = '',
+    List<MedicineFrameEvidence> evidence = const <MedicineFrameEvidence>[],
+    int limit = 12,
+  }) async {
+    MedicineScanDraft? draft;
+    if (evidence.isNotEmpty) {
+      try {
+        final understood = MedicineUnderstandingResult.fromMessage(
+          understandMedicineEvidenceV2Message(<String, Object?>{
+            'evidence': evidence
+                .take(maxMedicineEvidenceFrames)
+                .map((value) => value.toMessage())
+                .toList(growable: false),
+            'knowledge': const <Object?>[],
+            'catalog': const <Object?>[],
+          }),
+        );
+        if (understood.drafts.length == 1) draft = understood.drafts.single;
+      } catch (_) {
+        // Public discovery is fail-open. Raw OCR remains a valid fallback query
+        // even if a future semantic rule cannot interpret this scan.
+      }
+    }
+
+    final smartText = draft == null ? text : _catalogScanQuery(draft, text);
+    var candidates = await search(
+      barcode: barcode,
+      text: smartText,
+      limit: limit,
+    );
+
+    if (candidates.isEmpty &&
+        searchText(smartText) != searchText(text) &&
+        text.trim().isNotEmpty) {
+      candidates = await search(barcode: barcode, text: text, limit: limit);
+    }
+    if (draft == null || candidates.isEmpty) return candidates;
+    return _rerankCatalogCandidatesForScan(candidates, draft, barcode);
   }
 
   Future<List<MedicineCatalogCandidate>> _searchProviders({
@@ -305,26 +354,31 @@ class OpenFdaNdcProvider implements MedicineCatalogProvider {
       final manufacturer = string('labeler_name');
       final form = normalizeForm(string('dosage_form'));
       final productNdc = string('product_ndc');
-      final ingredients = <String>[];
-      final strengths = <String>[];
+      final activeComponents = <(String, String)>[];
       final active = row['active_ingredients'];
       if (active is List) {
         for (final item in active) {
           if (item is! Map) continue;
           final map = Map<String, dynamic>.from(item);
           final name = map['name'];
-          final strength = map['strength'];
-          if (name is String && name.trim().isNotEmpty) {
-            ingredients.add(name.trim());
-          }
-          if (strength is String && strength.trim().isNotEmpty) {
-            strengths.add(strength.trim());
-          }
+          if (name is! String || name.trim().isEmpty) continue;
+          final rawStrength = map['strength'];
+          final strength = rawStrength is String
+              ? _normalizeCatalogStrength(rawStrength)
+              : '';
+          activeComponents.add((name.trim(), strength));
         }
       }
 
+      final ingredients = activeComponents
+          .map((component) => component.$1)
+          .toList(growable: false);
       final salt = ingredients.isNotEmpty ? ingredients.join(' + ') : generic;
-      final strength = strengths.join(' + ');
+      final strength =
+          activeComponents.isNotEmpty &&
+              activeComponents.every((component) => component.$2.isNotEmpty)
+          ? activeComponents.map((component) => component.$2).join(' + ')
+          : '';
       final name = brand.isNotEmpty ? brand : (generic.isNotEmpty ? generic : salt);
       if (name.isEmpty) continue;
       final seed = MedicineDraftSeed(
@@ -432,36 +486,17 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
   final strength =
       strengthMatch?.group(0)?.replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
 
-  String form = '';
-  final lower = withoutBrand.toLowerCase();
-  for (final entry in const <String, String>{
-    'tablet': 'Tablet',
-    'capsule': 'Capsule',
-    'oral suspension': 'Suspension',
-    'oral solution': 'Solution',
-    'syrup': 'Syrup',
-    'injection': 'Injection',
-    'injectable': 'Injection',
-    'cream': 'Cream',
-    'ointment': 'Ointment',
-    'ophthalmic': 'Drops',
-    'otic': 'Drops',
-    'drops': 'Drops',
-  }.entries) {
-    if (lower.contains(entry.key)) {
-      form = entry.value;
-      break;
-    }
-  }
+  final form = _catalogFormFromText(withoutBrand);
 
   var generic = withoutBrand;
   if (strengthMatch != null) {
     generic = generic.substring(0, strengthMatch.start).trim();
   }
   generic = generic
+      .replaceAll(medicineFormPresentationPattern, ' ')
       .replaceAll(
         RegExp(
-          r'\b(oral|tablet|capsule|solution|suspension|injection|injectable|cream|ointment|ophthalmic|otic|extended release|delayed release)\b',
+          r'\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|extended\s+release|delayed\s+release)\b',
           caseSensitive: false,
         ),
         ' ',
@@ -479,6 +514,215 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
     source: 'RxNorm',
     sourceId: rxcui,
   );
+}
+
+String _normalizeCatalogStrength(String raw) {
+  var value = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+  value = value.replaceFirst(RegExp(r'\s*/\s*1\s*$'), '');
+  return value.trim();
+}
+
+String _catalogFormFromText(String raw) {
+  final normalized = normalize(raw);
+  if (normalized.isEmpty) return '';
+  final aliases = medicineFormAliases.entries
+      .where((entry) => entry.key != 'other')
+      .toList(growable: false)
+    ..sort((left, right) => right.key.length.compareTo(left.key.length));
+  for (final entry in aliases) {
+    final pattern =
+        '(?:^|[^a-z])' + RegExp.escape(entry.key) + r'(?:$|[^a-z])';
+    if (RegExp(pattern, caseSensitive: false).hasMatch(normalized)) {
+      return entry.value;
+    }
+  }
+  return '';
+}
+
+String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
+  final parts = <String>[];
+  final seen = <String>{};
+  void add(String value) {
+    final clean = value.trim();
+    final key = searchText(clean);
+    if (key.isEmpty || !seen.add(key)) return;
+    parts.add(clean);
+  }
+  add(draft.brand);
+  add(draft.name);
+  add(draft.salt);
+  add(draft.strength);
+  add(draft.form);
+  // The semantic draft can intentionally abstain from a weak standalone form
+  // line. A literal known form printed anywhere in the same scan is still safe
+  // identity evidence for public-catalog retrieval, so preserve that signal.
+  add(_catalogFormFromText(fallback));
+  if (parts.isEmpty) return fallback;
+  final joined = parts.join(' ');
+  return joined.length <= 420 ? joined : joined.substring(0, 420);
+}
+
+double _catalogTextSimilarity(String left, String right) {
+  final a = searchText(left);
+  final b = searchText(right);
+  if (a.isEmpty || b.isEmpty) return 0;
+  return max(
+    orderedSimilarity(a, b),
+    orderedSimilarity(a.replaceAll(' ', ''), b.replaceAll(' ', '')),
+  ).clamp(0, 1).toDouble();
+}
+
+double _catalogSaltSimilarity(String left, String right) {
+  List<String> components(String value) => value
+      .split(RegExp(r'\s*(?:\+|;|\band\b|\bwith\b)\s*', caseSensitive: false))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .take(6)
+      .toList(growable: false);
+  final a = components(left), b = components(right);
+  if (a.isEmpty || b.isEmpty) return _catalogTextSimilarity(left, right);
+  if (a.length == 1 && b.length == 1) return _catalogTextSimilarity(a.single, b.single);
+
+  double directed(List<String> source, List<String> target) {
+    var sum = 0.0;
+    for (final item in source) {
+      var best = 0.0;
+      for (final candidate in target) {
+        best = max(best, _catalogTextSimilarity(item, candidate));
+      }
+      sum += best;
+    }
+    return sum / source.length;
+  }
+  return ((directed(a, b) + directed(b, a)) / 2).clamp(0, 1).toDouble();
+}
+
+double _catalogStrengthSimilarity(String left, String right) {
+  final a = medicineStrengthKey(_normalizeCatalogStrength(left));
+  final b = medicineStrengthKey(_normalizeCatalogStrength(right));
+  if (a.isEmpty || b.isEmpty) return 0;
+  if (a == b) return 1;
+  return _catalogTextSimilarity(a, b);
+}
+
+List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
+  List<MedicineCatalogCandidate> candidates,
+  MedicineScanDraft draft,
+  String scanBarcode,
+) {
+  final ranked = <MedicineCatalogCandidate>[];
+  final scanBarcodeKey = _catalogBarcodeKey(scanBarcode);
+
+  for (final candidate in candidates) {
+    final seed = candidate.seed;
+    var mass = 0.0;
+    var agreement = 0.0;
+    final agreed = <String>[];
+    final conflicts = <String>[];
+
+    void observe({
+      required String label,
+      required ExtractedMedicineField observed,
+      required String canonical,
+      required double weight,
+      required double Function(String, String) similarity,
+      double conflictFloor = .56,
+      double conflictConfidence = .80,
+    }) {
+      if (observed.isEmpty || canonical.trim().isEmpty) return;
+      final score = similarity(observed.value, canonical);
+      mass += weight;
+      agreement += score * weight;
+      if (score >= .86) agreed.add(label);
+      if (!observed.conflicted &&
+          observed.confidence >= conflictConfidence &&
+          score < conflictFloor) {
+        conflicts.add(label);
+      }
+    }
+
+    final observedIdentity =
+        draft.field('brand').isEmpty ? draft.field('name') : draft.field('brand');
+    final canonicalIdentity =
+        seed.brand.trim().isNotEmpty ? seed.brand : seed.name;
+    observe(
+      label: 'brand',
+      observed: observedIdentity,
+      canonical: canonicalIdentity,
+      weight: .32,
+      similarity: _catalogTextSimilarity,
+    );
+    observe(
+      label: 'salt',
+      observed: draft.field('salt'),
+      canonical: seed.salt,
+      weight: .28,
+      similarity: _catalogSaltSimilarity,
+      conflictFloor: .54,
+    );
+    observe(
+      label: 'strength',
+      observed: draft.field('strength'),
+      canonical: seed.strength,
+      weight: .26,
+      similarity: _catalogStrengthSimilarity,
+      conflictFloor: .74,
+      conflictConfidence: .72,
+    );
+
+    final observedForm = draft.field('form');
+    final canonicalForm = normalizeForm(seed.form);
+    if (!observedForm.isEmpty && canonicalForm.isNotEmpty && canonicalForm != 'Other') {
+      final observedCanonical = normalizeForm(observedForm.value);
+      final formScore =
+          observedCanonical.isNotEmpty && observedCanonical == canonicalForm ? 1.0 : 0.0;
+      mass += .14;
+      agreement += formScore * .14;
+      if (formScore == 1) agreed.add('form');
+      if (!observedForm.conflicted && observedForm.confidence >= .78 && formScore == 0) {
+        conflicts.add('form');
+      }
+    }
+
+    final candidateBarcodeKey = _catalogBarcodeKey(seed.barcode);
+    final exactBarcode =
+        scanBarcodeKey.isNotEmpty &&
+        candidateBarcodeKey.isNotEmpty &&
+        scanBarcodeKey == candidateBarcodeKey;
+
+    var score = candidate.score;
+    if (mass > 0) {
+      final structuredAgreement = (agreement / mass).clamp(0, 1).toDouble();
+      score = candidate.score * .64 + structuredAgreement * .36;
+      if (agreed.length >= 2) score += min(.045, agreed.length * .012);
+      if (conflicts.isNotEmpty) score -= min(.42, conflicts.length * .21);
+    }
+    if (exactBarcode) score = 1.0;
+    score = score.clamp(.40, 1.0).toDouble();
+
+    final reason = exactBarcode
+        ? 'Exact catalogue barcode'
+        : conflicts.isNotEmpty
+        ? 'Check scan conflict: ${conflicts.join(', ')}'
+        : agreed.isNotEmpty
+        ? 'Scan agrees: ${agreed.toSet().join(', ')}'
+        : candidate.reason;
+
+    ranked.add(MedicineCatalogCandidate(
+      seed: candidate.seed,
+      score: score,
+      provider: candidate.provider,
+      reason: reason,
+    ));
+  }
+
+  ranked.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    return byScore != 0
+        ? byScore
+        : searchText(a.seed.name).compareTo(searchText(b.seed.name));
+  });
+  return ranked;
 }
 
 double _candidateScore(

@@ -39,6 +39,14 @@ def clean(value: object, limit: int = 300) -> str:
     return value[:limit]
 
 
+def normalize_strength(raw: object) -> str:
+    value = clean(raw, 120)
+    # openFDA often encodes a unit dose as "650 mg/1". A unitless /1 does not
+    # distinguish the product and causes false conflict with pack OCR "650 mg".
+    value = re.sub(r"\s*/\s*1\s*$", "", value)
+    return value.strip()
+
+
 def strings(value: object, limit: int = 24) -> list[str]:
     if isinstance(value, str):
         value = [value]
@@ -105,20 +113,20 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
     brand_base = clean(row.get("brand_name_base"))
     generic = clean(row.get("generic_name"))
 
-    ingredient_names: list[str] = []
-    strengths: list[str] = []
+    active_components: list[tuple[str, str]] = []
     active = row.get("active_ingredients")
     if isinstance(active, list):
         for item in active:
             if not isinstance(item, dict):
                 continue
             name = clean(item.get("name"))
-            strength = clean(item.get("strength"), 120)
-            if name:
-                ingredient_names.append(name)
-            if strength:
-                strengths.append(strength)
+            if not name:
+                continue
+            active_components.append(
+                (name, normalize_strength(item.get("strength")))
+            )
 
+    ingredient_names = [name for name, _ in active_components]
     salt = " + ".join(ingredient_names) if ingredient_names else generic
     name = brand or brand_base or generic or salt
     if not name:
@@ -145,7 +153,15 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
         "name": name,
         "brand": brand,
         "salt": salt,
-        "strength": " + ".join(strengths),
+        # Never misalign combination doses. If one active ingredient has no
+        # strength, keep the composition but leave the combined strength empty
+        # for scan/review rather than assigning another ingredient's dose.
+        "strength": (
+            " + ".join(strength for _, strength in active_components)
+            if active_components
+            and all(strength for _, strength in active_components)
+            else ""
+        ),
         "form": normalize_form(row.get("dosage_form")),
         "manufacturer": clean(row.get("labeler_name")),
         "aliases": aliases,
