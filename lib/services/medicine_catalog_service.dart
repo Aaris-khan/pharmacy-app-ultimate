@@ -159,7 +159,7 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
           .timeout(const Duration(milliseconds: 1800));
     } catch (_) {
       // Search remains available through the already-verified local revision
-      // and the other public providers when GitHub is slow or unavailable.
+      // and other public providers when GitHub is slow or unavailable.
     }
 
     final products = await CanonicalMedicineCatalogService.instance
@@ -179,7 +179,8 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
           final exactBarcode =
               barcode.trim().isNotEmpty &&
               product.barcodes.any(
-                (value) => _catalogBarcodeKey(value) == _catalogBarcodeKey(barcode),
+                (value) =>
+                    _catalogBarcodeKey(value) == _catalogBarcodeKey(barcode),
               );
           final seed = MedicineDraftSeed(
             name: product.displayName,
@@ -584,70 +585,12 @@ String _repairCatalogFragments(String value) {
   var index = 0;
   while (index < parts.length) {
     if (parts[index].length == 1 &&
-        RegExp(r'^[a-z]
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-).hasMatch(parts[index])) {
+        RegExp(r'^[a-z]$').hasMatch(parts[index])) {
       final joined = StringBuffer();
       var end = index;
       while (end < parts.length &&
           parts[end].length == 1 &&
-          RegExp(r'^[a-z]
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-).hasMatch(parts[end]) &&
+          RegExp(r'^[a-z]$').hasMatch(parts[end]) &&
           joined.length < 20) {
         joined.write(parts[end]);
         end++;
@@ -660,106 +603,19 @@ String _queryLiteral(String value) =>
     }
 
     if (parts[index].length == 1 &&
-        RegExp(r'^\d
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-).hasMatch(parts[index])) {
+        RegExp(r'^\d$').hasMatch(parts[index])) {
       final joined = StringBuffer();
       var end = index;
       while (end < parts.length &&
           parts[end].length == 1 &&
-          RegExp(r'^\d
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-).hasMatch(parts[end]) &&
+          RegExp(r'^\d$').hasMatch(parts[end]) &&
           joined.length < 5) {
         joined.write(parts[end]);
         end++;
       }
       if (joined.length >= 2 &&
           end < parts.length &&
-          RegExp(r'^(?:mcg|mg|g|ml|iu|units?)
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-).hasMatch(parts[end])) {
+          RegExp(r'^(?:mcg|mg|g|ml|iu|units?)$').hasMatch(parts[end])) {
         output.add(joined.toString());
         output.add(parts[end]);
         index = end + 1;
