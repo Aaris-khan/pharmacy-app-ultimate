@@ -308,6 +308,18 @@ def parse_rxnorm_name(raw: str) -> tuple[str, str, str, str]:
         match = _RX_STRENGTH.search(part)
         if match is None:
             complete = False
+            ingredient = _RX_ROUTE_FORM_NOISE.sub(" ", part)
+            ingredient = re.sub(
+                r"\b(?:tablet|tablets|capsule|capsules|solution|suspension|"
+                r"lotion|cream|ointment|gel|injection|spray|drops|inhaler|"
+                r"powder|sachet|packet)\b",
+                " ",
+                ingredient,
+                flags=re.IGNORECASE,
+            )
+            ingredient = clean(re.sub(r"\s+", " ", ingredient), 300)
+            if ingredient:
+                components.append((ingredient, ""))
             continue
         ingredient = clean(part[: match.start()], 300)
         strength = clean(match.group(0), 120)
