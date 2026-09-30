@@ -145,11 +145,7 @@ class _CatalogCacheEntry {
   final DateTime expiresAt;
 }
 
-/// The user's Online Search lane first consults the versioned Aaris catalogue.
-///
-/// A refresh is best-effort and deliberately short. If a large new Release pack
-/// is still downloading, live public providers can answer this search while the
-/// verified pack continues warming the local catalogue for the next lookup.
+/// Release-backed local catalogue used only from explicit Online Search.
 class ReleaseCatalogProvider implements MedicineCatalogProvider {
   @override
   Future<List<MedicineCatalogCandidate>> search({
@@ -162,26 +158,29 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
           .syncIfNeeded()
           .timeout(const Duration(milliseconds: 1800));
     } catch (_) {
-      // Online discovery must remain usable when GitHub is slow or unavailable.
-      // The synchronizer keeps its single in-flight refresh and the already
-      // verified local catalogue remains safe to query.
+      // Search remains available through the already-verified local revision
+      // and the other public providers when GitHub is slow or unavailable.
     }
 
-    final evidence = <MedicineFrameEvidence>[
-      MedicineFrameEvidence(
-        barcode: barcode,
-        text: text,
-        source: 'Online catalogue lookup',
-      ),
-    ];
     final products = await CanonicalMedicineCatalogService.instance
         .candidatesForEvidence(
-          evidence,
+          <MedicineFrameEvidence>[
+            MedicineFrameEvidence(
+              barcode: barcode,
+              text: text,
+              source: 'Online catalogue lookup',
+            ),
+          ],
           limit: min(max(limit * 3, 24), 48),
         );
     final query = _catalogQuery(text);
     return products
         .map((product) {
+          final exactBarcode =
+              barcode.trim().isNotEmpty &&
+              product.barcodes.any(
+                (value) => _catalogBarcodeKey(value) == _catalogBarcodeKey(barcode),
+              );
           final seed = MedicineDraftSeed(
             name: product.displayName,
             brand: product.brand,
@@ -189,24 +188,15 @@ class ReleaseCatalogProvider implements MedicineCatalogProvider {
             salt: product.salt,
             strength: product.strength,
             form: product.form,
-            barcode: barcode.trim().isNotEmpty &&
-                    product.barcodes.any(
-                      (value) =>
-                          _catalogBarcodeKey(value) ==
-                          _catalogBarcodeKey(barcode),
-                    )
-                ? barcode.trim()
-                : '',
+            barcode: exactBarcode ? barcode.trim() : '',
             source: product.source,
             sourceId: product.productId,
           );
-          final exactBarcode = seed.barcode.isNotEmpty;
-          final score = exactBarcode
-              ? 1.0
-              : _candidateScore(seed, query, providerFloor: .70);
           return MedicineCatalogCandidate(
             seed: seed,
-            score: score,
+            score: exactBarcode
+                ? 1.0
+                : _candidateScore(seed, query, providerFloor: .70),
             provider: 'Aaris catalogue',
             reason: exactBarcode
                 ? 'Exact verified catalogue barcode'
@@ -584,11 +574,6 @@ String _catalogQuery(String raw) {
   return tokens.join(' ');
 }
 
-/// Repairs only high-signal OCR fragmentation before public catalogue lookup.
-///
-/// It joins alphabetic single-character runs (D O L O -> dolo) and numeric
-/// runs only when a medicine unit follows (6 5 0 mg -> 650 mg). It never joins
-/// arbitrary full words, so packaging prose cannot silently become a medicine.
 String _repairCatalogFragments(String value) {
   final parts = value
       .split(' ')
