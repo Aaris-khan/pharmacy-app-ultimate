@@ -16,6 +16,10 @@ const ink = Color(0xFF182A44);
 const muted = Color(0xFF596A82);
 const canvas = Color(0xFFF3F5F8);
 const outline = Color(0xFFD9E2F0);
+// Idle interactive boundaries must remain visible on white/glass surfaces.
+// This tone clears roughly 3:1 against white while focus still upgrades to
+// the stronger brand-blue border.
+const controlOutline = Color(0xFF8194AC);
 const inverseMuted = Color(0xFFD5E2FF);
 const green = Color(0xFF1D7653);
 const red = Color(0xFFB63843);
@@ -843,7 +847,7 @@ ThemeData pharmacyTheme() => ThemeData(
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.white.withValues(alpha: .95)),
+      borderSide: const BorderSide(color: controlOutline),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(16),

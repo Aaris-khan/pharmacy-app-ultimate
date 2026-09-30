@@ -327,7 +327,7 @@ class _EditorScreenState extends State<EditorScreen> {
     counterText: '',
     alignLabelWithHint: multiline,
     border: _editorBorder(),
-    enabledBorder: _editorBorder(color: primary.withValues(alpha: .08)),
+    enabledBorder: _editorBorder(color: controlOutline),
     focusedBorder: _editorBorder(color: primary, width: 1.4),
     suffixIcon: suffixIcon,
   );

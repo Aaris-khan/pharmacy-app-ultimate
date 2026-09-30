@@ -806,9 +806,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(18),
-                        borderSide: BorderSide(
-                          color: primary.withValues(alpha: .08),
-                        ),
+                        borderSide: const BorderSide(color: controlOutline),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(18),
