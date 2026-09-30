@@ -13,6 +13,10 @@ void main() {
         'PARACETAMOL 500MG + CAFFEINE 65MG',
       );
       expect(
+        normalizeMedicineOcrLine('COMPOSITIONPARACETAMOL500MGCAFFEINE65MG'),
+        'COMPOSITION PARACETAMOL 500MG + CAFFEINE 65MG',
+      );
+      expect(
         normalizeMedicineOcrLine('AMOXICILLIN500MGCLAVULANATE125MGTABLETS'),
         'AMOXICILLIN 500MG + CLAVULANATE 125MG TABLETS',
       );
@@ -65,8 +69,8 @@ COMPOSITIONPARACETAMOL500MGCAFFEINE65MG''',
       );
 
       expect(provider.lastText, contains('candid'));
-      expect(provider.lastText, contains('paracetamol 500mg'));
-      expect(provider.lastText, contains('caffeine 65mg'));
+      expect(provider.lastText, contains('paracetamol 500 mg'));
+      expect(provider.lastText, contains('caffeine 65 mg'));
       expect(provider.lastText, contains('lotion'));
     });
   });
