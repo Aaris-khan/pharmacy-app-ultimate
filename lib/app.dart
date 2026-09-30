@@ -234,10 +234,12 @@ class _ShellState extends State<_Shell> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
             child: GlassPanel(
-          tint: Colors.white,
-          radius: 24,
-          elevation: .65,
-          child: ActiveListenableBuilder(
+              tint: Colors.white,
+              radius: 24,
+              elevation: .65,
+              child: LayoutBuilder(
+                builder: (context, navigationConstraints) =>
+                    ActiveListenableBuilder(
             listenable: widget.autopilot,
             // The navigation bar renders only the bounded badge count. Autopilot
             // can publish a different priority mix or next task while that count
@@ -252,7 +254,10 @@ class _ShellState extends State<_Shell> {
               final digest = widget.autopilot.digest;
               final issues = digest.isReady ? digest.navigationBadgeCount : 0;
               final badgeCount = issues > 99 ? 99 : issues;
-              final navigationWidth = MediaQuery.sizeOf(context).width;
+              // Use the width the navigation bar actually receives after
+              // SafeArea margins and the 720px shell cap. Screen width can be
+              // wider than this surface and would keep labels visible too long.
+              final navigationWidth = navigationConstraints.maxWidth;
               final navigationLabelHeight =
                   MediaQuery.textScalerOf(context).scale(11);
               final compactNavigation =
@@ -325,7 +330,8 @@ class _ShellState extends State<_Shell> {
                 ],
               );
             },
-          ),
+                    ),
+              ),
             ),
           ),
         ),
