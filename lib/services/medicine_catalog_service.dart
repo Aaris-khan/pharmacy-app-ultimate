@@ -159,7 +159,7 @@ class MedicineCatalogService {
         limit: limit,
       );
       if (release.any((candidate) => candidate.score >= .90)) {
-        return _rankCandidates(<List<MedicineCatalogCandidate>>[
+        return _rankCatalogCandidateGroups(<List<MedicineCatalogCandidate>>[
           release,
         ], limit);
       }
@@ -174,7 +174,7 @@ class MedicineCatalogService {
           ),
         ),
       );
-      return _rankCandidates(
+      return _rankCatalogCandidateGroups(
         <List<MedicineCatalogCandidate>>[release, ...fallback],
         limit,
       );
@@ -190,7 +190,7 @@ class MedicineCatalogService {
         ),
       ),
     );
-    return _rankCandidates(groups, limit);
+    return _rankCatalogCandidateGroups(groups, limit);
   }
 
   Future<List<MedicineCatalogCandidate>> _searchProvider(
@@ -214,29 +214,6 @@ class MedicineCatalogService {
     }
   }
 
-  List<MedicineCatalogCandidate> _rankCandidates(
-    Iterable<List<MedicineCatalogCandidate>> groups,
-    int limit,
-  ) {
-    final best = <String, MedicineCatalogCandidate>{};
-    for (final candidate in groups.expand((items) => items)) {
-      if (candidate.seed.name.trim().isEmpty) continue;
-      final key = candidate.seed.identityKey;
-      final previous = best[key];
-      if (previous == null || candidate.score > previous.score) {
-        best[key] = candidate;
-      }
-    }
-
-    final results = best.values.toList()
-      ..sort((a, b) {
-        final score = b.score.compareTo(a.score);
-        if (score != 0) return score;
-        return searchText(a.seed.name).compareTo(searchText(b.seed.name));
-      });
-    return results.take(limit).toList(growable: false);
-  }
-
   void close() {
     _cache.clear();
     _inflight.clear();
@@ -249,6 +226,29 @@ class _CatalogCacheEntry {
 
   final List<MedicineCatalogCandidate> values;
   final DateTime expiresAt;
+}
+
+List<MedicineCatalogCandidate> _rankCatalogCandidateGroups(
+  Iterable<List<MedicineCatalogCandidate>> groups,
+  int limit,
+) {
+  final best = <String, MedicineCatalogCandidate>{};
+  for (final candidate in groups.expand((items) => items)) {
+    if (candidate.seed.name.trim().isEmpty) continue;
+    final key = candidate.seed.identityKey;
+    final previous = best[key];
+    if (previous == null || candidate.score > previous.score) {
+      best[key] = candidate;
+    }
+  }
+
+  final results = best.values.toList()
+    ..sort((a, b) {
+      final score = b.score.compareTo(a.score);
+      if (score != 0) return score;
+      return searchText(a.seed.name).compareTo(searchText(b.seed.name));
+    });
+  return results.take(limit).toList(growable: false);
 }
 
 /// Release-backed local catalogue used only from explicit Online Search.
@@ -348,21 +348,27 @@ class OpenFdaNdcProvider implements MedicineCatalogProvider {
 
     final terms = _searchTerms(text);
     if (terms.isEmpty) return const [];
-    for (final term in terms.take(3)) {
-      final expression = [
-        'brand_name:$term*',
-        'generic_name:$term*',
-        'active_ingredients.name:$term*',
-      ].join(' ');
-      final found = await _query(
-        expression,
-        limit,
-        queryText: text,
-        barcode: barcode,
-      );
-      if (found.isNotEmpty) return found;
-    }
-    return const [];
+
+    // Do not stop at the first non-empty OCR token. A long salt fragment can
+    // legitimately match many products while a shorter brand token carries the
+    // decisive identity signal (or vice versa). Probe a tiny diverse set in
+    // parallel, then fuse/deduplicate by canonical medicine identity.
+    final groups = await Future.wait(
+      terms.take(3).map((term) {
+        final expression = [
+          'brand_name:$term*',
+          'generic_name:$term*',
+          'active_ingredients.name:$term*',
+        ].join(' ');
+        return _query(
+          expression,
+          limit,
+          queryText: text,
+          barcode: barcode,
+        );
+      }),
+    );
+    return _rankCatalogCandidateGroups(groups, limit);
   }
 
   Future<List<MedicineCatalogCandidate>> _query(
@@ -854,15 +860,23 @@ double _candidateScore(
   if (queryTokens.isEmpty || docTokens.isEmpty) return providerFloor;
 
   var exact = 0;
-  var best = 0.0;
-  for (final token in queryTokens.take(12)) {
+  var fuzzyTotal = 0.0;
+  final boundedQuery = queryTokens.take(12).toList(growable: false);
+  for (final token in boundedQuery) {
     if (docTokens.contains(token)) exact++;
+    var tokenBest = 0.0;
     for (final candidate in docTokens.take(28)) {
-      best = max(best, orderedSimilarity(token, candidate));
+      tokenBest = max(tokenBest, orderedSimilarity(token, candidate));
     }
+    fuzzyTotal += tokenBest;
   }
-  final exactFraction = exact / queryTokens.length;
-  return (providerFloor + exactFraction * .20 + best * .13)
+  final exactFraction = exact / boundedQuery.length;
+  final fuzzyCoverage = fuzzyTotal / boundedQuery.length;
+
+  // Coverage matters more than one lucky token. The old global-max fuzzy score
+  // let a candidate matching only "candid" look too similar to a full
+  // "candid + clotrimazole + lotion" observation.
+  return (providerFloor + exactFraction * .20 + fuzzyCoverage * .13)
       .clamp(providerFloor, .97)
       .toDouble();
 }
@@ -908,10 +922,17 @@ String _catalogQuery(String raw) {
     'keep',
     'away',
     'children',
-    'tablets',
-    'tablet',
-    'capsules',
-    'capsule',
+    'product',
+    'name',
+    'brand',
+    'generic',
+    'active',
+    'ingredient',
+    'ingredients',
+    'composition',
+    'contains',
+    'each',
+    'label',
   };
   final tokens = value
       .split(' ')
@@ -1005,30 +1026,66 @@ String _repairCatalogFragments(String value) {
 }
 
 List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
+  const probeNoise = {
+    'product',
+    'name',
+    'brand',
+    'generic',
+    'active',
+    'ingredient',
+    'ingredients',
+    'composition',
+    'contains',
+    'each',
+    'tablet',
+    'tablets',
+    'capsule',
+    'capsules',
+    'syrup',
+    'suspension',
+    'solution',
+    'injection',
+    'cream',
+    'ointment',
+    'gel',
+    'lotion',
+    'drops',
+    'spray',
+    'inhaler',
+    'powder',
+    'sachet',
+    'medicine',
+    'mg',
+    'ml',
+    'manufactured',
+    'manufacturer',
+  };
+  final ordered = <String>[];
+  final seen = <String>{};
+  for (final token in searchText(value).split(' ')) {
+    if (!RegExp(r'^[a-z][a-z0-9]{2,}
+String _queryLiteral(String value) =>
+    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
+).hasMatch(token) ||
+        probeNoise.contains(token) ||
+        !seen.add(token)) {
+      continue;
+    }
+    ordered.add(token);
+  }
+  if (ordered.length <= 2) return ordered;
+
+  // searchScan deliberately emits brand/name before composition. Keep those
+  // leading semantic identity terms stable, then prefer information-rich long
+  // tokens for the remaining probes. This avoids both "longest salt always
+  // wins" and "first random package word always wins" failure modes.
+  final head = ordered.take(2).toList(growable: false);
+  final tail = ordered.skip(2).toList(growable: true)
+    ..sort((a, b) {
+      final byLength = b.length.compareTo(a.length);
+      return byLength != 0 ? byLength : a.compareTo(b);
+    });
+  return <String>[...head, ...tail];
 }
 
 String _queryLiteral(String value) =>
