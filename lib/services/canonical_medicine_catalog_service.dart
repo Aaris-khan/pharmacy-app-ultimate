@@ -702,20 +702,14 @@ Map<String, double> _catalogTerms(CanonicalMedicineProduct product) {
       result[folded] = max(result[folded] ?? 0, weight * .98);
     }
 
-    // OCR often collapses multi-word brands/ingredients into one token
-    // (MONTEK LC -> MONTEKLC, Levocetirizine Hydrochloride -> one word).
-    // Index bounded 2/3-word compact windows as lexical evidence. This is an
-    // exact retrieval aid only; the downstream product resolver must still
-    // agree on strength/form/composition before canonical fields can win.
+    // OCR often collapses multi-word brands or ingredients into one token.
     for (var width = 2; width <= min(3, tokens.length); width++) {
       for (var start = 0; start + width <= tokens.length; start++) {
         final compact = tokens.sublist(start, start + width).join();
         if (compact.length < 4 || compact.length > 48) continue;
         result[compact] = max(result[compact] ?? 0, weight * .98);
-        result[_ocrFoldToken(compact)] = max(
-          result[_ocrFoldToken(compact)] ?? 0,
-          weight * .95,
-        );
+        final folded = _ocrFoldToken(compact);
+        result[folded] = max(result[folded] ?? 0, weight * .95);
       }
     }
 
@@ -747,11 +741,16 @@ Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
       result.add(token);
       result.add(_ocrFoldToken(token));
 
-      // Preserve the identity prefix when OCR glues a dose onto a brand or
-      // ingredient: MontelukastSodium10mg -> montelukastsodium. Do not split
-      // arbitrary alphabetic compounds; only a medicine-unit suffix qualifies.
+      // Preserve identity when OCR glues a medicine dose onto a brand/salt.
       final withoutDose = token.replaceFirst(
-        RegExp(r'\d+(?:[.]\d+)?(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)
+        RegExp(r'\d+(?:[.]\d+)?(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$'),
+        '',
+      );
+      if (withoutDose.length >= 4 && withoutDose.length <= 48) {
+        result.add(withoutDose);
+        result.add(_ocrFoldToken(withoutDose));
+      }
+    }
 
     for (final rawLine in frame.text.split(RegExp(r'[\r\n]+')).take(48)) {
       final line = searchText(rawLine);
@@ -858,126 +857,6 @@ const _catalogNoise = <String>{
   'powder',
   'sachet',
   'sachets',
-  'composition',
-  'contains',
-  'manufactured',
-  'manufacturer',
-  'expiry',
-  'batch',
-  'price',
-  'mrp',
-  'store',
-  'children',
-  'reach',
-  'schedule',
-  'only',
-};
-),
-        '',
-      );
-      if (withoutDose.length >= 4 && withoutDose.length <= 48) {
-        result.add(withoutDose);
-        result.add(_ocrFoldToken(withoutDose));
-      }
-    }
-
-    for (final rawLine in frame.text.split(RegExp(r'[\r\n]+')).take(48)) {
-      final line = searchText(rawLine);
-      if (line.isEmpty) continue;
-      final useful = line
-          .split(' ')
-          .where((value) => value.length >= 2 && !_catalogNoise.contains(value))
-          .take(8)
-          .toList(growable: false);
-      for (var width = 2; width <= min(3, useful.length); width++) {
-        for (var start = 0; start + width <= useful.length; start++) {
-          final phrase = useful.sublist(start, start + width).join();
-          if (phrase.length < 4 || phrase.length > 48) continue;
-          result.add(phrase);
-          result.add(_ocrFoldToken(phrase));
-          if (result.length >= 192) break;
-        }
-        if (result.length >= 192) break;
-      }
-      if (result.length >= 192) break;
-    }
-
-    for (var start = 0; start < tokens.length;) {
-      if (tokens[start].length != 1 ||
-          !RegExp(r'^[a-z]$').hasMatch(tokens[start])) {
-        start++;
-        continue;
-      }
-      var end = start;
-      final buffer = StringBuffer();
-      while (end < tokens.length &&
-          tokens[end].length == 1 &&
-          RegExp(r'^[a-z]$').hasMatch(tokens[end]) &&
-          buffer.length < 16) {
-        buffer.write(tokens[end]);
-        end++;
-      }
-      if (buffer.length >= 3) result.add(buffer.toString());
-      start = max(start + 1, end);
-    }
-    if (result.length >= 192) break;
-  }
-  return result.take(96).toSet();
-}
-
-Iterable<String> _deleteKeys(String value) sync* {
-  if (value.length < 4 || value.length > 28) return;
-  final seen = <String>{};
-  for (var index = 0; index < value.length; index++) {
-    final deleted = value.substring(0, index) + value.substring(index + 1);
-    if (deleted.length >= 3 && seen.add(deleted)) yield deleted;
-  }
-}
-
-String _ocrFoldToken(String token) {
-  final value = token.toLowerCase();
-  if (!RegExp(r'\d').hasMatch(value) || !RegExp(r'[a-z]').hasMatch(value)) {
-    return value;
-  }
-  if (RegExp(r'^\d').hasMatch(value)) {
-    return value
-        .replaceAll('o', '0')
-        .replaceAll('i', '1')
-        .replaceAll('l', '1')
-        .replaceAll('s', '5')
-        .replaceAll('b', '8')
-        .replaceAll('z', '2');
-  }
-  return value
-      .replaceAll('0', 'o')
-      .replaceAll('1', 'i')
-      .replaceAll('5', 's')
-      .replaceAll('8', 'b');
-}
-
-String _barcodeKey(String value) {
-  final raw = value.trim();
-  if (raw.isEmpty) return '';
-  final gs1 = parseGs1HealthcareBarcode(raw);
-  final candidate = gs1 != null && gs1.gtin.isNotEmpty ? gs1.gtin : raw;
-  if (RegExp(r'^\d+$').hasMatch(candidate) &&
-      const <int>{8, 12, 13, 14}.contains(candidate.length)) {
-    return candidate.padLeft(14, '0');
-  }
-  return candidate.replaceAll(RegExp(r'\s+'), '');
-}
-
-const _catalogNoise = <String>{
-  'tablet',
-  'tablets',
-  'capsule',
-  'capsules',
-  'syrup',
-  'suspension',
-  'injection',
-  'cream',
-  'ointment',
-  'drops',
   'composition',
   'contains',
   'manufactured',
