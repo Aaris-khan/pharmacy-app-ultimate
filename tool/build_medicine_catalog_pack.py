@@ -457,6 +457,11 @@ def transform_ekacare_drug(
     if not salt:
         return None
     form = normalize_form(medication_name)
+    if form == "Other":
+        # Here the raw string is a product name, not a dedicated dosage-form
+        # field. "Other" would falsely claim that an unprinted form was
+        # observed, so absence stays unknown and cannot contradict pack OCR.
+        form = ""
     fingerprint = hashlib.sha256(
         f"{_identity_key(medication_name)}|{_identity_key(salt)}".encode("utf-8")
     ).hexdigest()[:24]
