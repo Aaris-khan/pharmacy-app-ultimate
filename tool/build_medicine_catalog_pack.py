@@ -188,6 +188,19 @@ _INDIAN_FORM_PRESENTATION = re.compile(
     r"ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?)\b",
     re.IGNORECASE,
 )
+_INDIAN_DOSE_PRESENTATION = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mcg|ug|mg|gm|g|meq|mmol|iu|i\.u\.|units?)"
+    r"(?:\s*/\s*\d+(?:\.\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|mmol|iu|i\.u\.|units?)){0,5}\b",
+    re.IGNORECASE,
+)
+_INDIAN_ROUTE_PRESENTATION = re.compile(
+    r"\b(?:oral|nasal|topical|ophthalmic|otic|inhalation|rectal|vaginal)\b",
+    re.IGNORECASE,
+)
+_INDIAN_FORM_MODIFIER = re.compile(
+    r"\b(?:chewable|dispersible|orodispersible|effervescent|sublingual)\b",
+    re.IGNORECASE,
+)
 
 
 def indian_brand_name(raw: object) -> str:
@@ -199,7 +212,15 @@ def indian_brand_name(raw: object) -> str:
     value = clean(raw, 300)
     if not value:
         return ""
+    # Keep the complete source name as an alias elsewhere, but do not let
+    # presentation metadata masquerade as the trade-name field. Unit-bearing
+    # strengths are safe to remove; bare numbers (for example "625 Duo") are
+    # deliberately retained because they can be part of an Indian market
+    # variant name and the dataset does not provide enough evidence to split it.
+    value = _INDIAN_DOSE_PRESENTATION.sub(" ", value)
     value = _INDIAN_FORM_PRESENTATION.sub(" ", value)
+    value = _INDIAN_ROUTE_PRESENTATION.sub(" ", value)
+    value = _INDIAN_FORM_MODIFIER.sub(" ", value)
     return clean(re.sub(r"\s+", " ", value), 300)
 
 
