@@ -364,7 +364,7 @@ class _AnimatedNavigationIcon extends StatelessWidget {
     final duration = reduceMotion
         ? Duration.zero
         : const Duration(milliseconds: 180);
-    final icon = AnimatedSwitcher(
+    final animatedIcon = AnimatedSwitcher(
       duration: duration,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
@@ -398,7 +398,7 @@ class _AnimatedNavigationIcon extends StatelessWidget {
         child: Badge.count(
           count: badgeCount,
           isLabelVisible: showBadge,
-          child: icon,
+          child: animatedIcon,
         ),
       ),
     );
