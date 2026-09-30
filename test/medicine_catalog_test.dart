@@ -624,6 +624,7 @@ class _FakeScanAwareProvider implements MedicineScanAwareCatalogProvider {
   Future<List<MedicineCatalogCandidate>> searchScanEvidence({
     required String barcode,
     required List<String> queries,
+    required List<MedicineFrameEvidence> evidence,
     required int limit,
   }) async {
     scanCalls++;
