@@ -36,4 +36,32 @@ void main() {
     expect(navigation, contains('final duration = reduceMotion'));
     expect(navigation, contains('? Duration.zero'));
   });
+
+  test('secondary controls stay visible and navigation owns one surface', () {
+    final design = File('lib/ui/design.dart').readAsStringSync();
+
+    expect(
+      design,
+      contains('side: const BorderSide(color: controlOutline)'),
+      reason: 'Outlined actions and chips should not fade into white surfaces.',
+    );
+
+    final start = design.indexOf(
+      'navigationBarTheme: NavigationBarThemeData(',
+    );
+    final end = design.indexOf('class Surface', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final navigationTheme = design.substring(start, end);
+
+    expect(navigationTheme, contains('backgroundColor: Colors.transparent'));
+    expect(navigationTheme, contains('elevation: 0'));
+    expect(navigationTheme, contains('shadowColor: Colors.transparent'));
+    expect(
+      navigationTheme,
+      isNot(contains('Colors.white.withValues(alpha: .92)')),
+      reason: 'The outer GlassPanel should be the only navigation surface.',
+    );
+  });
+
 }
