@@ -1,3 +1,4 @@
+import 'package:aaris_pharmacy/domain/medicine.dart';
 import 'package:aaris_pharmacy/domain/medicine_date_intelligence.dart';
 import 'package:aaris_pharmacy/domain/medicine_date_parser.dart';
 import 'package:aaris_pharmacy/domain/medicine_ocr_text.dart';
@@ -28,6 +29,19 @@ void main() {
       expect(
         _draft('ASTHALIN\nSalbutamol 100 mcg/dose\nINHALER').form,
         'Inhaler',
+      );
+    });
+
+    test('lotion survives normal form text and common OCR confusions', () {
+      expect(normalizeForm('Topical Lotion'), 'Lotion');
+      expect(normalizeForm('IOTION'), 'Lotion');
+      expect(
+        _draft('DERMAL CARE\nClotrimazole 1% w/w\nIOTION').form,
+        'Lotion',
+      );
+      expect(
+        _draft('DERMAL CARE\nClotrimazole 1% w/w\nSCALP LOTION').form,
+        'Lotion',
       );
     });
 
