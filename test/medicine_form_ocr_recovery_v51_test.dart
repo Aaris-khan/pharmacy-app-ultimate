@@ -1,5 +1,6 @@
 import 'package:aaris_pharmacy/domain/medicine_discovery.dart';
 import 'package:aaris_pharmacy/domain/medicine_form_recognition.dart';
+import 'package:aaris_pharmacy/domain/medicine_ocr_text.dart';
 import 'package:aaris_pharmacy/domain/medicine_understanding.dart';
 import 'package:aaris_pharmacy/services/medicine_catalog_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,10 @@ void main() {
       expect(recognizeMedicineFormFromText('OINMENT'), 'Ointment');
       expect(recognizeMedicineFormFromText('SUSPENSIN'), 'Suspension');
       expect(recognizeMedicineFormFromText('CREM'), 'Cream');
+    });
+
+    test('lot-role normalization preserves a damaged lotion token', () {
+      expect(normalizeMedicineOcrLine('LOTIOH'), 'LOTIOH');
     });
 
     test('does not turn nearby ordinary words into dosage forms', () {
