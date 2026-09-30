@@ -85,6 +85,54 @@ List<String> selectRecoveryTerms(
   return List<String>.unmodifiable(unique.take(limit));
 }
 
+/// Produces a tiny set of stable anchors for unusually long OCR tokens.
+///
+/// Pharmaceutical OCR often collapses a multi-word ingredient into one token.
+/// Full-token exact lookup is excellent when OCR is perfect, but one corrupted
+/// character can otherwise destroy recall. Indexing every trigram would expand
+/// the catalogue aggressively, so this planner samples only a few separated
+/// windows. Existing delete-neighbour recovery can then tolerate one damaged
+/// character inside an anchor while keeping storage and query work bounded.
+List<String> boundedOcrAnchors(
+  String raw, {
+  int width = 12,
+  int maxAnchors = 4,
+}) {
+  if (maxAnchors <= 0) return const <String>[];
+  final compact = raw
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  if (compact.length <= 28) return const <String>[];
+
+  final boundedWidth = width < 8
+      ? 8
+      : width > 16
+      ? 16
+      : width;
+  final actualWidth = boundedWidth > compact.length
+      ? compact.length
+      : boundedWidth;
+  final span = compact.length - actualWidth;
+  if (span <= 0) return <String>[compact];
+
+  final starts = <int>{
+    0,
+    (span / 3).round(),
+    ((span * 2) / 3).round(),
+    span,
+  }.toList(growable: false)
+    ..sort();
+
+  final result = <String>[];
+  final seen = <String>{};
+  for (final start in starts) {
+    final anchor = compact.substring(start, start + actualWidth);
+    if (seen.add(anchor)) result.add(anchor);
+    if (result.length >= maxAnchors) break;
+  }
+  return List<String>.unmodifiable(result);
+}
+
 /// Reciprocal-rank fusion for heterogeneous bounded retrievers.
 ///
 /// RRF depends on rank rather than incomparable raw score scales, so exact-term
