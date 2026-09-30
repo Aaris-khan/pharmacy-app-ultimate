@@ -144,9 +144,15 @@ void main() {
     expect(taskSource, isNot(contains('maxLines: 1')));
   });
 
-  test('bottom navigation adapts instead of crushing labels on small screens', () {
+  test('bottom navigation adapts to its real surface width', () {
     final source = File('lib/app.dart').readAsStringSync();
 
+    expect(source, contains('builder: (context, navigationConstraints) =>'));
+    expect(
+      source,
+      contains('final navigationWidth = navigationConstraints.maxWidth;'),
+    );
+    expect(source, isNot(contains('MediaQuery.sizeOf(context).width')));
     expect(source, contains('navigationWidth < 380'));
     expect(source, contains('navigationLabelHeight > 15'));
     expect(
