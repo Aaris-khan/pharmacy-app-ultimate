@@ -1,3 +1,4 @@
+import 'package:aaris_pharmacy/domain/medicine_discovery.dart';
 import 'package:aaris_pharmacy/domain/medicine_form_recognition.dart';
 import 'package:aaris_pharmacy/domain/medicine_understanding.dart';
 import 'package:aaris_pharmacy/services/medicine_catalog_service.dart';
