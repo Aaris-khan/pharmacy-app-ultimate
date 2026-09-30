@@ -91,28 +91,50 @@ def ocr_aliases(
     name: str,
     brand: str = "",
     salt: str = "",
+    form: str = "",
     components: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """Bounded aliases for OCR that drops spaces/separators.
 
-    These aliases are retrieval hints only. Resolver contradiction gates remain
-    authoritative, so a compact alias can nominate a product but cannot by
-    itself overwrite scanned strength/form/composition.
+    In addition to individual identity fields, include a few complete
+    front-panel surfaces such as BRAND+INGREDIENT+DOSE+FORM. Camera OCR often
+    flattens exactly that layout into one token. These aliases only nominate
+    catalogue candidates; the app resolver still requires independent
+    strength/form/composition agreement before canonical auto-fill.
     """
     values: list[str] = [name, brand, salt]
+    identity = brand or name
+    if form:
+        values.append(f"{name}{form}")
+        if brand:
+            values.append(f"{brand}{form}")
+
     if components:
-        for ingredient, strength in components[:6]:
+        bounded = components[:6]
+        for ingredient, strength in bounded:
             values.append(ingredient)
             if strength:
                 values.append(f"{ingredient}{strength}")
-        values.append("".join(ingredient for ingredient, _ in components[:6]))
-        if all(strength for _, strength in components[:6]):
-            values.append(
-                "".join(
-                    f"{ingredient}{strength}"
-                    for ingredient, strength in components[:6]
-                )
-            )
+
+        ingredients = "".join(ingredient for ingredient, _ in bounded)
+        values.append(ingredients)
+        complete_doses = all(strength for _, strength in bounded)
+        dosed = (
+            "".join(f"{ingredient}{strength}" for ingredient, strength in bounded)
+            if complete_doses
+            else ""
+        )
+        if dosed:
+            values.append(dosed)
+
+        if identity:
+            values.append(f"{identity}{ingredients}")
+            if form:
+                values.append(f"{identity}{ingredients}{form}")
+            if dosed:
+                values.append(f"{identity}{dosed}")
+                if form:
+                    values.append(f"{identity}{dosed}{form}")
 
     out: list[str] = []
     seen: set[str] = set()
@@ -125,7 +147,6 @@ def ocr_aliases(
         if len(out) >= 24:
             break
     return out
-
 
 def normalize_form(raw: object) -> str:
     value = clean(raw, 100).casefold()
@@ -231,6 +252,7 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
             name=name,
             brand=brand,
             salt=salt,
+            form=normalize_form(row.get("dosage_form")),
             components=active_components,
         ),
         "barcodes": upcs,
@@ -391,6 +413,7 @@ def transform_rxnorm_concept(
             name=name,
             brand=brand,
             salt=salt,
+            form=form,
             components=components,
         ),
         # RxNorm NDC identifiers are not raw UPC/EAN/GTIN scanner payloads, so

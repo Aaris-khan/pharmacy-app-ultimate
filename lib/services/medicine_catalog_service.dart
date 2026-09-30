@@ -54,6 +54,20 @@ class MedicineCatalogService {
   final Map<String, Future<List<MedicineCatalogCandidate>>> _inflight =
       <String, Future<List<MedicineCatalogCandidate>>>{};
 
+  /// Starts the verified GitHub Release mirror refresh as soon as the owner
+  /// explicitly enables Online Search. The sync service coalesces concurrent
+  /// callers, so a later scan reuses the same in-flight work while live public
+  /// providers remain available if the mirror is not ready yet.
+  Future<void> warmReleaseMirror() async {
+    if (!_releaseFirst) return;
+    try {
+      await CatalogReleaseSyncService.instance.syncIfNeeded();
+    } catch (_) {
+      // Warming is an optimization, never a prerequisite for local scanning or
+      // public fallback. The normal search path will retry after backoff.
+    }
+  }
+
   Future<List<MedicineCatalogCandidate>> search({
     String barcode = '',
     String text = '',
@@ -821,11 +835,16 @@ double _catalogSaltSimilarity(String left, String right) {
 }
 
 double _catalogStrengthSimilarity(String left, String right) {
-  final a = medicineStrengthKey(_normalizeCatalogStrength(left));
-  final b = medicineStrengthKey(_normalizeCatalogStrength(right));
+  final a = medicineStrengthIdentityKey(_normalizeCatalogStrength(left));
+  final b = medicineStrengthIdentityKey(_normalizeCatalogStrength(right));
   if (a.isEmpty || b.isEmpty) return 0;
   if (a == b) return 1;
-  return _catalogTextSimilarity(a, b);
+  // Fuzzy fallback remains lexical only; dimensional conversions above must be
+  // exact before they can become structured strength agreement.
+  return _catalogTextSimilarity(
+    medicineStrengthKey(_normalizeCatalogStrength(left)),
+    medicineStrengthKey(_normalizeCatalogStrength(right)),
+  );
 }
 
 List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(

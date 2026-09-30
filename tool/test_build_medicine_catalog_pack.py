@@ -38,6 +38,29 @@ class CatalogBuilderTest(unittest.TestCase):
             "montelukastsodiumlevocetirizinehydrochloride",
             aliases,
         )
+        self.assertIn("monteklctablet", aliases)
+        self.assertIn(
+            "monteklcmontelukastsodiumlevocetirizinehydrochloride",
+            aliases,
+        )
+        self.assertIn(
+            "monteklcmontelukastsodium10mglevo"
+            "cetirizinehydrochloride5mgtablet",
+            aliases,
+        )
+
+    def test_unbranded_product_never_indexes_form_as_identity(self):
+        aliases = set(
+            builder.ocr_aliases(
+                name="Paracetamol",
+                brand="",
+                salt="Paracetamol",
+                form="Tablet",
+                components=[("Paracetamol", "500 mg")],
+            )
+        )
+        self.assertIn("paracetamoltablet", aliases)
+        self.assertNotIn("tablet", aliases)
 
     def test_rxnorm_lotion_parses_brand_salt_strength_and_form(self):
         product = builder.transform_rxnorm_concept(

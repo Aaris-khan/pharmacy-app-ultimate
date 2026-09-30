@@ -2283,7 +2283,7 @@ bool _isStrongProductBarcodeKey(String value) {
 }
 
 String _strengthIdentity(String value) =>
-    medicineStrengthKey(normalizeMedicineOcrLine(value));
+    medicineStrengthIdentityKey(normalizeMedicineOcrLine(value));
 
 double _weightedTextSimilarity(String rawObserved, String rawCanonical) {
   final canonical = _compactForOcr(rawCanonical);
