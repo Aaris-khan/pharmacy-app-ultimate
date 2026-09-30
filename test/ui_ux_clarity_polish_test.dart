@@ -33,6 +33,7 @@ void main() {
     expect(navigation, contains('dimension: 32'));
     expect(navigation, contains('scale: selected && !reduceMotion ? 1.035 : 1'));
     expect(navigation, contains("? const Offset(0, -.04)"));
-    expect(navigation, contains('reduceMotion ? Duration.zero'));
+    expect(navigation, contains('final duration = reduceMotion'));
+    expect(navigation, contains('? Duration.zero'));
   });
 }
