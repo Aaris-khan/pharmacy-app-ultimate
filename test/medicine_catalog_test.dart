@@ -596,7 +596,7 @@ void main() {
             name: 'Candid',
             brand: 'Candid',
             salt: 'Clotrimazole',
-            strength: '1%',
+            strength: '10 mg/mL',
             form: 'Lotion',
           ),
           score: .72,
