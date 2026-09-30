@@ -36,6 +36,7 @@ class PharmacyApp extends StatefulWidget {
 
 class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
   late AarisAutopilotSupervisor _autopilot;
+  Timer? _startupAutopilotGrace;
 
   @override
   void initState() {
@@ -49,7 +50,25 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
     return state == null || state == AppLifecycleState.resumed;
   }
 
+  bool _canStartInitialAutopilot(AarisAutopilotSupervisor supervisor) =>
+      mounted && identical(_autopilot, supervisor) && _isForeground;
+
+  void _scheduleInitialAutopilot(AarisAutopilotSupervisor supervisor) {
+    _startupAutopilotGrace?.cancel();
+
+    // This read-only full-inventory projection is useful, but never urgent
+    // enough to compete with the user's first tap. A cancelable grace window
+    // covers a fast tab selection plus the 260 ms navigation animation without
+    // leaving an uncancelable scheduler task behind in tests or after disposal.
+    _startupAutopilotGrace = Timer(const Duration(milliseconds: 700), () {
+      if (!_canStartInitialAutopilot(supervisor)) return;
+      _startupAutopilotGrace = null;
+      supervisor.refreshNow();
+    });
+  }
+
   void _installAutopilot(PharmacyController controller) {
+    _startupAutopilotGrace?.cancel();
     final supervisor = AarisAutopilotSupervisor(
       controller,
       startImmediately: false,
@@ -60,17 +79,12 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
       return;
     }
 
-    // First paint owns startup priority. Autopilot walks the complete
-    // operational inventory before handing work to an isolate, so starting it
-    // from initState's microtask queue can delay the first usable frame on large
-    // pharmacies. Begin that read-only work immediately after the first frame.
+    // First paint alone is not enough protection: a fast Stock tap arrives in
+    // the frames immediately after it. Defer non-critical inventory planning
+    // through the initial interaction window instead of competing with that tap.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          !identical(_autopilot, supervisor) ||
-          !_isForeground) {
-        return;
-      }
-      supervisor.refreshNow();
+      if (!_canStartInitialAutopilot(supervisor)) return;
+      _scheduleInitialAutopilot(supervisor);
     });
   }
 
@@ -99,6 +113,7 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupAutopilotGrace?.cancel();
     _autopilot.dispose();
     super.dispose();
   }

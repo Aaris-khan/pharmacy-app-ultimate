@@ -36,7 +36,9 @@ class _SearchScreenState extends State<SearchScreen> {
   static const _browsePageSize = 120;
 
   final _query = TextEditingController();
-  final _catalog = MedicineCatalogService();
+  MedicineCatalogService? _catalog;
+  MedicineCatalogService get _catalogService =>
+      _catalog ??= MedicineCatalogService();
   Timer? _debounce, _onlineDebounce;
   SearchHitPublication _publishedHits = SearchHitPublication.empty;
   List<SearchHit> get _hits => _publishedHits.hits;
@@ -79,7 +81,23 @@ class _SearchScreenState extends State<SearchScreen> {
       widget.controller.settings.shortDays,
       widget.controller.settings.months,
     );
-    unawaited(_search());
+
+    if (widget.database && widget.embedded) {
+      // Stock is a lazily-created primary tab. Paint its controls first so the
+      // tap-to-frame path never waits behind the one-time search isolate startup
+      // and initial immutable-dataset handoff. The browse begins immediately
+      // after that frame and keeps the existing loading/result semantics.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_controllerListening) {
+          _refreshWhenActive = true;
+          return;
+        }
+        unawaited(_search());
+      });
+    } else {
+      unawaited(_search());
+    }
   }
 
   @override
@@ -414,7 +432,7 @@ class _SearchScreenState extends State<SearchScreen> {
     // Release mirror. If a scan is already on screen, immediately continue that
     // exact scan through the scan-aware catalogue path; previously the toggle
     // only warmed the mirror and the user had to scan/type again.
-    unawaited(_catalog.warmReleaseMirror());
+    unawaited(_catalogService.warmReleaseMirror());
     final scan = _scan;
     if (scan != null) {
       if (widget.database && !_scanHasConfidentLocalMatch()) {
@@ -446,7 +464,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _catalogError = '';
     });
     try {
-      final candidates = await _catalog.search(text: clean);
+      final candidates = await _catalogService.search(text: clean);
       if (!mounted ||
           generation != _catalogGeneration ||
           !_onlineMode ||
@@ -481,7 +499,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _catalogError = '';
     });
     try {
-      final candidates = await _catalog.searchScan(
+      final candidates = await _catalogService.searchScan(
         barcode: scan.barcode,
         text: scan.text,
         evidence: scan.evidence,
@@ -670,7 +688,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_controllerListening) widget.controller.removeListener(_changed);
     _debounce?.cancel();
     _onlineDebounce?.cancel();
-    _catalog.close();
+    _catalog?.close();
     _query.dispose();
     super.dispose();
   }

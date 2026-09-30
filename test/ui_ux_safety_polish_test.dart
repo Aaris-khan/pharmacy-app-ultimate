@@ -855,4 +855,54 @@ void main() {
     );
   });
 
+
+  test(
+    'cold-start Stock navigation yields background work to the first frame',
+    () {
+      final app = File('lib/app.dart').readAsStringSync();
+      final stock = File('lib/ui/search_screen.dart').readAsStringSync();
+
+      expect(
+        app,
+        contains('Timer(const Duration(milliseconds: 700)'),
+        reason:
+            'Initial input and navigation animation need a bounded grace window.',
+      );
+      expect(app, contains('_startupAutopilotGrace?.cancel()'));
+      expect(app, isNot(contains("package:flutter/scheduler.dart")));
+      expect(app, isNot(contains('SchedulerBinding.instance.scheduleTask')));
+      expect(
+        app,
+        isNot(contains('_startupAutopilotFallback')),
+        reason: 'Startup deferral must stay fully cancelable.',
+      );
+
+      final initStart = stock.indexOf('void initState()');
+      final dependenciesStart = stock.indexOf(
+        'void didChangeDependencies()',
+        initStart,
+      );
+      expect(initStart, greaterThanOrEqualTo(0));
+      expect(dependenciesStart, greaterThan(initStart));
+      final initSource = stock.substring(initStart, dependenciesStart);
+      expect(initSource, contains('if (widget.database && widget.embedded)'));
+      expect(
+        initSource,
+        contains('WidgetsBinding.instance.addPostFrameCallback'),
+      );
+      expect(initSource, contains('if (!_controllerListening)'));
+      expect(initSource, contains('_refreshWhenActive = true'));
+      expect(initSource, contains('unawaited(_search())'));
+
+      expect(stock, contains('MedicineCatalogService? _catalog;'));
+      expect(stock, contains('_catalog ??= MedicineCatalogService()'));
+      expect(stock, contains('_catalog?.close()'));
+      expect(
+        stock,
+        isNot(contains('final _catalog = MedicineCatalogService();')),
+        reason: 'Offline Stock must not eagerly construct online HTTP providers.',
+      );
+    },
+  );
+
 }
