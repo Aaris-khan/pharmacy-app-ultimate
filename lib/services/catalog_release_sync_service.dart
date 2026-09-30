@@ -118,10 +118,12 @@ class CatalogReleaseSyncService {
     var revision = await catalog.lastAppliedRevision;
     if (manifest.lastRevision <= revision) {
       if (manifest.snapshot) {
-        await catalog.deprecateSourceBeforeRevision(
-          source: manifest.productSource,
-          revision: manifest.firstRevision,
-        );
+        for (final source in manifest.productSources) {
+          await catalog.deprecateSourceBeforeRevision(
+            source: source,
+            revision: manifest.firstRevision,
+          );
+        }
       }
       return CatalogReleaseSyncResult(
         checked: true,
@@ -148,10 +150,12 @@ class CatalogReleaseSyncService {
     }
 
     if (manifest.snapshot && revision >= manifest.lastRevision) {
-      await catalog.deprecateSourceBeforeRevision(
-        source: manifest.productSource,
-        revision: manifest.firstRevision,
-      );
+      for (final source in manifest.productSources) {
+        await catalog.deprecateSourceBeforeRevision(
+          source: source,
+          revision: manifest.firstRevision,
+        );
+      }
     }
 
     return CatalogReleaseSyncResult(
@@ -313,12 +317,12 @@ class _CatalogManifest {
   const _CatalogManifest({
     required this.shards,
     required this.snapshot,
-    required this.productSource,
+    required this.productSources,
   });
 
   final List<_CatalogShard> shards;
   final bool snapshot;
-  final String productSource;
+  final List<String> productSources;
 
   int get firstRevision => shards.first.firstRevision;
   int get lastRevision => shards.last.lastRevision;
@@ -329,24 +333,42 @@ class _CatalogManifest {
       throw const FormatException('Catalogue manifest must be JSON.');
     }
     final map = Map<String, dynamic>.from(decoded);
-    final source = map['source'];
+    final rawSources = map['sources'];
     final rawShards = map['shards'];
-    final sourceMap = source is Map
-        ? Map<String, dynamic>.from(source)
-        : const <String, dynamic>{};
     final snapshot = map['mode'] == 'snapshot';
-    final productSource = '${sourceMap['product_source'] ?? ''}'.trim();
     if (map['schema'] != 1 ||
         map['kind'] != 'aaris-medicine-catalog' ||
-        source is! Map ||
-        sourceMap['redistributable'] != true ||
         !snapshot ||
-        !productSource.startsWith('public:') ||
-        productSource.length > 80 ||
+        rawSources is! List ||
+        rawSources.isEmpty ||
+        rawSources.length > 16 ||
         rawShards is! List ||
         rawShards.isEmpty ||
         rawShards.length > 64) {
       throw const FormatException('Unsupported catalogue manifest.');
+    }
+
+    final productSources = <String>[];
+    final seenSources = <String>{};
+    for (final rawSource in rawSources) {
+      if (rawSource is! Map) {
+        throw const FormatException('Invalid catalogue source metadata.');
+      }
+      final source = Map<String, dynamic>.from(rawSource);
+      final productSource = '${source['product_source'] ?? ''}'.trim();
+      final sourceName = '${source['name'] ?? ''}'.trim();
+      final license = '${source['license'] ?? ''}'.trim();
+      if (source['redistributable'] != true ||
+          !productSource.startsWith('public:') ||
+          productSource.length > 80 ||
+          sourceName.isEmpty ||
+          sourceName.length > 120 ||
+          license.isEmpty ||
+          license.length > 100 ||
+          !seenSources.add(productSource)) {
+        throw const FormatException('Invalid catalogue source metadata.');
+      }
+      productSources.add(productSource);
     }
     final shards = rawShards
         .whereType<Map>()
@@ -368,7 +390,7 @@ class _CatalogManifest {
     return _CatalogManifest(
       shards: List<_CatalogShard>.unmodifiable(shards),
       snapshot: snapshot,
-      productSource: productSource,
+      productSources: List<String>.unmodifiable(productSources),
     );
   }
 }
