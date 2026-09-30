@@ -150,20 +150,20 @@ CREATE TABLE catalog_deletes (
       const anchorStatements = <String>[
         '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
            SELECT product_id, substr(term, 1, 12), weight * 0.74
-           FROM catalog_terms WHERE length(term) > 28''',
+           FROM catalog_terms WHERE length(term) > 28 AND weight >= 3.0''',
         '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
            SELECT product_id,
                   substr(term, CAST((length(term) - 12) / 3 AS INTEGER) + 1, 12),
                   weight * 0.74
-           FROM catalog_terms WHERE length(term) > 28''',
+           FROM catalog_terms WHERE length(term) > 28 AND weight >= 3.0''',
         '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
            SELECT product_id,
                   substr(term, CAST(((length(term) - 12) * 2) / 3 AS INTEGER) + 1, 12),
                   weight * 0.74
-           FROM catalog_terms WHERE length(term) > 28''',
+           FROM catalog_terms WHERE length(term) > 28 AND weight >= 3.0''',
         '''INSERT OR IGNORE INTO catalog_terms(product_id, term, weight)
            SELECT product_id, substr(term, length(term) - 11, 12), weight * 0.74
-           FROM catalog_terms WHERE length(term) > 28''',
+           FROM catalog_terms WHERE length(term) > 28 AND weight >= 3.0''',
       ];
       for (final statement in anchorStatements) {
         await txn.execute(statement);
@@ -789,12 +789,14 @@ Map<String, double> _catalogTerms(CanonicalMedicineProduct product) {
       final folded = _ocrFoldToken(token);
       result[token] = max(result[token] ?? 0, weight);
       result[folded] = max(result[folded] ?? 0, weight * .98);
-      for (final anchor in boundedOcrAnchors(token)) {
-        result[anchor] = max(result[anchor] ?? 0, weight * .74);
-      }
-      if (folded != token) {
-        for (final anchor in boundedOcrAnchors(folded)) {
-          result[anchor] = max(result[anchor] ?? 0, weight * .72);
+      if (weight >= 3.0) {
+        for (final anchor in boundedOcrAnchors(token)) {
+          result[anchor] = max(result[anchor] ?? 0, weight * .74);
+        }
+        if (folded != token) {
+          for (final anchor in boundedOcrAnchors(folded)) {
+            result[anchor] = max(result[anchor] ?? 0, weight * .72);
+          }
         }
       }
     }
