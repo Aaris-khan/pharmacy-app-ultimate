@@ -117,8 +117,8 @@ List<String> boundedOcrAnchors(
 
   final starts = <int>{
     0,
-    (span / 3).round(),
-    ((span * 2) / 3).round(),
+    span ~/ 3,
+    (span * 2) ~/ 3,
     span,
   }.toList(growable: false)
     ..sort();
