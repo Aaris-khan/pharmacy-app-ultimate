@@ -821,11 +821,16 @@ double _catalogSaltSimilarity(String left, String right) {
 }
 
 double _catalogStrengthSimilarity(String left, String right) {
-  final a = medicineStrengthKey(_normalizeCatalogStrength(left));
-  final b = medicineStrengthKey(_normalizeCatalogStrength(right));
+  final a = medicineStrengthIdentityKey(_normalizeCatalogStrength(left));
+  final b = medicineStrengthIdentityKey(_normalizeCatalogStrength(right));
   if (a.isEmpty || b.isEmpty) return 0;
   if (a == b) return 1;
-  return _catalogTextSimilarity(a, b);
+  // Fuzzy fallback remains lexical only; dimensional conversions above must be
+  // exact before they can become structured strength agreement.
+  return _catalogTextSimilarity(
+    medicineStrengthKey(_normalizeCatalogStrength(left)),
+    medicineStrengthKey(_normalizeCatalogStrength(right)),
+  );
 }
 
 List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
