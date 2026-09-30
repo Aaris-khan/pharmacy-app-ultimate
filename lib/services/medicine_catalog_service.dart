@@ -357,29 +357,31 @@ class OpenFdaNdcProvider implements MedicineCatalogProvider {
       final manufacturer = string('labeler_name');
       final form = normalizeForm(string('dosage_form'));
       final productNdc = string('product_ndc');
-      final ingredients = <String>[];
-      final strengths = <String>[];
+      final activeComponents = <(String, String)>[];
       final active = row['active_ingredients'];
       if (active is List) {
         for (final item in active) {
           if (item is! Map) continue;
           final map = Map<String, dynamic>.from(item);
           final name = map['name'];
-          final strength = map['strength'];
-          if (name is String && name.trim().isNotEmpty) {
-            ingredients.add(name.trim());
-          }
-          if (strength is String && strength.trim().isNotEmpty) {
-            strengths.add(strength.trim());
-          }
+          if (name is! String || name.trim().isEmpty) continue;
+          final rawStrength = map['strength'];
+          final strength = rawStrength is String
+              ? _normalizeCatalogStrength(rawStrength)
+              : '';
+          activeComponents.add((name.trim(), strength));
         }
       }
 
+      final ingredients = activeComponents
+          .map((component) => component.$1)
+          .toList(growable: false);
       final salt = ingredients.isNotEmpty ? ingredients.join(' + ') : generic;
-      final strength = strengths
-          .map(_normalizeCatalogStrength)
-          .where((value) => value.isNotEmpty)
-          .join(' + ');
+      final strength =
+          activeComponents.isNotEmpty &&
+              activeComponents.every((component) => component.$2.isNotEmpty)
+          ? activeComponents.map((component) => component.$2).join(' + ')
+          : '';
       final name = brand.isNotEmpty ? brand : (generic.isNotEmpty ? generic : salt);
       if (name.isEmpty) continue;
       final seed = MedicineDraftSeed(
@@ -534,10 +536,9 @@ String _catalogFormFromText(String raw) {
       .toList(growable: false)
     ..sort((left, right) => right.key.length.compareTo(left.key.length));
   for (final entry in aliases) {
-    if (RegExp(
-      '(?:^|[^a-z])${RegExp.escape(entry.key)}(?:\\$|[^a-z])',
-      caseSensitive: false,
-    ).hasMatch(normalized)) {
+    final pattern =
+        '(?:^|[^a-z])' + RegExp.escape(entry.key) + r'(?:$|[^a-z])';
+    if (RegExp(pattern, caseSensitive: false).hasMatch(normalized)) {
       return entry.value;
     }
   }
