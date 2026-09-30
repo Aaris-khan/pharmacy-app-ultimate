@@ -553,6 +553,10 @@ String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
   add(draft.salt);
   add(draft.strength);
   add(draft.form);
+  // The semantic draft can intentionally abstain from a weak standalone form
+  // line. A literal known form printed anywhere in the same scan is still safe
+  // identity evidence for public-catalog retrieval, so preserve that signal.
+  add(_catalogFormFromText(fallback));
   if (parts.isEmpty) return fallback;
   final joined = parts.join(' ');
   return joined.length <= 420 ? joined : joined.substring(0, 420);
