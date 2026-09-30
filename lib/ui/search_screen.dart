@@ -467,9 +467,10 @@ class _SearchScreenState extends State<SearchScreen> {
       _catalogError = '';
     });
     try {
-      final candidates = await _catalog.search(
+      final candidates = await _catalog.searchScan(
         barcode: scan.barcode,
         text: scan.text,
+        evidence: scan.evidence,
       );
       if (!mounted ||
           generation != _catalogGeneration ||
