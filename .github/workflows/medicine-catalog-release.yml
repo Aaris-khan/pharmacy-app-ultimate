@@ -1,0 +1,73 @@
+name: Medicine catalogue release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/build_medicine_catalog_pack.py'
+      - '.github/workflows/medicine-catalog-release.yml'
+      - 'docs/MEDICINE_CATALOG_DATA_POLICY_2026_09_30.md'
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: medicine-catalogue-release
+  cancel-in-progress: false
+
+jobs:
+  build-catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Build licence-safe identity catalogue
+        run: python tool/build_medicine_catalog_pack.py --output-dir build/medicine-catalog
+
+      - name: Validate generated manifest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("build/medicine-catalog")
+          manifest = json.loads(
+              (root / "aaris-medicine-catalog.manifest.json").read_text("utf-8")
+          )
+          assert manifest["schema"] == 1
+          assert manifest["kind"] == "aaris-medicine-catalog"
+          assert manifest["mode"] == "snapshot"
+          assert 0 < len(manifest["sources"]) <= 16
+          assert all(source["redistributable"] is True for source in manifest["sources"])
+          assert manifest["sources"][0]["product_source"] == "public:openfda_ndc_cc0"
+          assert manifest["records"] > 0
+          previous = 0
+          total = 0
+          for shard in manifest["shards"]:
+              data = (root / shard["name"]).read_bytes()
+              assert len(data) == shard["bytes"]
+              assert hashlib.sha256(data).hexdigest() == shard["sha256"]
+              assert 0 < shard["records"] <= 50000
+              assert shard["first_revision"] > previous
+              assert shard["last_revision"] >= shard["first_revision"]
+              previous = shard["last_revision"]
+              total += shard["records"]
+          assert total == manifest["records"]
+          print(f"Validated {total} catalogue records in {len(manifest['shards'])} shards")
+          PY
+
+      - name: Publish non-latest catalogue Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="catalog-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG"             build/medicine-catalog/aaris-medicine-catalog.manifest.json             build/medicine-catalog/aaris-medicine-catalog-*.jsonl             --target "${GITHUB_SHA}"             --latest=false             --title "Aaris medicine catalogue $(date -u +%Y-%m-%d)"             --notes "Identity-only openFDA NDC catalogue pack. Source distribution: Public Domain / CC0. Labeler-submitted NDC content is not FDA verification or approval."

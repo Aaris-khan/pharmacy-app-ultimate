@@ -365,6 +365,39 @@ CREATE TABLE catalog_deletes (
         .toList(growable: false);
   }
 
+  /// Marks rows from a completed full-snapshot source as stale only after all
+  /// newer snapshot shards have been applied. Retrieval already ignores
+  /// deprecated rows, so aliases/terms may be retained without becoming hits.
+  Future<int> deprecateSourceBeforeRevision({
+    required String source,
+    required int revision,
+  }) async {
+    final cleanSource = source.trim();
+    if (cleanSource.isEmpty ||
+        cleanSource.length > 80 ||
+        revision <= 0) {
+      throw const FormatException('Invalid catalogue snapshot boundary.');
+    }
+    await initialize();
+    return _database!.transaction((txn) async {
+      final changed = await txn.update(
+        'catalog_products',
+        <String, Object?>{'status': 'deprecated'},
+        where: 'source = ? AND status = ? AND rev < ?',
+        whereArgs: <Object?>[cleanSource, 'active', revision],
+      );
+      await txn.insert(
+        'catalog_meta',
+        <String, Object?>{
+          'key': 'snapshot_floor:$cleanSource',
+          'value': '$revision',
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return changed;
+    });
+  }
+
   /// Applies a trusted, already-acquired JSONL delta atomically after SHA-256
   /// integrity verification. This method performs no network I/O.
   Future<CatalogDeltaApplyResult> applyVerifiedDelta(
@@ -692,15 +725,29 @@ Map<String, double> _catalogTerms(CanonicalMedicineProduct product) {
     if (normalized.isEmpty) return;
     final tokens = normalized
         .split(' ')
-        .where((value) => value.length >= 3)
-        .take(32);
+        .where((value) => value.length >= 2)
+        .take(32)
+        .toList(growable: false);
     for (final token in tokens) {
+      if (token.length < 3) continue;
       final folded = _ocrFoldToken(token);
       result[token] = max(result[token] ?? 0, weight);
       result[folded] = max(result[folded] ?? 0, weight * .98);
     }
+
+    // OCR often collapses multi-word brands or ingredients into one token.
+    for (var width = 2; width <= min(3, tokens.length); width++) {
+      for (var start = 0; start + width <= tokens.length; start++) {
+        final compact = tokens.sublist(start, start + width).join();
+        if (compact.length < 4 || compact.length > 48) continue;
+        result[compact] = max(result[compact] ?? 0, weight * .98);
+        final folded = _ocrFoldToken(compact);
+        result[folded] = max(result[folded] ?? 0, weight * .95);
+      }
+    }
+
     final compact = normalized.replaceAll(' ', '');
-    if (compact.length >= 4 && compact.length <= 28) {
+    if (compact.length >= 4 && compact.length <= 48) {
       result[compact] = max(result[compact] ?? 0, weight);
     }
   }
@@ -726,6 +773,16 @@ Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
       if (token.length < 3 || _catalogNoise.contains(token)) continue;
       result.add(token);
       result.add(_ocrFoldToken(token));
+
+      // Preserve identity when OCR glues a medicine dose onto a brand/salt.
+      final withoutDose = token.replaceFirst(
+        RegExp(r'\d+(?:[.]\d+)?(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$'),
+        '',
+      );
+      if (withoutDose.length >= 4 && withoutDose.length <= 48) {
+        result.add(withoutDose);
+        result.add(_ocrFoldToken(withoutDose));
+      }
     }
 
     for (final rawLine in frame.text.split(RegExp(r'[\r\n]+')).take(48)) {
@@ -739,7 +796,7 @@ Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
       for (var width = 2; width <= min(3, useful.length); width++) {
         for (var start = 0; start + width <= useful.length; start++) {
           final phrase = useful.sublist(start, start + width).join();
-          if (phrase.length < 4 || phrase.length > 28) continue;
+          if (phrase.length < 4 || phrase.length > 48) continue;
           result.add(phrase);
           result.add(_ocrFoldToken(phrase));
           if (result.length >= 192) break;
@@ -821,10 +878,18 @@ const _catalogNoise = <String>{
   'capsules',
   'syrup',
   'suspension',
+  'solution',
   'injection',
   'cream',
   'ointment',
+  'gel',
+  'lotion',
   'drops',
+  'spray',
+  'inhaler',
+  'powder',
+  'sachet',
+  'sachets',
   'composition',
   'contains',
   'manufactured',

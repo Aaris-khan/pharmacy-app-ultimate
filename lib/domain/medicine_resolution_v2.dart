@@ -507,10 +507,15 @@ class MedicineProductResolverV2 {
       hardConflicts: winner.hardConflicts,
       exactBarcode: exactBarcodeLock,
     );
+    // Public mirrored catalogues improve recall, but they are not equivalent
+    // to pharmacist-confirmed local recognition memory. Without an exact
+    // barcode they need one extra independent evidence channel before identity
+    // can auto-lock.
+    final minimumChannels = winner.product.source.startsWith('public:') ? 3 : 2;
     final calibratedLock =
         winner.product.verified &&
         winner.score >= requiredScore &&
-        winner.channels >= 2 &&
+        winner.channels >= minimumChannels &&
         winner.decisionMass >= requiredDecisionMass &&
         margin >= requiredMargin &&
         winner.hardConflicts == 0 &&
@@ -865,14 +870,14 @@ Set<String> _productTerms(CanonicalMedicineProduct product) {
     for (var width = 2; width <= min(3, tokens.length); width++) {
       for (var start = 0; start + width <= tokens.length; start++) {
         final phrase = tokens.sublist(start, start + width).join('');
-        if (phrase.length >= 4 && phrase.length <= 28) {
+        if (phrase.length >= 4 && phrase.length <= 48) {
           result.add(phrase);
           result.add(_ocrFoldToken(phrase));
         }
       }
     }
     final compact = normalized.replaceAll(' ', '');
-    if (compact.length >= 4 && compact.length <= 28) {
+    if (compact.length >= 4 && compact.length <= 48) {
       result.add(compact);
       result.add(_ocrFoldToken(compact));
     }
@@ -905,6 +910,16 @@ Set<String> _queryTerms(
       if (token.length >= 3 && !_resolverNoise.contains(token)) {
         result.add(token);
         result.add(_ocrFoldToken(token));
+
+        // Preserve identity when OCR glues a medicine dose onto a brand/salt.
+        final withoutDose = token.replaceFirst(
+          RegExp(r'\d+(?:[.]\d+)?(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$'),
+          '',
+        );
+        if (withoutDose.length >= 4 && withoutDose.length <= 48) {
+          result.add(withoutDose);
+          result.add(_ocrFoldToken(withoutDose));
+        }
       }
     }
     if (phrases) {
@@ -917,7 +932,7 @@ Set<String> _queryTerms(
       for (var width = 2; width <= min(3, useful.length); width++) {
         for (var start = 0; start + width <= useful.length; start++) {
           final phrase = useful.sublist(start, start + width).join('');
-          if (phrase.length >= 4 && phrase.length <= 28) {
+          if (phrase.length >= 4 && phrase.length <= 48) {
             result.add(phrase);
             result.add(_ocrFoldToken(phrase));
           }

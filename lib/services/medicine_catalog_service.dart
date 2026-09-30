@@ -5,7 +5,10 @@ import 'package:http/http.dart' as http;
 
 import '../domain/medicine.dart';
 import '../domain/medicine_discovery.dart';
+import '../domain/medicine_understanding.dart';
 import '../domain/search.dart';
+import 'canonical_medicine_catalog_service.dart';
+import 'catalog_release_sync_service.dart';
 
 abstract interface class MedicineCatalogProvider {
   Future<List<MedicineCatalogCandidate>> search({
@@ -31,6 +34,7 @@ class MedicineCatalogService {
            : List<MedicineCatalogProvider>.of(providers) {
     if (_providers.isEmpty) {
       _providers.addAll([
+        ReleaseCatalogProvider(),
         OpenFdaNdcProvider(_client),
         RxNormProvider(_client),
       ]);
@@ -139,6 +143,79 @@ class _CatalogCacheEntry {
 
   final List<MedicineCatalogCandidate> values;
   final DateTime expiresAt;
+}
+
+/// Release-backed local catalogue used only from explicit Online Search.
+class ReleaseCatalogProvider implements MedicineCatalogProvider {
+  @override
+  Future<List<MedicineCatalogCandidate>> search({
+    required String barcode,
+    required String text,
+    required int limit,
+  }) async {
+    try {
+      await CatalogReleaseSyncService.instance
+          .syncIfNeeded()
+          .timeout(const Duration(milliseconds: 1800));
+    } catch (_) {
+      // Search remains available through the already-verified local revision
+      // and other public providers when GitHub is slow or unavailable.
+    }
+
+    final products = await CanonicalMedicineCatalogService.instance
+        .candidatesForEvidence(
+          <MedicineFrameEvidence>[
+            MedicineFrameEvidence(
+              barcode: barcode,
+              text: text,
+              source: 'Online catalogue lookup',
+            ),
+          ],
+          limit: min(max(limit * 3, 24), 48),
+        );
+    final query = _catalogQuery(text);
+    return products
+        .map((product) {
+          final exactBarcode =
+              barcode.trim().isNotEmpty &&
+              product.barcodes.any(
+                (value) =>
+                    _catalogBarcodeKey(value) == _catalogBarcodeKey(barcode),
+              );
+          final seed = MedicineDraftSeed(
+            name: product.displayName,
+            brand: product.brand,
+            manufacturer: product.manufacturer,
+            salt: product.salt,
+            strength: product.strength,
+            form: product.form,
+            barcode: exactBarcode ? barcode.trim() : '',
+            source: product.source,
+            sourceId: product.productId,
+          );
+          return MedicineCatalogCandidate(
+            seed: seed,
+            score: exactBarcode
+                ? 1.0
+                : _candidateScore(seed, query, providerFloor: .70),
+            provider: 'Aaris catalogue',
+            reason: exactBarcode
+                ? 'Exact verified catalogue barcode'
+                : 'Versioned release catalogue',
+          );
+        })
+        .where((candidate) => candidate.seed.name.trim().isNotEmpty)
+        .take(limit)
+        .toList(growable: false);
+  }
+}
+
+String _catalogBarcodeKey(String value) {
+  final digits = value.replaceAll(RegExp(r'\D'), '');
+  if (const <int>{8, 12, 13, 14}.contains(digits.length)) {
+    return digits.padLeft(14, '0');
+  }
+  return value.trim().toLowerCase();
 }
 
 class OpenFdaNdcProvider implements MedicineCatalogProvider {
@@ -459,7 +536,7 @@ String _catalogQuery(String raw) {
     RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
     ' ',
   );
-  final value = searchText(withoutStockDates);
+  final value = _repairCatalogFragments(searchText(withoutStockDates));
   if (value.isEmpty) return '';
   const noise = {
     'exp',
@@ -496,6 +573,88 @@ String _catalogQuery(String raw) {
       .take(14)
       .toList();
   return tokens.join(' ');
+}
+
+String _repairCatalogFragments(String value) {
+  final parts = value
+      .split(' ')
+      .where((part) => part.isNotEmpty)
+      .take(80)
+      .toList(growable: false);
+  final output = <String>[];
+  var index = 0;
+  while (index < parts.length) {
+    if (parts[index].length == 1 &&
+        RegExp(r'^[a-z]$').hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^[a-z]$').hasMatch(parts[end]) &&
+          joined.length < 20) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (joined.length >= 3) {
+        output.add(joined.toString());
+        index = end;
+        continue;
+      }
+    }
+
+    if (parts[index].length == 1 &&
+        RegExp(r'^\d$').hasMatch(parts[index])) {
+      final joined = StringBuffer();
+      var end = index;
+      while (end < parts.length &&
+          parts[end].length == 1 &&
+          RegExp(r'^\d$').hasMatch(parts[end]) &&
+          joined.length < 5) {
+        joined.write(parts[end]);
+        end++;
+      }
+      if (end < parts.length) {
+        final plainUnit = RegExp(
+          r'^(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.length >= 2 && plainUnit != null) {
+          output.add(joined.toString());
+          output.add(parts[end]);
+          index = end + 1;
+          continue;
+        }
+
+        // searchText may already compact the final digit with its unit:
+        // "6 5 0 mg" -> "6 5 0mg". Join only this tightly-bounded shape.
+        final digitUnit = RegExp(
+          r'^(\d)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+        ).firstMatch(parts[end]);
+        if (joined.isNotEmpty &&
+            digitUnit != null &&
+            joined.length < 5) {
+          output.add('${joined.toString()}${digitUnit.group(1)!}');
+          output.add(digitUnit.group(2)!);
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+
+    final gluedDose = RegExp(
+      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+    ).firstMatch(parts[index]);
+    if (gluedDose != null) {
+      output.add(gluedDose.group(1)!);
+      output.add(gluedDose.group(2)!);
+      output.add(gluedDose.group(3)!);
+      index++;
+      continue;
+    }
+
+    output.add(parts[index]);
+    index++;
+  }
+  return output.join(' ');
 }
 
 List<String> _searchTerms(String value) {
