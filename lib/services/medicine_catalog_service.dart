@@ -530,24 +530,24 @@ class RxNormProvider implements MedicineCatalogProvider {
 }
 
 MedicineDraftSeed _rxSeed(String raw, String rxcui) {
-  final brandMatch = RegExp(r'\\[([^\\]]+)\\]').firstMatch(raw);
+  final brandMatch = RegExp(r'\[([^\]]+)\]').firstMatch(raw);
   final brand = brandMatch?.group(1)?.trim() ?? '';
   final withoutBrand = raw
-      .replaceAll(RegExp(r'\\s*\\[[^\\]]+\\]\\s*'), ' ')
-      .replaceAll(RegExp(r'\\s+'), ' ')
+      .replaceAll(RegExp(r'\s*\[[^\]]+\]\s*'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   final form = _catalogFormFromText(withoutBrand);
   final strengthPattern = RegExp(
     // Keep denominator quantities with their units. Ingredient separators in
     // normalized RxNorm names use a slash surrounded by spaces, while dose
     // concentrations such as 250 MG/5 ML do not.
-    r'\\b\\d+(?:\\.\\d+)?\\s*(?:mcg|ug|mg|g|gm|ml|l|meq|mmol|mol|unt|unit|units|iu|%)'
-    r'(?:\\s*/\\s*(?:(?:\\d+(?:\\.\\d+)?\\s*)?(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?\\b',
+    r'\b\d+(?:\.\d+)?\s*(?:mcg|ug|mg|g|gm|ml|l|meq|mmol|mol|unt|unit|units|iu|%)'
+    r'(?:\s*/\s*(?:(?:\d+(?:\.\d+)?\s*)?(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?\b',
     caseSensitive: false,
   );
 
   final parts = withoutBrand
-      .split(RegExp(r'\\s+/\\s+'))
+      .split(RegExp(r'\s+/\s+'))
       .map((value) => value.trim())
       .where((value) => value.isNotEmpty)
       .take(6)
@@ -561,7 +561,7 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
       continue;
     }
     final ingredient = part.substring(0, match.start).trim();
-    final dose = match.group(0)?.replaceAll(RegExp(r'\\s+'), ' ').trim() ?? '';
+    final dose = match.group(0)?.replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
     if (ingredient.isEmpty || dose.isEmpty) {
       complete = false;
       continue;
@@ -584,12 +584,12 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
         .replaceAll(medicineFormPresentationPattern, ' ')
         .replaceAll(
           RegExp(
-            r'\\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|rectal|vaginal|sublingual|buccal|transdermal|extended\\s+release|delayed\\s+release)\\b',
+            r'\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|rectal|vaginal|sublingual|buccal|transdermal|extended\s+release|delayed\s+release)\b',
             caseSensitive: false,
           ),
           ' ',
         )
-        .replaceAll(RegExp(r'\\s+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     strength = '';
   }
