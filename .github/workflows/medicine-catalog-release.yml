@@ -47,7 +47,7 @@ jobs:
           assert manifest["kind"] == "aaris-medicine-catalog"
           assert manifest["mode"] == "snapshot"
           assert manifest["source"]["redistributable"] is True
-          assert manifest["source"]["product_source"] == "openFDA NDC CC0"
+          assert manifest["source"]["product_source"] == "public:openfda_ndc_cc0"
           assert manifest["records"] > 0
           previous = 0
           total = 0
