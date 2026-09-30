@@ -263,9 +263,11 @@ def write_pack(
     manifest = {
         "schema": 1,
         "kind": "aaris-medicine-catalog",
+        "mode": "snapshot",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": {
             "name": "openFDA Drug NDC",
+            "product_source": "openFDA NDC CC0",
             "source_url": SOURCE_URL,
             "download_index": DOWNLOAD_INDEX,
             "export_date": export_date,
