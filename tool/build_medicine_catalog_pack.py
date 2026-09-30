@@ -265,20 +265,22 @@ def write_pack(
         "kind": "aaris-medicine-catalog",
         "mode": "snapshot",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": {
-            "name": "openFDA Drug NDC",
-            "product_source": "public:openfda_ndc_cc0",
-            "source_url": SOURCE_URL,
-            "download_index": DOWNLOAD_INDEX,
-            "export_date": export_date,
-            "license": "CC0-1.0 / Public Domain",
-            "license_url": LICENSE_URL,
-            "redistributable": True,
-            "quality_note": (
-                "NDC content is submitted by labelers and is not FDA verification "
-                "or approval. Aaris uses it only as product-identity evidence."
-            ),
-        },
+        "sources": [
+            {
+                "name": "openFDA Drug NDC",
+                "product_source": "public:openfda_ndc_cc0",
+                "source_url": SOURCE_URL,
+                "download_index": DOWNLOAD_INDEX,
+                "export_date": export_date,
+                "license": "CC0-1.0 / Public Domain",
+                "license_url": LICENSE_URL,
+                "redistributable": True,
+                "quality_note": (
+                    "NDC content is submitted by labelers and is not FDA verification "
+                    "or approval. Aaris uses it only as product-identity evidence."
+                ),
+            }
+        ],
         "records": len(products),
         "shards": shards,
     }
