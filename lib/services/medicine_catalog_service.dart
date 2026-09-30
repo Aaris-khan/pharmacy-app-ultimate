@@ -130,9 +130,6 @@ class MedicineCatalogService {
       limit: limit,
     );
 
-    // A conservative semantic parse can occasionally abstain on the only useful
-    // OCR token. Retry the original bounded OCR query only when the smart query
-    // found nothing; never fan out both paths unnecessarily.
     if (candidates.isEmpty &&
         searchText(smartText) != searchText(text) &&
         text.trim().isNotEmpty) {
@@ -521,9 +518,6 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
 
 String _normalizeCatalogStrength(String raw) {
   var value = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
-  // openFDA commonly expresses a unit dose as "650 mg/1". The denominator has
-  // no unit and adds no discriminating identity information; keeping it would
-  // make an observed "650 mg" look like a different medicine strength.
   value = value.replaceFirst(RegExp(r'\s*/\s*1\s*$'), '');
   return value.trim();
 }
@@ -554,7 +548,6 @@ String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
     if (key.isEmpty || !seen.add(key)) return;
     parts.add(clean);
   }
-
   add(draft.brand);
   add(draft.name);
   add(draft.salt);
@@ -569,33 +562,22 @@ double _catalogTextSimilarity(String left, String right) {
   final a = searchText(left);
   final b = searchText(right);
   if (a.isEmpty || b.isEmpty) return 0;
-  final spaced = orderedSimilarity(a, b);
-  final compact = orderedSimilarity(
-    a.replaceAll(' ', ''),
-    b.replaceAll(' ', ''),
-  );
-  return max(spaced, compact).clamp(0, 1).toDouble();
+  return max(
+    orderedSimilarity(a, b),
+    orderedSimilarity(a.replaceAll(' ', ''), b.replaceAll(' ', '')),
+  ).clamp(0, 1).toDouble();
 }
 
 double _catalogSaltSimilarity(String left, String right) {
   List<String> components(String value) => value
-      .split(
-        RegExp(
-          r'\s*(?:\+|;|\band\b|\bwith\b)\s*',
-          caseSensitive: false,
-        ),
-      )
+      .split(RegExp(r'\s*(?:\+|;|\band\b|\bwith\b)\s*', caseSensitive: false))
       .map((part) => part.trim())
       .where((part) => part.isNotEmpty)
       .take(6)
       .toList(growable: false);
-
-  final a = components(left);
-  final b = components(right);
+  final a = components(left), b = components(right);
   if (a.isEmpty || b.isEmpty) return _catalogTextSimilarity(left, right);
-  if (a.length == 1 && b.length == 1) {
-    return _catalogTextSimilarity(a.single, b.single);
-  }
+  if (a.length == 1 && b.length == 1) return _catalogTextSimilarity(a.single, b.single);
 
   double directed(List<String> source, List<String> target) {
     var sum = 0.0;
@@ -608,10 +590,7 @@ double _catalogSaltSimilarity(String left, String right) {
     }
     return sum / source.length;
   }
-
-  return ((directed(a, b) + directed(b, a)) / 2)
-      .clamp(0, 1)
-      .toDouble();
+  return ((directed(a, b) + directed(b, a)) / 2).clamp(0, 1).toDouble();
 }
 
 double _catalogStrengthSimilarity(String left, String right) {
@@ -658,12 +637,10 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
       }
     }
 
-    final observedIdentity = draft.field('brand').isEmpty
-        ? draft.field('name')
-        : draft.field('brand');
-    final canonicalIdentity = seed.brand.trim().isNotEmpty
-        ? seed.brand
-        : seed.name;
+    final observedIdentity =
+        draft.field('brand').isEmpty ? draft.field('name') : draft.field('brand');
+    final canonicalIdentity =
+        seed.brand.trim().isNotEmpty ? seed.brand : seed.name;
     observe(
       label: 'brand',
       observed: observedIdentity,
@@ -691,20 +668,14 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
 
     final observedForm = draft.field('form');
     final canonicalForm = normalizeForm(seed.form);
-    if (!observedForm.isEmpty &&
-        canonicalForm.isNotEmpty &&
-        canonicalForm != 'Other') {
+    if (!observedForm.isEmpty && canonicalForm.isNotEmpty && canonicalForm != 'Other') {
       final observedCanonical = normalizeForm(observedForm.value);
       final formScore =
-          observedCanonical.isNotEmpty && observedCanonical == canonicalForm
-          ? 1.0
-          : 0.0;
+          observedCanonical.isNotEmpty && observedCanonical == canonicalForm ? 1.0 : 0.0;
       mass += .14;
       agreement += formScore * .14;
       if (formScore == 1) agreed.add('form');
-      if (!observedForm.conflicted &&
-          observedForm.confidence >= .78 &&
-          formScore == 0) {
+      if (!observedForm.conflicted && observedForm.confidence >= .78 && formScore == 0) {
         conflicts.add('form');
       }
     }
@@ -725,7 +696,7 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
     if (exactBarcode) score = 1.0;
     score = score.clamp(.40, 1.0).toDouble();
 
-    final evidenceReason = exactBarcode
+    final reason = exactBarcode
         ? 'Exact catalogue barcode'
         : conflicts.isNotEmpty
         ? 'Check scan conflict: ${conflicts.join(', ')}'
@@ -733,453 +704,19 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
         ? 'Scan agrees: ${agreed.toSet().join(', ')}'
         : candidate.reason;
 
-    ranked.add(
-      MedicineCatalogCandidate(
-        seed: candidate.seed,
-        score: score,
-        provider: candidate.provider,
-        reason: evidenceReason,
-      ),
-    );
+    ranked.add(MedicineCatalogCandidate(
+      seed: candidate.seed,
+      score: score,
+      provider: candidate.provider,
+      reason: reason,
+    ));
   }
 
-  ranked.sort((left, right) {
-    final score = right.score.compareTo(left.score);
-    if (score != 0) return score;
-    return searchText(left.seed.name).compareTo(searchText(right.seed.name));
-  });
-  return ranked;
-}
-
-double _candidateScore(
-  MedicineDraftSeed seed,
-  String queryText, {
-  required double providerFloor,
-}) {
-  final query = searchText(queryText);
-  if (query.isEmpty) return providerFloor;
-  final document = searchText([
-    seed.name,
-    seed.brand,
-    seed.salt,
-    seed.strength,
-    seed.form,
-    seed.manufacturer,
-  ].join(' '));
-  final queryTokens = query
-      .split(' ')
-      .where((token) => token.length >= 2)
-      .toList();
-  final docTokens = document
-      .split(' ')
-      .where((token) => token.isNotEmpty)
-      .toList();
-  if (queryTokens.isEmpty || docTokens.isEmpty) return providerFloor;
-
-  var exact = 0;
-  var best = 0.0;
-  for (final token in queryTokens.take(12)) {
-    if (docTokens.contains(token)) exact++;
-    for (final candidate in docTokens.take(28)) {
-      best = max(best, orderedSimilarity(token, candidate));
-    }
-  }
-  final exactFraction = exact / queryTokens.length;
-  return (providerFloor + exactFraction * .20 + best * .13)
-      .clamp(providerFloor, .97)
-      .toDouble();
-}
-
-String _catalogQuery(String raw) {
-  if (raw.trim().isEmpty) return '';
-  // Stock-specific date lines must never influence public identity lookup.
-  // Remove common labelled EXP/MFG fragments before general normalization, and
-  // then discard standalone date-shaped tokens as a second line of defence.
-  var withoutStockDates = raw.replaceAll(
-    RegExp(
-      r'\b(?:exp(?:iry|ires)?|use\s*by|use\s*before|mfg|mfd|manufactured)\b\s*[:.-]?\s*\d{1,4}(?:[./-]\d{1,4}){1,2}',
-      caseSensitive: false,
-    ),
-    ' ',
-  );
-  withoutStockDates = withoutStockDates.replaceAll(
-    RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
-    ' ',
-  );
-  final value = _repairCatalogFragments(searchText(withoutStockDates));
-  if (value.isEmpty) return '';
-  const noise = {
-    'exp',
-    'expiry',
-    'expires',
-    'mfg',
-    'mfd',
-    'manufactured',
-    'batch',
-    'batchno',
-    'lot',
-    'mrp',
-    'price',
-    'rs',
-    'inr',
-    'use',
-    'before',
-    'after',
-    'schedule',
-    'store',
-    'storage',
-    'keep',
-    'away',
-    'children',
-    'tablets',
-    'tablet',
-    'capsules',
-    'capsule',
-  };
-  final tokens = value
-      .split(' ')
-      .where((token) => token.isNotEmpty)
-      .where((token) => !noise.contains(token))
-      .take(14)
-      .toList();
-  return tokens.join(' ');
-}
-
-String _repairCatalogFragments(String value) {
-  final parts = value
-      .split(' ')
-      .where((part) => part.isNotEmpty)
-      .take(80)
-      .toList(growable: false);
-  final output = <String>[];
-  var index = 0;
-  while (index < parts.length) {
-    if (parts[index].length == 1 &&
-        RegExp(r'^[a-z]$').hasMatch(parts[index])) {
-      final joined = StringBuffer();
-      var end = index;
-      while (end < parts.length &&
-          parts[end].length == 1 &&
-          RegExp(r'^[a-z]$').hasMatch(parts[end]) &&
-          joined.length < 20) {
-        joined.write(parts[end]);
-        end++;
-      }
-      if (joined.length >= 3) {
-        output.add(joined.toString());
-        index = end;
-        continue;
-      }
-    }
-
-    if (parts[index].length == 1 &&
-        RegExp(r'^\d$').hasMatch(parts[index])) {
-      final joined = StringBuffer();
-      var end = index;
-      while (end < parts.length &&
-          parts[end].length == 1 &&
-          RegExp(r'^\d$').hasMatch(parts[end]) &&
-          joined.length < 5) {
-        joined.write(parts[end]);
-        end++;
-      }
-      if (end < parts.length) {
-        final plainUnit = RegExp(
-          r'^(?:mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
-        ).firstMatch(parts[end]);
-        if (joined.length >= 2 && plainUnit != null) {
-          output.add(joined.toString());
-          output.add(parts[end]);
-          index = end + 1;
-          continue;
-        }
-
-        // searchText may already compact the final digit with its unit:
-        // "6 5 0 mg" -> "6 5 0mg". Join only this tightly-bounded shape.
-        final digitUnit = RegExp(
-          r'^(\d)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
-        ).firstMatch(parts[end]);
-        if (joined.isNotEmpty &&
-            digitUnit != null &&
-            joined.length < 5) {
-          output.add('${joined.toString()}${digitUnit.group(1)!}');
-          output.add(digitUnit.group(2)!);
-          index = end + 1;
-          continue;
-        }
-      }
-    }
-
-    final gluedDose = RegExp(
-      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
-    ).firstMatch(parts[index]);
-    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-), '');
-  return value.trim();
-}
-
-String _catalogFormFromText(String raw) {
-  final normalized = normalize(raw);
-  if (normalized.isEmpty) return '';
-  final aliases = medicineFormAliases.entries
-      .where((entry) => entry.key != 'other')
-      .toList(growable: false)
-    ..sort((left, right) => right.key.length.compareTo(left.key.length));
-  for (final entry in aliases) {
-    if (RegExp(
-      '(?:^|[^a-z])${RegExp.escape(entry.key)}(?:\$|[^a-z])',
-      caseSensitive: false,
-    ).hasMatch(normalized)) {
-      return entry.value;
-    }
-  }
-  return '';
-}
-
-String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
-  final parts = <String>[];
-  final seen = <String>{};
-  void add(String value) {
-    final clean = value.trim();
-    final key = searchText(clean);
-    if (key.isEmpty || !seen.add(key)) return;
-    parts.add(clean);
-  }
-
-  add(draft.brand);
-  add(draft.name);
-  add(draft.salt);
-  add(draft.strength);
-  add(draft.form);
-  if (parts.isEmpty) return fallback;
-  final joined = parts.join(' ');
-  return joined.length <= 420 ? joined : joined.substring(0, 420);
-}
-
-double _catalogTextSimilarity(String left, String right) {
-  final a = searchText(left);
-  final b = searchText(right);
-  if (a.isEmpty || b.isEmpty) return 0;
-  final spaced = orderedSimilarity(a, b);
-  final compact = orderedSimilarity(
-    a.replaceAll(' ', ''),
-    b.replaceAll(' ', ''),
-  );
-  return max(spaced, compact).clamp(0, 1).toDouble();
-}
-
-double _catalogSaltSimilarity(String left, String right) {
-  List<String> components(String value) => value
-      .split(
-        RegExp(
-          r'\s*(?:\+|;|\band\b|\bwith\b)\s*',
-          caseSensitive: false,
-        ),
-      )
-      .map((part) => part.trim())
-      .where((part) => part.isNotEmpty)
-      .take(6)
-      .toList(growable: false);
-
-  final a = components(left);
-  final b = components(right);
-  if (a.isEmpty || b.isEmpty) return _catalogTextSimilarity(left, right);
-  if (a.length == 1 && b.length == 1) {
-    return _catalogTextSimilarity(a.single, b.single);
-  }
-
-  double directed(List<String> source, List<String> target) {
-    var sum = 0.0;
-    for (final item in source) {
-      var best = 0.0;
-      for (final candidate in target) {
-        best = max(best, _catalogTextSimilarity(item, candidate));
-      }
-      sum += best;
-    }
-    return sum / source.length;
-  }
-
-  return ((directed(a, b) + directed(b, a)) / 2)
-      .clamp(0, 1)
-      .toDouble();
-}
-
-double _catalogStrengthSimilarity(String left, String right) {
-  final a = medicineStrengthKey(_normalizeCatalogStrength(left));
-  final b = medicineStrengthKey(_normalizeCatalogStrength(right));
-  if (a.isEmpty || b.isEmpty) return 0;
-  if (a == b) return 1;
-  return _catalogTextSimilarity(a, b);
-}
-
-List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
-  List<MedicineCatalogCandidate> candidates,
-  MedicineScanDraft draft,
-  String scanBarcode,
-) {
-  final ranked = <MedicineCatalogCandidate>[];
-  final scanBarcodeKey = _catalogBarcodeKey(scanBarcode);
-
-  for (final candidate in candidates) {
-    final seed = candidate.seed;
-    var mass = 0.0;
-    var agreement = 0.0;
-    final agreed = <String>[];
-    final conflicts = <String>[];
-
-    void observe({
-      required String label,
-      required ExtractedMedicineField observed,
-      required String canonical,
-      required double weight,
-      required double Function(String, String) similarity,
-      double conflictFloor = .56,
-      double conflictConfidence = .80,
-    }) {
-      if (observed.isEmpty || canonical.trim().isEmpty) return;
-      final score = similarity(observed.value, canonical);
-      mass += weight;
-      agreement += score * weight;
-      if (score >= .86) agreed.add(label);
-      if (!observed.conflicted &&
-          observed.confidence >= conflictConfidence &&
-          score < conflictFloor) {
-        conflicts.add(label);
-      }
-    }
-
-    final observedIdentity = draft.field('brand').isEmpty
-        ? draft.field('name')
-        : draft.field('brand');
-    final canonicalIdentity = seed.brand.trim().isNotEmpty
-        ? seed.brand
-        : seed.name;
-    observe(
-      label: 'brand',
-      observed: observedIdentity,
-      canonical: canonicalIdentity,
-      weight: .32,
-      similarity: _catalogTextSimilarity,
-    );
-    observe(
-      label: 'salt',
-      observed: draft.field('salt'),
-      canonical: seed.salt,
-      weight: .28,
-      similarity: _catalogSaltSimilarity,
-      conflictFloor: .54,
-    );
-    observe(
-      label: 'strength',
-      observed: draft.field('strength'),
-      canonical: seed.strength,
-      weight: .26,
-      similarity: _catalogStrengthSimilarity,
-      conflictFloor: .74,
-      conflictConfidence: .72,
-    );
-
-    final observedForm = draft.field('form');
-    final canonicalForm = normalizeForm(seed.form);
-    if (!observedForm.isEmpty &&
-        canonicalForm.isNotEmpty &&
-        canonicalForm != 'Other') {
-      final observedCanonical = normalizeForm(observedForm.value);
-      final formScore =
-          observedCanonical.isNotEmpty && observedCanonical == canonicalForm
-          ? 1.0
-          : 0.0;
-      mass += .14;
-      agreement += formScore * .14;
-      if (formScore == 1) agreed.add('form');
-      if (!observedForm.conflicted &&
-          observedForm.confidence >= .78 &&
-          formScore == 0) {
-        conflicts.add('form');
-      }
-    }
-
-    final candidateBarcodeKey = _catalogBarcodeKey(seed.barcode);
-    final exactBarcode =
-        scanBarcodeKey.isNotEmpty &&
-        candidateBarcodeKey.isNotEmpty &&
-        scanBarcodeKey == candidateBarcodeKey;
-
-    var score = candidate.score;
-    if (mass > 0) {
-      final structuredAgreement = (agreement / mass).clamp(0, 1).toDouble();
-      score = candidate.score * .64 + structuredAgreement * .36;
-      if (agreed.length >= 2) score += min(.045, agreed.length * .012);
-      if (conflicts.isNotEmpty) score -= min(.42, conflicts.length * .21);
-    }
-    if (exactBarcode) score = 1.0;
-    score = score.clamp(.40, 1.0).toDouble();
-
-    final evidenceReason = exactBarcode
-        ? 'Exact catalogue barcode'
-        : conflicts.isNotEmpty
-        ? 'Check scan conflict: ${conflicts.join(', ')}'
-        : agreed.isNotEmpty
-        ? 'Scan agrees: ${agreed.toSet().join(', ')}'
-        : candidate.reason;
-
-    ranked.add(
-      MedicineCatalogCandidate(
-        seed: candidate.seed,
-        score: score,
-        provider: candidate.provider,
-        reason: evidenceReason,
-      ),
-    );
-  }
-
-  ranked.sort((left, right) {
-    final score = right.score.compareTo(left.score);
-    if (score != 0) return score;
-    return searchText(left.seed.name).compareTo(searchText(right.seed.name));
+  ranked.sort((a, b) {
+    final byScore = b.score.compareTo(a.score);
+    return byScore != 0
+        ? byScore
+        : searchText(a.seed.name).compareTo(searchText(b.seed.name));
   });
   return ranked;
 }
