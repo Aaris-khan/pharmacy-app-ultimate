@@ -2,6 +2,12 @@ name: Medicine catalogue release
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/build_medicine_catalog_pack.py'
+      - '.github/workflows/medicine-catalog-release.yml'
+      - 'docs/MEDICINE_CATALOG_DATA_POLICY_2026_09_30.md'
   schedule:
     - cron: '17 3 * * 1'
 
