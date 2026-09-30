@@ -9,26 +9,41 @@ import io
 import json
 import re
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-DOWNLOAD_INDEX = "https://api.fda.gov/download.json"
-SOURCE_URL = "https://open.fda.gov/apis/drug/ndc/"
-LICENSE_URL = "https://open.fda.gov/license/"
+OPENFDA_DOWNLOAD_INDEX = "https://api.fda.gov/download.json"
+OPENFDA_SOURCE_URL = "https://open.fda.gov/apis/drug/ndc/"
+OPENFDA_LICENSE_URL = "https://open.fda.gov/license/"
+RXNORM_FILES_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
+RXNORM_SOURCE_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/prescribe.html"
+RXNORM_DOWNLOAD_HOST = "download.nlm.nih.gov"
 MAX_SHARD_RECORDS = 20_000
 MAX_SHARD_BYTES = 8 * 1024 * 1024
+MAX_RXNORM_ARCHIVE_BYTES = 256 * 1024 * 1024
+MIN_RXNORM_CLINICAL_DRUGS = 10_000
+MAX_RXNORM_CLINICAL_DRUGS = 100_000
 
 
-def fetch(url: str, timeout: int = 120) -> bytes:
+def fetch(url: str, timeout: int = 120, max_bytes: int | None = None) -> bytes:
     if url.startswith("http://download.open.fda.gov/"):
         url = "https://" + url[len("http://") :]
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "Aaris-Pharmacy-Catalog-Builder/1"},
+        headers={"User-Agent": "Aaris-Pharmacy-Catalog-Builder/2"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
+        if max_bytes is not None:
+            declared = response.headers.get("Content-Length")
+            if declared and int(declared) > max_bytes:
+                raise RuntimeError(f"Download is larger than the safety limit: {url}")
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise RuntimeError(f"Download exceeded the safety limit: {url}")
+            return data
         return response.read()
 
 
@@ -61,6 +76,53 @@ def strings(value: object, limit: int = 24) -> list[str]:
             seen.add(key)
             out.append(text)
         if len(out) >= limit:
+            break
+    return out
+
+
+def _compact_ocr(value: str) -> str:
+    # Release data is Latin pharmaceutical terminology. Keep digits because
+    # glued OCR frequently binds a dose to the ingredient (e.g. NAME500MG).
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def ocr_aliases(
+    *,
+    name: str,
+    brand: str = "",
+    salt: str = "",
+    components: list[tuple[str, str]] | None = None,
+) -> list[str]:
+    """Bounded aliases for OCR that drops spaces/separators.
+
+    These aliases are retrieval hints only. Resolver contradiction gates remain
+    authoritative, so a compact alias can nominate a product but cannot by
+    itself overwrite scanned strength/form/composition.
+    """
+    values: list[str] = [name, brand, salt]
+    if components:
+        for ingredient, strength in components[:6]:
+            values.append(ingredient)
+            if strength:
+                values.append(f"{ingredient}{strength}")
+        values.append("".join(ingredient for ingredient, _ in components[:6]))
+        if all(strength for _, strength in components[:6]):
+            values.append(
+                "".join(
+                    f"{ingredient}{strength}"
+                    for ingredient, strength in components[:6]
+                )
+            )
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        compact = _compact_ocr(value)
+        if not 4 <= len(compact) <= 160 or compact in seen:
+            continue
+        seen.add(compact)
+        out.append(compact)
+        if len(out) >= 24:
             break
     return out
 
@@ -165,7 +227,12 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
         "form": normalize_form(row.get("dosage_form")),
         "manufacturer": clean(row.get("labeler_name")),
         "aliases": aliases,
-        "aliases_ocr": [],
+        "aliases_ocr": ocr_aliases(
+            name=name,
+            brand=brand,
+            salt=salt,
+            components=active_components,
+        ),
         "barcodes": upcs,
         "source": "public:openfda_ndc_cc0",
         "verified": True,
@@ -176,7 +243,7 @@ def transform(row: dict[str, object]) -> dict[str, object] | None:
 
 
 def load_openfda() -> tuple[list[dict[str, object]], str]:
-    metadata = json.loads(fetch(DOWNLOAD_INDEX))
+    metadata = json.loads(fetch(OPENFDA_DOWNLOAD_INDEX))
     endpoint = metadata["results"]["drug"]["ndc"]
     partitions = endpoint.get("partitions", [])
     export_date = clean(endpoint.get("export_date"), 40)
@@ -207,15 +274,244 @@ def load_openfda() -> tuple[list[dict[str, object]], str]:
     return [products[key] for key in sorted(products)], export_date
 
 
+_RX_STRENGTH = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:%|mcg|ug|mg|g|gm|ml|l|meq|mmol|mol|unt|unit|units|iu)"
+    r"(?:\s*/\s*(?:(?:\d+(?:\.\d+)?\s*)?"
+    r"(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?",
+    re.IGNORECASE,
+)
+_RX_ROUTE_FORM_NOISE = re.compile(
+    r"\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|rectal|vaginal|"
+    r"sublingual|buccal|transdermal|extended\s+release|delayed\s+release)\b",
+    re.IGNORECASE,
+)
+
+
+def parse_rxnorm_name(raw: str) -> tuple[str, str, str, str]:
+    """Return brand, salt, aligned strength, coarse form from an RxNorm drug name."""
+    term = clean(raw, 600)
+    if not term:
+        return "", "", "", ""
+    brand_match = re.search(r"\[([^\[\]]+)\]\s*$", term)
+    brand = clean(brand_match.group(1), 300) if brand_match else ""
+    body = re.sub(r"\s*\[[^\[\]]+\]\s*$", "", term).strip()
+    form = normalize_form(body)
+
+    raw_parts = [
+        part.strip()
+        for part in re.split(r"\s+/\s+", body)
+        if part.strip()
+    ]
+    components: list[tuple[str, str]] = []
+    complete = True
+    for part in raw_parts[:6]:
+        match = _RX_STRENGTH.search(part)
+        if match is None:
+            complete = False
+            ingredient = _RX_ROUTE_FORM_NOISE.sub(" ", part)
+            ingredient = re.sub(
+                r"\b(?:tablet|tablets|capsule|capsules|solution|suspension|"
+                r"lotion|cream|ointment|gel|injection|spray|drops|inhaler|"
+                r"powder|sachet|packet)\b",
+                " ",
+                ingredient,
+                flags=re.IGNORECASE,
+            )
+            ingredient = clean(re.sub(r"\s+", " ", ingredient), 300)
+            if ingredient:
+                components.append((ingredient, ""))
+            continue
+        ingredient = clean(part[: match.start()], 300)
+        strength = clean(match.group(0), 120)
+        if not ingredient or not strength:
+            complete = False
+            continue
+        components.append((ingredient, strength))
+
+    if components:
+        salt = " + ".join(ingredient for ingredient, _ in components)
+        # A combination dose is safe only when every slash-delimited component
+        # was parsed. Otherwise preserve salt recall and abstain from dose fill.
+        strength = (
+            " + ".join(dose for _, dose in components)
+            if complete and len(components) == len(raw_parts)
+            else ""
+        )
+        return brand, salt, strength, form
+
+    generic = _RX_ROUTE_FORM_NOISE.sub(" ", body)
+    generic = re.sub(
+        r"\b(?:tablet|tablets|capsule|capsules|solution|suspension|lotion|"
+        r"cream|ointment|gel|injection|spray|drops|inhaler|powder|sachet|packet)\b",
+        " ",
+        generic,
+        flags=re.IGNORECASE,
+    )
+    generic = re.sub(r"\s+", " ", generic).strip()
+    return brand, generic, "", form
+
+
+def transform_rxnorm_concept(
+    rxcui: str,
+    tty: str,
+    raw_name: str,
+) -> dict[str, object] | None:
+    rxcui = clean(rxcui, 32)
+    tty = clean(tty, 12).upper()
+    raw_name = clean(raw_name, 600)
+    if not rxcui.isdigit() or tty not in {"SCD", "SBD"} or not raw_name:
+        return None
+
+    brand, salt, strength, form = parse_rxnorm_name(raw_name)
+    if not salt:
+        return None
+    name = brand or salt
+    salts = [part.strip() for part in salt.split(" + ") if part.strip()]
+    strengths = [part.strip() for part in strength.split(" + ") if part.strip()]
+    components: list[tuple[str, str]] = []
+    for index, ingredient in enumerate(salts[:6]):
+        dose = strengths[index] if index < len(strengths) else ""
+        components.append((ingredient, dose))
+
+    aliases: list[str] = []
+    if raw_name.casefold() not in {name.casefold(), salt.casefold()}:
+        aliases.append(raw_name)
+
+    return {
+        "op": "upsert",
+        "product_id": f"rxnorm:cpc:{rxcui}",
+        "name": name,
+        "brand": brand,
+        "salt": salt,
+        "strength": strength,
+        "form": form,
+        "manufacturer": "",
+        "aliases": aliases,
+        "aliases_ocr": ocr_aliases(
+            name=name,
+            brand=brand,
+            salt=salt,
+            components=components,
+        ),
+        # RxNorm NDC identifiers are not raw UPC/EAN/GTIN scanner payloads, so
+        # they deliberately do not enter the exact-barcode authority lane.
+        "barcodes": [],
+        "source": "public:rxnorm_cpc_pd",
+        "verified": True,
+        "prior_weight": 0.66,
+    }
+
+
+def discover_rxnorm_cpc_release() -> tuple[str, str]:
+    html = fetch(
+        RXNORM_FILES_URL,
+        timeout=60,
+        max_bytes=2 * 1024 * 1024,
+    ).decode("utf-8", errors="strict")
+    matches = re.findall(
+        r'href=["\']([^"\']*RxNorm_full_prescribe_(\d{8})\.zip)["\']',
+        html,
+        flags=re.IGNORECASE,
+    )
+    if not matches:
+        raise RuntimeError("Could not locate the current RxNorm CPC monthly archive")
+
+    choices: list[tuple[datetime, str]] = []
+    for href, stamp in matches:
+        try:
+            release = datetime.strptime(stamp, "%m%d%Y")
+        except ValueError:
+            continue
+        url = urllib.parse.urljoin(RXNORM_FILES_URL, href)
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != RXNORM_DOWNLOAD_HOST:
+            continue
+        choices.append((release, url))
+    if not choices:
+        raise RuntimeError("RxNorm CPC archive link failed the HTTPS/host policy")
+    release, url = max(choices, key=lambda item: item[0])
+    return url, release.date().isoformat()
+
+
+def load_rxnorm_cpc() -> tuple[list[dict[str, object]], str, str, str]:
+    archive_url, release_date = discover_rxnorm_cpc_release()
+    archive_bytes = fetch(
+        archive_url,
+        timeout=180,
+        max_bytes=MAX_RXNORM_ARCHIVE_BYTES,
+    )
+    archive_sha256 = hashlib.sha256(archive_bytes).hexdigest()
+    products: dict[str, dict[str, object]] = {}
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        names = [
+            name
+            for name in archive.namelist()
+            if name.upper().endswith("RXNCONSO.RRF")
+        ]
+        if len(names) != 1:
+            raise RuntimeError(
+                "RxNorm CPC archive must contain exactly one RXNCONSO.RRF"
+            )
+        with archive.open(names[0]) as raw_stream:
+            for raw_line in io.TextIOWrapper(
+                raw_stream,
+                encoding="utf-8",
+                newline="",
+            ):
+                fields = raw_line.rstrip("\r\n").split("|")
+                if len(fields) < 18:
+                    continue
+                # RXNCONSO: RXCUI=0, LAT=1, SAB=11, TTY=12, STR=14,
+                # SUPPRESS=16. CPC contains MTHSPL too; mirror only NLM's
+                # normalized RXNORM SCD/SBD concepts to avoid source ambiguity.
+                if (
+                    fields[1] != "ENG"
+                    or fields[11] != "RXNORM"
+                    or fields[12] not in {"SCD", "SBD"}
+                    or fields[16] != "N"
+                ):
+                    continue
+                product = transform_rxnorm_concept(
+                    fields[0],
+                    fields[12],
+                    fields[14],
+                )
+                if product is not None:
+                    products[str(product["product_id"])] = product
+
+    if not MIN_RXNORM_CLINICAL_DRUGS <= len(products) <= MAX_RXNORM_CLINICAL_DRUGS:
+        raise RuntimeError(
+            "RxNorm CPC schema/count sanity check failed: "
+            f"{len(products)} clinical drugs"
+        )
+    return (
+        [products[key] for key in sorted(products)],
+        release_date,
+        archive_url,
+        archive_sha256,
+    )
+
+
 def write_pack(
     products: list[dict[str, object]],
     output: Path,
-    export_date: str,
+    *,
+    sources: list[dict[str, object]],
 ) -> None:
     if not products:
         raise RuntimeError("No medicine records were produced")
     if len(products) >= 9_000_000:
         raise RuntimeError("Catalogue exceeds revision namespace")
+    if not sources or any(
+        source.get("redistributable") is not True for source in sources
+    ):
+        raise RuntimeError(
+            "Every catalogue source must be explicitly redistributable"
+        )
+
+    # Stable source/product ordering makes release contents auditable apart from
+    # the monotonic revision namespace.
+    products = sorted(products, key=lambda row: str(row["product_id"]))
 
     output.mkdir(parents=True, exist_ok=True)
     for old in output.glob("aaris-medicine-catalog-*.jsonl"):
@@ -281,22 +577,7 @@ def write_pack(
         "kind": "aaris-medicine-catalog",
         "mode": "snapshot",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sources": [
-            {
-                "name": "openFDA Drug NDC",
-                "product_source": "public:openfda_ndc_cc0",
-                "source_url": SOURCE_URL,
-                "download_index": DOWNLOAD_INDEX,
-                "export_date": export_date,
-                "license": "CC0-1.0 / Public Domain",
-                "license_url": LICENSE_URL,
-                "redistributable": True,
-                "quality_note": (
-                    "NDC content is submitted by labelers and is not FDA verification "
-                    "or approval. Aaris uses it only as product-identity evidence."
-                ),
-            }
-        ],
+        "sources": sources,
         "records": len(products),
         "shards": shards,
     }
@@ -314,9 +595,64 @@ def main() -> None:
         help="Directory for the manifest and JSONL shards",
     )
     args = parser.parse_args()
-    products, export_date = load_openfda()
-    write_pack(products, Path(args.output_dir), export_date)
-    print(f"Built {len(products)} identity records from openFDA NDC")
+    openfda_products, openfda_export_date = load_openfda()
+    (
+        rxnorm_products,
+        rxnorm_release_date,
+        rxnorm_archive_url,
+        rxnorm_archive_sha256,
+    ) = load_rxnorm_cpc()
+
+    combined: dict[str, dict[str, object]] = {}
+    for product in [*openfda_products, *rxnorm_products]:
+        combined[str(product["product_id"])] = product
+
+    sources: list[dict[str, object]] = [
+        {
+            "name": "openFDA Drug NDC",
+            "product_source": "public:openfda_ndc_cc0",
+            "source_url": OPENFDA_SOURCE_URL,
+            "download_index": OPENFDA_DOWNLOAD_INDEX,
+            "export_date": openfda_export_date,
+            "license": "CC0-1.0 / Public Domain",
+            "license_url": OPENFDA_LICENSE_URL,
+            "redistributable": True,
+            "records": len(openfda_products),
+            "quality_note": (
+                "NDC content is submitted by labelers and is not FDA verification "
+                "or approval. Aaris uses it only as product-identity evidence."
+            ),
+        },
+        {
+            "name": "RxNorm Current Prescribable Content",
+            "product_source": "public:rxnorm_cpc_pd",
+            "source_url": RXNORM_SOURCE_URL,
+            "download_index": RXNORM_FILES_URL,
+            "archive_url": rxnorm_archive_url,
+            "archive_sha256": rxnorm_archive_sha256,
+            "export_date": rxnorm_release_date,
+            "license": "Public Domain / no licensing restrictions",
+            "license_url": RXNORM_SOURCE_URL,
+            "redistributable": True,
+            "records": len(rxnorm_products),
+            "quality_note": (
+                "Only active NLM-normalized RXNORM SCD/SBD concepts from the "
+                "Current Prescribable Content subset are mirrored. Proprietary "
+                "full-RxNorm source vocabularies are excluded."
+            ),
+        },
+    ]
+    write_pack(
+        list(combined.values()),
+        Path(args.output_dir),
+        sources=sources,
+    )
+    print(
+        "Built "
+        f"{len(combined)} identity records "
+        f"({len(openfda_products)} openFDA NDC + "
+        f"{len(rxnorm_products)} RxNorm CPC)"
+    )
 
 
 if __name__ == "__main__":
