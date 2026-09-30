@@ -23,6 +23,9 @@ void main() {
     });
 
     test('does not split one ingredient from presentation or release prose', () {
+      expect(normalizeMedicineOcrLine('LOTION'), 'LOTION');
+      expect(normalizeMedicineOcrLine('LOTN'), 'LOTN');
+      expect(normalizeMedicineOcrLine('LOT100'), 'LOT 100');
       expect(
         normalizeMedicineOcrLine('CALPOL500MGTABLETS'),
         'CALPOL 500MG TABLETS',
