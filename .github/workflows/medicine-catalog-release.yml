@@ -58,6 +58,7 @@ jobs:
           }
           assert set(sources) == {
               "public:openfda_ndc_cc0",
+              "public:openfda_drugsfda_cc0",
               "public:rxnorm_cpc_pd",
           }
           assert all(source.get("records", 0) > 0 for source in sources.values())
@@ -83,4 +84,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="catalog-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG"             build/medicine-catalog/aaris-medicine-catalog.manifest.json             build/medicine-catalog/aaris-medicine-catalog-*.jsonl             --target "${GITHUB_SHA}"             --latest=false             --title "Aaris medicine catalogue $(date -u +%Y-%m-%d)"             --notes "Identity-only Aaris catalogue pack from explicitly redistributable public sources: openFDA NDC (CC0/Public Domain) and NLM RxNorm Current Prescribable Content (Public Domain/no licensing restrictions). Source data is recognition evidence, not clinical approval or inventory truth."
+          gh release create "$TAG"             build/medicine-catalog/aaris-medicine-catalog.manifest.json             build/medicine-catalog/aaris-medicine-catalog-*.jsonl             --target "${GITHUB_SHA}"             --latest=false             --title "Aaris medicine catalogue $(date -u +%Y-%m-%d)"             --notes "Identity-only Aaris catalogue pack from explicitly redistributable public sources: openFDA NDC and Drugs@FDA (CC0/Public Domain), plus NLM RxNorm Current Prescribable Content (Public Domain/no licensing restrictions). Catalogue data is recognition evidence; physical pack evidence and pharmacist review remain authoritative."
