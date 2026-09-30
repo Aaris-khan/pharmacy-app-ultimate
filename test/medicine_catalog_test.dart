@@ -108,6 +108,21 @@ void main() {
     expect(solution.strength.toLowerCase(), '1 mg/ml');
   });
 
+  test('catalog service repairs fragmented and glued OCR before lookup', () async {
+    final provider = _FakeProvider(const <MedicineCatalogCandidate>[]);
+    final service = MedicineCatalogService(providers: [provider]);
+    addTearDown(service.close);
+
+    await service.search(
+      text: 'D O L O\nMontelukastSodium10mg\n6 5 0 mg\nTABLETS',
+    );
+
+    expect(provider.lastText, contains('dolo'));
+    expect(provider.lastText, contains('montelukastsodium 10 mg'));
+    expect(provider.lastText, contains('650 mg'));
+    expect(provider.lastText, isNot(contains('tablets')));
+  });
+
   test('catalog service deduplicates identity and keeps stronger result', () async {
     final weak = _FakeProvider([
       const MedicineCatalogCandidate(
@@ -169,6 +184,7 @@ class _FakeProvider implements MedicineCatalogProvider {
 
   final List<MedicineCatalogCandidate> results;
   int calls = 0;
+  String lastText = '';
 
   @override
   Future<List<MedicineCatalogCandidate>> search({
@@ -177,6 +193,7 @@ class _FakeProvider implements MedicineCatalogProvider {
     required int limit,
   }) async {
     calls++;
+    lastText = text;
     return results;
   }
 }
