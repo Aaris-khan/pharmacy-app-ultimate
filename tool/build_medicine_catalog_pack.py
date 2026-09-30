@@ -21,11 +21,18 @@ OPENFDA_LICENSE_URL = "https://open.fda.gov/license/"
 RXNORM_FILES_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
 RXNORM_SOURCE_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/prescribe.html"
 RXNORM_DOWNLOAD_HOST = "download.nlm.nih.gov"
+EKACARE_DATASET_ID = "ekacare/indian_drug_mcqa"
+EKACARE_API_URL = f"https://huggingface.co/api/datasets/{EKACARE_DATASET_ID}"
+EKACARE_SOURCE_URL = f"https://huggingface.co/datasets/{EKACARE_DATASET_ID}"
+EKACARE_LICENSE_URL = EKACARE_SOURCE_URL
 MAX_SHARD_RECORDS = 20_000
 MAX_SHARD_BYTES = 8 * 1024 * 1024
 MAX_RXNORM_ARCHIVE_BYTES = 256 * 1024 * 1024
 MIN_RXNORM_CLINICAL_DRUGS = 10_000
 MAX_RXNORM_CLINICAL_DRUGS = 100_000
+MAX_EKACARE_PARQUET_BYTES = 5 * 1024 * 1024
+MIN_EKACARE_SOURCE_ROWS = 500
+MAX_EKACARE_SOURCE_ROWS = 10_000
 
 
 def fetch(url: str, timeout: int = 120, max_bytes: int | None = None) -> bytes:
@@ -173,6 +180,54 @@ def normalize_form(raw: object) -> str:
         if needle in value:
             return canonical
     return "Other" if value else ""
+
+
+_INDIAN_FORM_PRESENTATION = re.compile(
+    r"\b(?:soft\s+gel(?:atin)?\s+capsules?|softgels?|tablets?|capsules?|"
+    r"syrups?|suspensions?|solutions?|injections?|injectables?|creams?|"
+    r"ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?)\b",
+    re.IGNORECASE,
+)
+_INDIAN_DOSE_PRESENTATION = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mcg|ug|mg|gm|g|meq|mmol|iu|i\.u\.|units?)"
+    r"(?:\s*/\s*\d+(?:\.\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|mmol|iu|i\.u\.|units?)){0,5}\b",
+    re.IGNORECASE,
+)
+_INDIAN_ROUTE_PRESENTATION = re.compile(
+    r"\b(?:oral|nasal|topical|ophthalmic|otic|inhalation|rectal|vaginal)\b",
+    re.IGNORECASE,
+)
+_INDIAN_FORM_MODIFIER = re.compile(
+    r"\b(?:chewable|dispersible|orodispersible|effervescent|sublingual)\b",
+    re.IGNORECASE,
+)
+
+
+def indian_brand_name(raw: object) -> str:
+    """Separate trade identity from obvious dose/form presentation.
+
+    Unit-bearing strengths and route/form words are presentation metadata and
+    stay available through the full-name alias. Bare numbers and suffixes such
+    as "625 Duo", "AM" or "ER" are retained because they may identify an Indian
+    market variant and the dataset does not prove they are dosage fields.
+    """
+    value = clean(raw, 300)
+    if not value:
+        return ""
+    # Keep the complete source name as an alias elsewhere, but do not let
+    # presentation metadata masquerade as the trade-name field. Unit-bearing
+    # strengths are safe to remove; bare numbers (for example "625 Duo") are
+    # deliberately retained because they can be part of an Indian market
+    # variant name and the dataset does not provide enough evidence to split it.
+    value = _INDIAN_DOSE_PRESENTATION.sub(" ", value)
+    value = _INDIAN_FORM_PRESENTATION.sub(" ", value)
+    value = _INDIAN_ROUTE_PRESENTATION.sub(" ", value)
+    value = _INDIAN_FORM_MODIFIER.sub(" ", value)
+    return clean(re.sub(r"\s+", " ", value), 300)
+
+
+def _identity_key(raw: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", clean(raw, 600).casefold())
 
 
 def ndc_product_id(row: dict[str, object]) -> str:
@@ -373,6 +428,98 @@ def parse_rxnorm_name(raw: str) -> tuple[str, str, str, str]:
     return brand, generic, "", form
 
 
+def _parse_ekacare_generic(
+    raw: object,
+) -> tuple[str, str, list[tuple[str, str]]]:
+    """Return salt, aligned strength and components without inventing doses."""
+    value = clean(raw, 600)
+    if not value:
+        return "", "", []
+    parts = [
+        clean(part, 300)
+        for part in re.split(r"\s*\+\s*", value)
+        if clean(part, 300)
+    ][:6]
+    components: list[tuple[str, str]] = []
+    complete = bool(parts)
+    for part in parts:
+        ingredient = part
+        strength = ""
+        wrapped = re.search(r"\(([^()]*)\)\s*$", part)
+        if wrapped is not None:
+            candidate = normalize_strength(wrapped.group(1))
+            if _RX_STRENGTH.fullmatch(candidate):
+                strength = candidate
+                ingredient = clean(part[: wrapped.start()], 300)
+        if not ingredient:
+            complete = False
+            continue
+        if not strength:
+            complete = False
+        components.append((ingredient, strength))
+    salt = " + ".join(ingredient for ingredient, _ in components)
+    strength = (
+        " + ".join(dose for _, dose in components)
+        if complete and len(components) == len(parts)
+        else ""
+    )
+    return salt, strength, components
+
+
+def transform_ekacare_drug(
+    row: dict[str, object],
+) -> dict[str, object] | None:
+    """Transform one MIT-licensed Eka Care Indian brand mapping."""
+    medication_name = clean(row.get("medication_name"), 300)
+    generic_name = clean(row.get("generic_name"), 600)
+    if not medication_name or not generic_name:
+        return None
+
+    brand = indian_brand_name(medication_name) or medication_name
+    salt, strength, components = _parse_ekacare_generic(generic_name)
+    if not salt:
+        return None
+    form = normalize_form(medication_name)
+    if form == "Other":
+        # Here the raw string is a product name, not a dedicated dosage-form
+        # field. "Other" would falsely claim that an unprinted form was
+        # observed, so absence stays unknown and cannot contradict pack OCR.
+        form = ""
+    fingerprint = hashlib.sha256(
+        f"{_identity_key(medication_name)}|{_identity_key(salt)}".encode("utf-8")
+    ).hexdigest()[:24]
+
+    aliases = []
+    if medication_name.casefold() != brand.casefold():
+        aliases.append(medication_name)
+
+    return {
+        "op": "upsert",
+        "product_id": f"ekacare:indian-mcqa:{fingerprint}",
+        "name": brand,
+        "brand": brand,
+        "salt": salt,
+        "strength": strength,
+        "form": form,
+        "manufacturer": "",
+        "aliases": aliases,
+        "aliases_ocr": ocr_aliases(
+            name=brand,
+            brand=brand,
+            salt=salt,
+            form=form,
+            components=components,
+        ),
+        "barcodes": [],
+        "source": "public:ekacare_indian_drug_mcqa_mit",
+        "verified": True,
+        # Useful Indian-market identity evidence, but not a regulator-maintained
+        # product registry. Public sources still require three independent scan
+        # channels before canonical lock in the app.
+        "prior_weight": 0.60,
+    }
+
+
 def transform_rxnorm_concept(
     rxcui: str,
     tty: str,
@@ -515,6 +662,123 @@ def load_rxnorm_cpc() -> tuple[list[dict[str, object]], str, str, str]:
     )
 
 
+def load_ekacare_indian_drugs(
+) -> tuple[list[dict[str, object]], str, str, str, int]:
+    """Load one reviewed revision of Eka Care's MIT Indian brand dataset.
+
+    The Hugging Face API is used only to resolve the current immutable revision
+    and verify that the dataset still declares MIT before any payload is read.
+    """
+    metadata = json.loads(
+        fetch(EKACARE_API_URL, timeout=60, max_bytes=2 * 1024 * 1024)
+    )
+    if not isinstance(metadata, dict):
+        raise RuntimeError("Eka Care dataset metadata is invalid")
+    revision = clean(metadata.get("sha"), 80)
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise RuntimeError("Eka Care dataset revision is missing")
+
+    card = metadata.get("cardData")
+    declared_license = ""
+    if isinstance(card, dict):
+        declared_license = clean(card.get("license"), 80).casefold()
+    if not declared_license:
+        tags = metadata.get("tags")
+        if isinstance(tags, list):
+            for tag in tags:
+                value = clean(tag, 100)
+                if value.casefold().startswith("license:"):
+                    declared_license = value.split(":", 1)[1].strip().casefold()
+                    break
+    if declared_license != "mit":
+        raise RuntimeError(
+            "Eka Care dataset no longer declares the audited MIT license"
+        )
+
+    siblings = metadata.get("siblings")
+    if not isinstance(siblings, list):
+        raise RuntimeError("Eka Care dataset file list is missing")
+    parquet_paths = []
+    for item in siblings:
+        if not isinstance(item, dict):
+            continue
+        filename = clean(item.get("rfilename"), 300)
+        if re.fullmatch(r"data/test-\d{5}-of-\d{5}\.parquet", filename):
+            parquet_paths.append(filename)
+    if len(parquet_paths) != 1:
+        raise RuntimeError(
+            "Eka Care dataset must expose exactly one reviewed test parquet"
+        )
+
+    quoted_path = urllib.parse.quote(parquet_paths[0], safe="/")
+    download_url = (
+        f"https://huggingface.co/datasets/{EKACARE_DATASET_ID}/resolve/"
+        f"{revision}/{quoted_path}?download=true"
+    )
+    parquet_bytes = fetch(
+        download_url,
+        timeout=90,
+        max_bytes=MAX_EKACARE_PARQUET_BYTES,
+    )
+    parquet_sha256 = hashlib.sha256(parquet_bytes).hexdigest()
+
+    try:
+        import pyarrow.parquet as parquet
+    except ImportError as error:
+        raise RuntimeError(
+            "pyarrow is required only for the audited Eka Care parquet source"
+        ) from error
+
+    table = parquet.read_table(
+        io.BytesIO(parquet_bytes),
+        columns=["medication_name", "generic_name"],
+    )
+    rows = table.to_pylist()
+    if not MIN_EKACARE_SOURCE_ROWS <= len(rows) <= MAX_EKACARE_SOURCE_ROWS:
+        raise RuntimeError(
+            f"Eka Care row-count sanity check failed: {len(rows)} rows"
+        )
+
+    # Duplicate MCQ variants for the same trade name are expected. Require them
+    # to agree on the generic composition; if the source contains contradictory
+    # mappings for one product name, exclude that identity instead of guessing.
+    normalized_salts: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    staged: list[tuple[str, dict[str, object]]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        product = transform_ekacare_drug(raw)
+        if product is None:
+            continue
+        medicine_key = _identity_key(raw.get("medication_name"))
+        salt_key = _identity_key(product["salt"])
+        previous = normalized_salts.get(medicine_key)
+        if previous is not None and previous != salt_key:
+            ambiguous.add(medicine_key)
+        else:
+            normalized_salts[medicine_key] = salt_key
+        staged.append((medicine_key, product))
+
+    products: dict[str, dict[str, object]] = {}
+    for medicine_key, product in staged:
+        if not medicine_key or medicine_key in ambiguous:
+            continue
+        products[str(product["product_id"])] = product
+
+    if len(products) < 300:
+        raise RuntimeError(
+            f"Eka Care produced too few unambiguous products: {len(products)}"
+        )
+    return (
+        [products[key] for key in sorted(products)],
+        revision,
+        download_url,
+        parquet_sha256,
+        len(rows),
+    )
+
+
 def write_pack(
     products: list[dict[str, object]],
     output: Path,
@@ -625,9 +889,16 @@ def main() -> None:
         rxnorm_archive_url,
         rxnorm_archive_sha256,
     ) = load_rxnorm_cpc()
+    (
+        ekacare_products,
+        ekacare_revision,
+        ekacare_download_url,
+        ekacare_parquet_sha256,
+        ekacare_source_rows,
+    ) = load_ekacare_indian_drugs()
 
     combined: dict[str, dict[str, object]] = {}
-    for product in [*openfda_products, *rxnorm_products]:
+    for product in [*openfda_products, *rxnorm_products, *ekacare_products]:
         combined[str(product["product_id"])] = product
 
     sources: list[dict[str, object]] = [
@@ -664,6 +935,26 @@ def main() -> None:
                 "full-RxNorm source vocabularies are excluded."
             ),
         },
+        {
+            "name": "Eka Care Indian Drug MCQA",
+            "product_source": "public:ekacare_indian_drug_mcqa_mit",
+            "source_url": EKACARE_SOURCE_URL,
+            "download_index": EKACARE_API_URL,
+            "archive_url": ekacare_download_url,
+            "archive_sha256": ekacare_parquet_sha256,
+            "export_date": ekacare_revision,
+            "license": "MIT",
+            "license_url": EKACARE_LICENSE_URL,
+            "redistributable": True,
+            "records": len(ekacare_products),
+            "source_rows": ekacare_source_rows,
+            "quality_note": (
+                "Indian brand-to-generic mappings from the dataset's immutable "
+                "MIT-licensed revision. Duplicate question variants must agree "
+                "on composition; contradictory trade-name mappings are excluded. "
+                "Used only for recognition identity, never clinical advice."
+            ),
+        },
     ]
     write_pack(
         list(combined.values()),
@@ -674,7 +965,8 @@ def main() -> None:
         "Built "
         f"{len(combined)} identity records "
         f"({len(openfda_products)} openFDA NDC + "
-        f"{len(rxnorm_products)} RxNorm CPC)"
+        f"{len(rxnorm_products)} RxNorm CPC + "
+        f"{len(ekacare_products)} Eka Care Indian brands)"
     )
 
 

@@ -13,6 +13,7 @@ const aarisCatalogManifestAsset = 'aaris-medicine-catalog.manifest.json';
 const _auditedCatalogueSources = <String>{
   'public:openfda_ndc_cc0',
   'public:rxnorm_cpc_pd',
+  'public:ekacare_indian_drug_mcqa_mit',
 };
 
 class CatalogReleaseSyncResult {
