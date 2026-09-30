@@ -507,10 +507,15 @@ class MedicineProductResolverV2 {
       hardConflicts: winner.hardConflicts,
       exactBarcode: exactBarcodeLock,
     );
+    // Public mirrored catalogues improve recall, but they are not equivalent
+    // to pharmacist-confirmed local recognition memory. Without an exact
+    // barcode they need one extra independent evidence channel before identity
+    // can auto-lock.
+    final minimumChannels = winner.product.source.startsWith('public:') ? 3 : 2;
     final calibratedLock =
         winner.product.verified &&
         winner.score >= requiredScore &&
-        winner.channels >= 2 &&
+        winner.channels >= minimumChannels &&
         winner.decisionMass >= requiredDecisionMass &&
         margin >= requiredMargin &&
         winner.hardConflicts == 0 &&
