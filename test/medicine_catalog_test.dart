@@ -35,6 +35,27 @@ void main() {
     expect(seed.source, 'openFDA NDC');
   });
 
+  test('openFDA combination strength abstains when one component dose is missing', () {
+    final seed = OpenFdaNdcProvider.parseResults(
+      [
+        {
+          'brand_name': 'Combo',
+          'generic_name': 'Alpha and Beta',
+          'dosage_form': 'TABLET',
+          'active_ingredients': [
+            {'name': 'ALPHA', 'strength': '10 mg/1'},
+            {'name': 'BETA', 'strength': ''},
+          ],
+        },
+      ],
+      queryText: 'Combo alpha beta',
+      barcode: '',
+    ).single.seed;
+
+    expect(seed.salt, 'ALPHA + BETA');
+    expect(seed.strength, isEmpty);
+  });
+
   test('exact catalog barcode is carried into the review draft', () {
     final hits = OpenFdaNdcProvider.parseResults(
       [
