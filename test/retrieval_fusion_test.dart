@@ -29,6 +29,23 @@ void main() {
       expect(ranked, isNot(contains('tablet')));
     });
 
+    test('long glued medicine OCR gets bounded stable anchors', () {
+      const clean = 'montelukastsodiumlevocetirizinehydrochloride';
+      const noisy = 'montelukastsodiumlevxcetirizinehydrochloride';
+
+      final cleanAnchors = boundedOcrAnchors(clean);
+      final noisyAnchors = boundedOcrAnchors(noisy);
+
+      expect(cleanAnchors, hasLength(4));
+      expect(cleanAnchors.every((value) => value.length == 12), isTrue);
+      expect(cleanAnchors.first, clean.substring(0, 12));
+      expect(cleanAnchors.last, clean.substring(clean.length - 12));
+      expect(
+        cleanAnchors.toSet().intersection(noisyAnchors.toSet()).length,
+        greaterThanOrEqualTo(3),
+      );
+    });
+
     test('RRF rewards independent corroboration across retrievers', () {
       final fused = reciprocalRankFuse(const <RankedRetrievalChannel>[
         RankedRetrievalChannel(ids: <String>['a', 'b', 'c']),
