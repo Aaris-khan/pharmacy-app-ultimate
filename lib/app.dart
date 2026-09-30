@@ -286,8 +286,8 @@ class _ShellState extends State<_Shell> {
                   ),
                   NavigationDestination(
                     icon: _AnimatedNavigationIcon(
-                      icon: Icons.inventory_2_outlined,
-                      selectedIcon: Icons.inventory_2_rounded,
+                      icon: Icons.medication_outlined,
+                      selectedIcon: Icons.medication_rounded,
                       selected: tab == 1,
                       reduceMotion: reduceMotion,
                     ),

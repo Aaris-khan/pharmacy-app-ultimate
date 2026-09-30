@@ -291,7 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
               }
 
               final selectorHeight =
-                  (scaler.scale(10.5) > 16 ? scaler.scale(10.5) : 16) + 30;
+                  (scaler.scale(10.5) > 16 ? scaler.scale(10.5) : 16) + 32;
               final topRowHeight = selectorHeight > 42 ? selectorHeight : 42;
               final height =
                   62 +
@@ -628,7 +628,7 @@ class _OverviewTile extends StatelessWidget {
                       child:
                           selector ??
                           Icon(
-                            Icons.north_east_rounded,
+                            Icons.chevron_right_rounded,
                             size: 20,
                             color: muted,
                           ),
@@ -744,37 +744,43 @@ class _WarningSelector extends StatelessWidget {
         ),
       ),
     ],
-    child: GlassPanel(
-      tint: Colors.white,
-      radius: 999,
-      elevation: .35,
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 14),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: ink,
-                fontSize: 10.5,
-                height: 1,
-                fontWeight: FontWeight.w800,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: GlassPanel(
+        tint: Colors.white,
+        radius: 999,
+        elevation: .35,
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 14),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: ink,
+                  fontSize: 10.5,
+                  height: 1,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 5),
-          if (busy)
-            const Icon(
-              Icons.sync_rounded,
-              size: 14,
-              color: primary,
-            )
-          else
-            const Icon(Icons.expand_more_rounded, size: 16, color: ink),
-        ],
+            const SizedBox(width: 5),
+            if (busy)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: primary,
+                ),
+              )
+            else
+              const Icon(Icons.expand_more_rounded, size: 16, color: ink),
+          ],
+        ),
       ),
     ),
   );

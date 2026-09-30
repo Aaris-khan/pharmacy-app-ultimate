@@ -84,7 +84,7 @@ void main() {
       expect(find.text('8 Days Left'), findsNothing);
       final selectorBusy = find.descendant(
         of: find.byType(PopupMenuButton<int>).first,
-        matching: find.byIcon(Icons.sync_rounded),
+        matching: find.byType(CircularProgressIndicator),
       );
       expect(selectorBusy, findsOneWidget);
 
