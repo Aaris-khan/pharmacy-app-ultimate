@@ -129,6 +129,29 @@ class CatalogBuilderTest(unittest.TestCase):
             "public:ekacare_indian_drug_mcqa_mit",
         )
 
+    def test_ekacare_brand_excludes_strength_route_and_form_presentation(self):
+        self.assertEqual(
+            builder.indian_brand_name("Rapeed 20mg Injection"),
+            "Rapeed",
+        )
+        self.assertEqual(
+            builder.indian_brand_name("Linaglip-M 2.5mg/850mg Tablet"),
+            "Linaglip-M",
+        )
+        self.assertEqual(
+            builder.indian_brand_name("Winkast-AZ Nasal Spray"),
+            "Winkast-AZ",
+        )
+        self.assertEqual(
+            builder.indian_brand_name("Cbinan Vit C Zinc Chewable Tablet"),
+            "Cbinan Vit C Zinc",
+        )
+        # A bare market-variant number is not silently interpreted as a dose.
+        self.assertEqual(
+            builder.indian_brand_name("Augmentin 625 Duo Tablet"),
+            "Augmentin 625 Duo",
+        )
+
     def test_ekacare_never_invents_missing_combination_doses(self):
         product = builder.transform_ekacare_drug({
             "medication_name": "Telcare AM",
