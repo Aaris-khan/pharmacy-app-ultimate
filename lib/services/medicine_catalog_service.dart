@@ -165,11 +165,12 @@ class MedicineCatalogService {
     required MedicineScanDraft draft,
     required int limit,
   }) async {
+    final boundedLimit = min(max(1, limit), 12);
     if (!_releaseFirst || _providers.isEmpty) {
       final candidates = await search(
         barcode: barcode,
         text: text,
-        limit: limit,
+        limit: boundedLimit,
       );
       return _rerankCatalogCandidatesForScan(candidates, draft, barcode);
     }
@@ -178,10 +179,13 @@ class MedicineCatalogService {
       _providers.first,
       barcode: barcode,
       text: text,
-      limit: limit,
+      limit: boundedLimit,
     );
     final releaseRanked = _rerankCatalogCandidatesForScan(
-      _rankCandidates(<List<MedicineCatalogCandidate>>[release], limit),
+      _rankCandidates(
+        <List<MedicineCatalogCandidate>>[release],
+        boundedLimit,
+      ),
       draft,
       barcode,
     );
@@ -195,13 +199,13 @@ class MedicineCatalogService {
           provider,
           barcode: barcode,
           text: text,
-          limit: limit,
+          limit: boundedLimit,
         ),
       ),
     );
     final combined = _rankCandidates(
       <List<MedicineCatalogCandidate>>[release, ...fallback],
-      limit,
+      boundedLimit,
     );
     return _rerankCatalogCandidatesForScan(combined, draft, barcode);
   }
