@@ -117,6 +117,12 @@ class CatalogReleaseSyncService {
     final catalog = CanonicalMedicineCatalogService.instance;
     var revision = await catalog.lastAppliedRevision;
     if (manifest.lastRevision <= revision) {
+      if (manifest.snapshot) {
+        await catalog.deprecateSourceBeforeRevision(
+          source: manifest.productSource,
+          revision: manifest.firstRevision,
+        );
+      }
       return CatalogReleaseSyncResult(
         checked: true,
         changed: false,
@@ -139,6 +145,13 @@ class CatalogReleaseSyncService {
       );
       applied += result.applied;
       revision = result.lastAppliedRevision;
+    }
+
+    if (manifest.snapshot && revision >= manifest.lastRevision) {
+      await catalog.deprecateSourceBeforeRevision(
+        source: manifest.productSource,
+        revision: manifest.firstRevision,
+      );
     }
 
     return CatalogReleaseSyncResult(
@@ -280,10 +293,17 @@ class _CatalogShard {
 }
 
 class _CatalogManifest {
-  const _CatalogManifest(this.shards);
+  const _CatalogManifest({
+    required this.shards,
+    required this.snapshot,
+    required this.productSource,
+  });
 
   final List<_CatalogShard> shards;
+  final bool snapshot;
+  final String productSource;
 
+  int get firstRevision => shards.first.firstRevision;
   int get lastRevision => shards.last.lastRevision;
 
   factory _CatalogManifest.parse(String text) {
@@ -294,10 +314,18 @@ class _CatalogManifest {
     final map = Map<String, dynamic>.from(decoded);
     final source = map['source'];
     final rawShards = map['shards'];
+    final sourceMap = source is Map
+        ? Map<String, dynamic>.from(source)
+        : const <String, dynamic>{};
+    final snapshot = map['mode'] == 'snapshot';
+    final productSource = '${sourceMap['product_source'] ?? ''}'.trim();
     if (map['schema'] != 1 ||
         map['kind'] != 'aaris-medicine-catalog' ||
         source is! Map ||
-        Map<String, dynamic>.from(source)['redistributable'] != true ||
+        sourceMap['redistributable'] != true ||
+        !snapshot ||
+        productSource.isEmpty ||
+        productSource.length > 80 ||
         rawShards is! List ||
         rawShards.isEmpty ||
         rawShards.length > 64) {
@@ -320,6 +348,10 @@ class _CatalogManifest {
       }
       previous = shard.lastRevision;
     }
-    return _CatalogManifest(List<_CatalogShard>.unmodifiable(shards));
+    return _CatalogManifest(
+      shards: List<_CatalogShard>.unmodifiable(shards),
+      snapshot: snapshot,
+      productSource: productSource,
+    );
   }
 }
