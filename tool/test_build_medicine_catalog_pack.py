@@ -79,7 +79,7 @@ class CatalogBuilderTest(unittest.TestCase):
             "alpha 10 MG / beta Oral Tablet [Combo]"
         )
         self.assertEqual(brand, "Combo")
-        self.assertEqual(salt.lower(), "alpha")
+        self.assertEqual(salt.lower(), "alpha + beta")
         self.assertEqual(strength, "")
         self.assertEqual(form, "Tablet")
 
