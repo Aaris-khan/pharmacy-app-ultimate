@@ -7,6 +7,14 @@ import 'canonical_medicine_catalog_service.dart';
 
 const aarisCatalogManifestAsset = 'aaris-medicine-catalog.manifest.json';
 
+// Runtime trust boundary for mirrored catalogue data. A manifest cannot grant
+// itself permission merely by claiming "redistributable": every source must be
+// reviewed in code before an installed app will ingest it.
+const _auditedCatalogueSources = <String>{
+  'public:openfda_ndc_cc0',
+  'public:rxnorm_cpc_pd',
+};
+
 class CatalogReleaseSyncResult {
   const CatalogReleaseSyncResult({
     required this.checked,
@@ -358,13 +366,21 @@ class _CatalogManifest {
       final productSource = '${source['product_source'] ?? ''}'.trim();
       final sourceName = '${source['name'] ?? ''}'.trim();
       final license = '${source['license'] ?? ''}'.trim();
+      final sourceUrl = Uri.tryParse('${source['source_url'] ?? ''}'.trim());
+      final licenseUrl = Uri.tryParse('${source['license_url'] ?? ''}'.trim());
       if (source['redistributable'] != true ||
-          !productSource.startsWith('public:') ||
+          !_auditedCatalogueSources.contains(productSource) ||
           productSource.length > 80 ||
           sourceName.isEmpty ||
           sourceName.length > 120 ||
           license.isEmpty ||
           license.length > 100 ||
+          sourceUrl == null ||
+          sourceUrl.scheme != 'https' ||
+          sourceUrl.host.isEmpty ||
+          licenseUrl == null ||
+          licenseUrl.scheme != 'https' ||
+          licenseUrl.host.isEmpty ||
           !seenSources.add(productSource)) {
         throw const FormatException('Invalid catalogue source metadata.');
       }
