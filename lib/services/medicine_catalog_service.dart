@@ -542,7 +542,7 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
     // normalized RxNorm names use a slash surrounded by spaces, while dose
     // concentrations such as 250 MG/5 ML do not.
     r'\b\d+(?:\.\d+)?\s*(?:mcg|ug|mg|g|gm|ml|l|meq|mmol|mol|unt|unit|units|iu|%)'
-    r'(?:\s*/\s*(?:(?:\d+(?:\.\d+)?\s*)?(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?\b',
+    r'(?:\s*/\s*(?:(?:\d+(?:\.\d+)?\s*)?(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?',
     caseSensitive: false,
   );
 
@@ -558,6 +558,18 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
     final match = strengthPattern.firstMatch(part);
     if (match == null) {
       complete = false;
+      final ingredient = part
+          .replaceAll(medicineFormPresentationPattern, ' ')
+          .replaceAll(
+            RegExp(
+              r'\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|rectal|vaginal|sublingual|buccal|transdermal|extended\s+release|delayed\s+release)\b',
+              caseSensitive: false,
+            ),
+            ' ',
+          )
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (ingredient.isNotEmpty) components.add((ingredient, ''));
       continue;
     }
     final ingredient = part.substring(0, match.start).trim();
