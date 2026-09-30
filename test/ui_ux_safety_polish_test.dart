@@ -739,7 +739,7 @@ void main() {
 
 
   test(
-    'primary navigation animates destination glyphs and returns home on system back',
+    'primary navigation animates selection without replaying motion for badge updates',
     () {
       final source = File('lib/app.dart').readAsStringSync();
 
@@ -760,19 +760,20 @@ void main() {
       expect(start, greaterThanOrEqualTo(0));
       final icon = source.substring(start);
       expect(icon, contains('final currentIcon = selected ? selectedIcon : icon;'));
+      expect(icon, contains('final duration = reduceMotion'));
       expect(icon, contains('AnimatedSwitcher('));
+      expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
+      expect(icon, contains('ValueKey<int>(currentIcon.codePoint)'));
+      expect(icon, contains('AnimatedScale('));
+      expect(icon, contains('scale: selected && !reduceMotion ? 1.08 : 1'));
+      expect(icon, contains('AnimatedSlide('));
+      expect(icon, contains("const Offset(0, -.06)"));
+      expect(icon, contains('child: Badge.count('));
       expect(
         icon,
-        contains(
-          'duration: reduceMotion\n'
-          '          ? Duration.zero\n'
-          '          : const Duration(milliseconds: 180)',
-        ),
+        isNot(contains('badgeCount,\n          showBadge')),
+        reason: 'Badge data must not key the destination icon animation.',
       );
-      expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
-      expect(icon, contains('ValueKey(('));
-      expect(icon, contains('currentIcon.codePoint'));
-      expect(icon, contains('child: Icon(currentIcon)'));
     },
   );
 
@@ -798,7 +799,10 @@ void main() {
     expect(source, contains("import 'dart:async';"));
     expect(source, contains('final bool hapticFeedback;'));
     expect(source, contains('this.hapticFeedback = true'));
-    expect(tactile, contains('unawaited(HapticFeedback.selectionClick())'));
+    expect(
+      tactile,
+      contains('HapticFeedback.selectionClick().catchError((Object _) {})'),
+    );
     expect(tactile, contains('onTap: enabled ? _handleTap : null'));
   });
 
@@ -833,8 +837,14 @@ void main() {
     expect(scanner, contains('?.disableAnimations ??'));
     expect(scanner, contains('? green'));
     expect(scanner, contains('const Duration(milliseconds: 220)'));
-    expect(scannerLogic, contains('HapticFeedback.mediumImpact()'));
-    expect(scannerLogic, contains('HapticFeedback.lightImpact()'));
+    expect(
+      scannerLogic,
+      contains('HapticFeedback.mediumImpact().catchError((Object _) {})'),
+    );
+    expect(
+      scannerLogic,
+      contains('HapticFeedback.lightImpact().catchError((Object _) {})'),
+    );
   });
 
 }

@@ -486,7 +486,7 @@ class _ScannerScreenState extends State<ScannerScreen>
         // the camera session was retired, not the already-saved photo.
         if (mounted && !_closed && !_leaving) {
           if (_foreground) {
-            unawaited(HapticFeedback.mediumImpact());
+            unawaited(HapticFeedback.mediumImpact().catchError((Object _) {}));
           }
           setState(() {
             _text = queued == 1
@@ -530,7 +530,7 @@ class _ScannerScreenState extends State<ScannerScreen>
         }
         final recognized = await stillRecognition;
         if (current() && recognized) {
-          unawaited(HapticFeedback.lightImpact());
+          unawaited(HapticFeedback.lightImpact().catchError((Object _) {}));
         }
         if (current() &&
             widget.autoSubmit &&

@@ -128,7 +128,7 @@ class _ShellState extends State<_Shell> {
   void _selectTab(int next) {
     if (next == tab) return;
     // Keep tab switches crisp and physical without delaying navigation.
-    unawaited(HapticFeedback.selectionClick());
+    unawaited(HapticFeedback.selectionClick().catchError((Object _) {}));
     // A retained offstage tab must not keep its text field and keyboard active.
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => tab = next);
@@ -361,10 +361,11 @@ class _AnimatedNavigationIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentIcon = selected ? selectedIcon : icon;
-    return AnimatedSwitcher(
-      duration: reduceMotion
-          ? Duration.zero
-          : const Duration(milliseconds: 180),
+    final duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
+    final animatedIcon = AnimatedSwitcher(
+      duration: duration,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, animation) => FadeTransition(
@@ -374,16 +375,31 @@ class _AnimatedNavigationIcon extends StatelessWidget {
           child: child,
         ),
       ),
-      child: Badge.count(
-        key: ValueKey((
-          selected,
-          currentIcon.codePoint,
-          badgeCount,
-          showBadge,
-        )),
-        count: badgeCount,
-        isLabelVisible: showBadge,
-        child: Icon(currentIcon),
+      child: Icon(
+        currentIcon,
+        key: ValueKey<int>(currentIcon.codePoint),
+      ),
+    );
+
+    // Badge changes are operational data, not navigation events. Keep the badge
+    // outside AnimatedSwitcher so a live issue-count update never replays the
+    // destination-selection motion. Selection itself gets a restrained physical
+    // lift, while Reduce Motion collapses every transition to a static state.
+    return AnimatedScale(
+      scale: selected && !reduceMotion ? 1.08 : 1,
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      child: AnimatedSlide(
+        offset: selected && !reduceMotion
+            ? const Offset(0, -.06)
+            : Offset.zero,
+        duration: duration,
+        curve: Curves.easeOutCubic,
+        child: Badge.count(
+          count: badgeCount,
+          isLabelVisible: showBadge,
+          child: animatedIcon,
+        ),
       ),
     );
   }
