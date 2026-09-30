@@ -522,7 +522,236 @@ String _normalizeCatalogStrength(String raw) {
   // openFDA commonly expresses a unit dose as "650 mg/1". The denominator has
   // no unit and adds no discriminating identity information; keeping it would
   // make an observed "650 mg" look like a different medicine strength.
-  value = value.replaceFirst(RegExp(r'\s*/\s*1\s*  MedicineDraftSeed seed,
+  value = value.replaceFirst(RegExp(r'\s*/\s*1\s*$'), '');
+  return value.trim();
+}
+
+String _catalogFormFromText(String raw) {
+  final normalized = normalize(raw);
+  if (normalized.isEmpty) return '';
+  final aliases = medicineFormAliases.entries
+      .where((entry) => entry.key != 'other')
+      .toList(growable: false)
+    ..sort((left, right) => right.key.length.compareTo(left.key.length));
+  for (final entry in aliases) {
+    if (RegExp(
+      '(?:^|[^a-z])${RegExp.escape(entry.key)}(?:\\$|[^a-z])',
+      caseSensitive: false,
+    ).hasMatch(normalized)) {
+      return entry.value;
+    }
+  }
+  return '';
+}
+
+String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
+  final parts = <String>[];
+  final seen = <String>{};
+  void add(String value) {
+    final clean = value.trim();
+    final key = searchText(clean);
+    if (key.isEmpty || !seen.add(key)) return;
+    parts.add(clean);
+  }
+
+  add(draft.brand);
+  add(draft.name);
+  add(draft.salt);
+  add(draft.strength);
+  add(draft.form);
+  if (parts.isEmpty) return fallback;
+  final joined = parts.join(' ');
+  return joined.length <= 420 ? joined : joined.substring(0, 420);
+}
+
+double _catalogTextSimilarity(String left, String right) {
+  final a = searchText(left);
+  final b = searchText(right);
+  if (a.isEmpty || b.isEmpty) return 0;
+  final spaced = orderedSimilarity(a, b);
+  final compact = orderedSimilarity(
+    a.replaceAll(' ', ''),
+    b.replaceAll(' ', ''),
+  );
+  return max(spaced, compact).clamp(0, 1).toDouble();
+}
+
+double _catalogSaltSimilarity(String left, String right) {
+  List<String> components(String value) => value
+      .split(
+        RegExp(
+          r'\s*(?:\+|;|\band\b|\bwith\b)\s*',
+          caseSensitive: false,
+        ),
+      )
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .take(6)
+      .toList(growable: false);
+
+  final a = components(left);
+  final b = components(right);
+  if (a.isEmpty || b.isEmpty) return _catalogTextSimilarity(left, right);
+  if (a.length == 1 && b.length == 1) {
+    return _catalogTextSimilarity(a.single, b.single);
+  }
+
+  double directed(List<String> source, List<String> target) {
+    var sum = 0.0;
+    for (final item in source) {
+      var best = 0.0;
+      for (final candidate in target) {
+        best = max(best, _catalogTextSimilarity(item, candidate));
+      }
+      sum += best;
+    }
+    return sum / source.length;
+  }
+
+  return ((directed(a, b) + directed(b, a)) / 2)
+      .clamp(0, 1)
+      .toDouble();
+}
+
+double _catalogStrengthSimilarity(String left, String right) {
+  final a = medicineStrengthKey(_normalizeCatalogStrength(left));
+  final b = medicineStrengthKey(_normalizeCatalogStrength(right));
+  if (a.isEmpty || b.isEmpty) return 0;
+  if (a == b) return 1;
+  return _catalogTextSimilarity(a, b);
+}
+
+List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
+  List<MedicineCatalogCandidate> candidates,
+  MedicineScanDraft draft,
+  String scanBarcode,
+) {
+  final ranked = <MedicineCatalogCandidate>[];
+  final scanBarcodeKey = _catalogBarcodeKey(scanBarcode);
+
+  for (final candidate in candidates) {
+    final seed = candidate.seed;
+    var mass = 0.0;
+    var agreement = 0.0;
+    final agreed = <String>[];
+    final conflicts = <String>[];
+
+    void observe({
+      required String label,
+      required ExtractedMedicineField observed,
+      required String canonical,
+      required double weight,
+      required double Function(String, String) similarity,
+      double conflictFloor = .56,
+      double conflictConfidence = .80,
+    }) {
+      if (observed.isEmpty || canonical.trim().isEmpty) return;
+      final score = similarity(observed.value, canonical);
+      mass += weight;
+      agreement += score * weight;
+      if (score >= .86) agreed.add(label);
+      if (!observed.conflicted &&
+          observed.confidence >= conflictConfidence &&
+          score < conflictFloor) {
+        conflicts.add(label);
+      }
+    }
+
+    final observedIdentity = draft.field('brand').isEmpty
+        ? draft.field('name')
+        : draft.field('brand');
+    final canonicalIdentity = seed.brand.trim().isNotEmpty
+        ? seed.brand
+        : seed.name;
+    observe(
+      label: 'brand',
+      observed: observedIdentity,
+      canonical: canonicalIdentity,
+      weight: .32,
+      similarity: _catalogTextSimilarity,
+    );
+    observe(
+      label: 'salt',
+      observed: draft.field('salt'),
+      canonical: seed.salt,
+      weight: .28,
+      similarity: _catalogSaltSimilarity,
+      conflictFloor: .54,
+    );
+    observe(
+      label: 'strength',
+      observed: draft.field('strength'),
+      canonical: seed.strength,
+      weight: .26,
+      similarity: _catalogStrengthSimilarity,
+      conflictFloor: .74,
+      conflictConfidence: .72,
+    );
+
+    final observedForm = draft.field('form');
+    final canonicalForm = normalizeForm(seed.form);
+    if (!observedForm.isEmpty &&
+        canonicalForm.isNotEmpty &&
+        canonicalForm != 'Other') {
+      final observedCanonical = normalizeForm(observedForm.value);
+      final formScore =
+          observedCanonical.isNotEmpty && observedCanonical == canonicalForm
+          ? 1.0
+          : 0.0;
+      mass += .14;
+      agreement += formScore * .14;
+      if (formScore == 1) agreed.add('form');
+      if (!observedForm.conflicted &&
+          observedForm.confidence >= .78 &&
+          formScore == 0) {
+        conflicts.add('form');
+      }
+    }
+
+    final candidateBarcodeKey = _catalogBarcodeKey(seed.barcode);
+    final exactBarcode =
+        scanBarcodeKey.isNotEmpty &&
+        candidateBarcodeKey.isNotEmpty &&
+        scanBarcodeKey == candidateBarcodeKey;
+
+    var score = candidate.score;
+    if (mass > 0) {
+      final structuredAgreement = (agreement / mass).clamp(0, 1).toDouble();
+      score = candidate.score * .64 + structuredAgreement * .36;
+      if (agreed.length >= 2) score += min(.045, agreed.length * .012);
+      if (conflicts.isNotEmpty) score -= min(.42, conflicts.length * .21);
+    }
+    if (exactBarcode) score = 1.0;
+    score = score.clamp(.40, 1.0).toDouble();
+
+    final evidenceReason = exactBarcode
+        ? 'Exact catalogue barcode'
+        : conflicts.isNotEmpty
+        ? 'Check scan conflict: ${conflicts.join(', ')}'
+        : agreed.isNotEmpty
+        ? 'Scan agrees: ${agreed.toSet().join(', ')}'
+        : candidate.reason;
+
+    ranked.add(
+      MedicineCatalogCandidate(
+        seed: candidate.seed,
+        score: score,
+        provider: candidate.provider,
+        reason: evidenceReason,
+      ),
+    );
+  }
+
+  ranked.sort((left, right) {
+    final score = right.score.compareTo(left.score);
+    if (score != 0) return score;
+    return searchText(left.seed.name).compareTo(searchText(right.seed.name));
+  });
+  return ranked;
+}
+
+double _candidateScore(
+  MedicineDraftSeed seed,
   String queryText, {
   required double providerFloor,
 }) {
