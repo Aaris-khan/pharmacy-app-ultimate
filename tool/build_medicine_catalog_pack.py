@@ -204,10 +204,12 @@ _INDIAN_FORM_MODIFIER = re.compile(
 
 
 def indian_brand_name(raw: object) -> str:
-    """Strip only dosage-form presentation from an Indian trade name.
+    """Separate trade identity from obvious dose/form presentation.
 
-    Strength/variant text is deliberately retained because strings such as
-    "625 Duo", "20mg", "AM" or "ER" can distinguish commercial variants.
+    Unit-bearing strengths and route/form words are presentation metadata and
+    stay available through the full-name alias. Bare numbers and suffixes such
+    as "625 Duo", "AM" or "ER" are retained because they may identify an Indian
+    market variant and the dataset does not prove they are dosage fields.
     """
     value = clean(raw, 300)
     if not value:
