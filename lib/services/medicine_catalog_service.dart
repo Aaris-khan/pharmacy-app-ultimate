@@ -14,6 +14,20 @@ import 'canonical_medicine_catalog_service.dart';
 import 'catalog_release_sync_service.dart';
 
 abstract interface class MedicineCatalogProvider {
+  /// Starts the verified GitHub Release mirror refresh as soon as the owner
+  /// explicitly enables Online Search. The sync service coalesces concurrent
+  /// callers, so a later scan reuses the same in-flight work while live public
+  /// providers remain available if the mirror is not ready yet.
+  Future<void> warmReleaseMirror() async {
+    if (!_releaseFirst) return;
+    try {
+      await CatalogReleaseSyncService.instance.syncIfNeeded();
+    } catch (_) {
+      // Warming is an optimization, never a prerequisite for local scanning or
+      // public fallback. The normal search path will retry after backoff.
+    }
+  }
+
   Future<List<MedicineCatalogCandidate>> search({
     required String barcode,
     required String text,
