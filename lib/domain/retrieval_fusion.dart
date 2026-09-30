@@ -133,6 +133,88 @@ List<String> boundedOcrAnchors(
   return List<String>.unmodifiable(result);
 }
 
+/// Bounded key plan for complete single-edit OCR recovery.
+///
+/// The catalogue already stores one-character deletes for each indexed identity
+/// term. Querying only deletes of the observed token recovers substitutions, but
+/// misses two equally common camera failures: a character dropped by OCR and an
+/// extra character hallucinated by OCR. This plan covers all three cases without
+/// adding a larger on-device index:
+///
+/// * observed deletion -> query the observed term against catalog_deletes;
+/// * observed substitution -> query observed one-deletes against catalog_deletes;
+/// * observed insertion -> query observed one-deletes against catalog_terms.
+///
+/// Callers should pass already-normalized/folded identity tokens. Work is bounded
+/// before SQL expansion so low-memory phones do not pay for unbounded fuzzy work.
+class SingleEditRecoveryPlan {
+  const SingleEditRecoveryPlan({
+    required this.deleteIndexKeys,
+    required this.exactIndexKeys,
+  });
+
+  final List<String> deleteIndexKeys;
+  final List<String> exactIndexKeys;
+}
+
+SingleEditRecoveryPlan planSingleEditRecoveryKeys(
+  Iterable<String> normalizedTerms, {
+  int maxDeleteIndexKeys = 144,
+  int maxExactIndexKeys = 120,
+}) {
+  if (maxDeleteIndexKeys <= 0 || maxExactIndexKeys <= 0) {
+    return const SingleEditRecoveryPlan(
+      deleteIndexKeys: <String>[],
+      exactIndexKeys: <String>[],
+    );
+  }
+
+  final deleteIndexKeys = <String>[];
+  final exactIndexKeys = <String>[];
+  final deleteSeen = <String>{};
+  final exactSeen = <String>{};
+
+  void addDelete(String value) {
+    if (deleteIndexKeys.length >= maxDeleteIndexKeys || value.length < 3) return;
+    if (deleteSeen.add(value)) deleteIndexKeys.add(value);
+  }
+
+  void addExact(String value) {
+    if (exactIndexKeys.length >= maxExactIndexKeys || value.length < 3) return;
+    if (exactSeen.add(value)) exactIndexKeys.add(value);
+  }
+
+  for (final raw in normalizedTerms) {
+    final term = raw.trim();
+    if (term.length < 4 || term.length > 28) continue;
+
+    // If OCR dropped one character, the observed token itself is already one
+    // of the canonical token's precomputed delete keys.
+    addDelete(term);
+
+    for (var index = 0; index < term.length; index++) {
+      final deleted = term.substring(0, index) + term.substring(index + 1);
+      // Shared delete keys recover substitutions. Looking the same key up in
+      // catalog_terms recovers one spurious extra OCR character.
+      addDelete(deleted);
+      addExact(deleted);
+      if (deleteIndexKeys.length >= maxDeleteIndexKeys &&
+          exactIndexKeys.length >= maxExactIndexKeys) {
+        break;
+      }
+    }
+    if (deleteIndexKeys.length >= maxDeleteIndexKeys &&
+        exactIndexKeys.length >= maxExactIndexKeys) {
+      break;
+    }
+  }
+
+  return SingleEditRecoveryPlan(
+    deleteIndexKeys: List<String>.unmodifiable(deleteIndexKeys),
+    exactIndexKeys: List<String>.unmodifiable(exactIndexKeys),
+  );
+}
+
 /// Reciprocal-rank fusion for heterogeneous bounded retrievers.
 ///
 /// RRF depends on rank rather than incomparable raw score scales, so exact-term
