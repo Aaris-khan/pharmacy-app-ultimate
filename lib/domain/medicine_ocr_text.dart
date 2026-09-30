@@ -105,6 +105,39 @@ final _medicineOcrGluedUnitForm = RegExp(
   caseSensitive: false,
 );
 
+// Long dosage-form words are safe suffix anchors when OCR drops the boundary
+// after a medicine token (for example CANDIDLOTION or CALPOLTABLETS). Short
+// aliases such as tab/cap/inj/gel are deliberately excluded because splitting
+// arbitrary words on a 3-letter suffix creates too many false positives.
+final _medicineOcrLongSingleTokenFormPattern =
+    (medicineFormAliases.keys
+            .where(
+              (value) =>
+                  value != 'other' &&
+                  !value.contains(' ') &&
+                  value.length >= 5,
+            )
+            .toList(growable: false)
+          ..sort((left, right) => right.length.compareTo(left.length)))
+        .map(RegExp.escape)
+        .join('|');
+final _medicineOcrGluedWordForm = RegExp(
+  '(?<![A-Za-z])([A-Za-z][A-Za-z0-9-]{2,47})'
+  '($_medicineOcrLongSingleTokenFormPattern)(?![A-Za-z])',
+  caseSensitive: false,
+);
+
+// OCR can also collapse a complete ingredient-dose conjunction:
+// PARACETAMOL500MGWITHCAFFEINE65MG. Recover only when both sides contain a
+// pharmaceutical strength, so ordinary prose containing AND/WITH is untouched.
+final _medicineOcrGluedCombinationSeparator = RegExp(
+  r'(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)'
+  r'(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?)'
+  r'(?:and|with)'
+  r'(?=[A-Za-z][A-Za-z .()/-]{2,72}\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
+  caseSensitive: false,
+);
+
 // A dropped boundary before a printed dose is semantically recoverable because
 // the numeric token is immediately owned by a pharmaceutical unit. The prefix
 // still needs at least three alphabetic characters; field ownership below keeps
@@ -366,6 +399,15 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]} ',
   );
 
+  // Recover a medicine-token/form boundary only for long, known dosage forms.
+  // This is intentionally narrower than generic camel-case splitting and does
+  // not invent a form: the suffix itself must be a canonical form alias.
+  result = result.replaceAllMapped(_medicineOcrGluedWordForm, (match) {
+    final prefix = match[1]!;
+    if (!RegExp(r'[A-Za-z]{3}').hasMatch(prefix)) return match[0]!;
+    return '$prefix ${match[2]}';
+  });
+
   // Recover a lost boundary such as "Paracetamol5O0MG" or "CALPOL500MG".
   // Traceability context remains fused on purpose so its internal digits cannot
   // become competing strength evidence downstream.
@@ -453,6 +495,18 @@ String _canonicalMedicineOcrSurface(String value) {
         ? '${match[1]}/$unit'
         : '${match[1]}/$denominator $unit';
   });
+
+  // Recover the no-whitespace form of the same evidence before applying the
+  // ordinary separator rule. The dose on both sides is the safety proof.
+  result = result.replaceAllMapped(
+    _medicineOcrGluedCombinationSeparator,
+    (match) {
+      if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      return '${match[1]} + ';
+    },
+  );
 
   // Map only semantically constrained ingredient-dose separators onto the one
   // '+' grammar consumed by the unlabeled composition resolver. A machine field
