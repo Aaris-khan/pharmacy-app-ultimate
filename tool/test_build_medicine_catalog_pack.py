@@ -106,6 +106,40 @@ class CatalogBuilderTest(unittest.TestCase):
         self.assertEqual(strength, "")
         self.assertEqual(form, "Tablet")
 
+    def test_ekacare_indian_brand_maps_form_and_aligned_combination(self):
+        product = builder.transform_ekacare_drug({
+            "medication_name": "Augmentin 625 Duo Tablet",
+            "generic_name": (
+                "Amoxycillin (500mg) + Clavulanic Acid (125mg)"
+            ),
+        })
+        self.assertIsNotNone(product)
+        self.assertEqual(product["name"], "Augmentin 625 Duo")
+        self.assertEqual(product["brand"], "Augmentin 625 Duo")
+        self.assertEqual(
+            product["salt"].lower(),
+            "amoxycillin + clavulanic acid",
+        )
+        self.assertEqual(product["strength"].lower(), "500mg + 125mg")
+        self.assertEqual(product["form"], "Tablet")
+        self.assertIn("Augmentin 625 Duo Tablet", product["aliases"])
+        self.assertIn("augmentin625duotablet", product["aliases_ocr"])
+        self.assertEqual(
+            product["source"],
+            "public:ekacare_indian_drug_mcqa_mit",
+        )
+
+    def test_ekacare_never_invents_missing_combination_doses(self):
+        product = builder.transform_ekacare_drug({
+            "medication_name": "Telcare AM Tablet",
+            "generic_name": "telmisartan + amlodipine",
+        })
+        self.assertIsNotNone(product)
+        self.assertEqual(product["name"], "Telcare AM")
+        self.assertEqual(product["salt"], "telmisartan + amlodipine")
+        self.assertEqual(product["strength"], "")
+        self.assertEqual(product["form"], "Tablet")
+
     def test_rxnorm_non_clinical_tty_is_rejected(self):
         self.assertIsNone(
             builder.transform_rxnorm_concept(
