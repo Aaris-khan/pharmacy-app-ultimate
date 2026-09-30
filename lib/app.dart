@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'domain/app_brain.dart';
@@ -37,7 +36,7 @@ class PharmacyApp extends StatefulWidget {
 
 class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
   late AarisAutopilotSupervisor _autopilot;
-  Timer? _startupAutopilotGrace, _startupAutopilotFallback;
+  Timer? _startupAutopilotGrace;
 
   @override
   void initState() {
@@ -56,41 +55,20 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
 
   void _scheduleInitialAutopilot(AarisAutopilotSupervisor supervisor) {
     _startupAutopilotGrace?.cancel();
-    _startupAutopilotFallback?.cancel();
-    var launched = false;
 
-    void launch() {
-      if (launched || !_canStartInitialAutopilot(supervisor)) return;
-      launched = true;
-      _startupAutopilotGrace?.cancel();
-      _startupAutopilotFallback?.cancel();
+    // This read-only full-inventory projection is useful, but never urgent
+    // enough to compete with the user's first tap. A cancelable grace window
+    // covers a fast tab selection plus the 260 ms navigation animation without
+    // leaving an uncancelable scheduler task behind in tests or after disposal.
+    _startupAutopilotGrace = Timer(const Duration(milliseconds: 700), () {
+      if (!_canStartInitialAutopilot(supervisor)) return;
+      _startupAutopilotGrace = null;
       supervisor.refreshNow();
-    }
-
-    // A newly opened app should reserve its first interaction window for input
-    // and navigation. After that short grace, let the scheduler run the
-    // full-inventory read model only when animation/input work is idle.
-    //
-    // The bounded fallback prevents continuously animated surfaces from
-    // starving Autopilot forever; normal idle devices start much earlier.
-    _startupAutopilotFallback = Timer(const Duration(seconds: 2), launch);
-    _startupAutopilotGrace = Timer(const Duration(milliseconds: 300), () {
-      if (launched || !_canStartInitialAutopilot(supervisor)) return;
-      unawaited(
-        SchedulerBinding.instance
-            .scheduleTask<void>(
-              launch,
-              Priority.idle,
-              debugLabel: 'AarisAutopilot.startup',
-            )
-            .catchError((Object _) {}),
-      );
     });
   }
 
   void _installAutopilot(PharmacyController controller) {
     _startupAutopilotGrace?.cancel();
-    _startupAutopilotFallback?.cancel();
     final supervisor = AarisAutopilotSupervisor(
       controller,
       startImmediately: false,
@@ -136,7 +114,6 @@ class _PharmacyAppState extends State<PharmacyApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _startupAutopilotGrace?.cancel();
-    _startupAutopilotFallback?.cancel();
     _autopilot.dispose();
     super.dispose();
   }
