@@ -9,6 +9,7 @@ Only data with explicit redistribution rights may be mirrored into Aaris catalog
 Automated mirrored sources are deliberately narrow:
 
 - **openFDA Drug NDC** — openFDA distributes the data under Public Domain / CC0. It contributes labeler-submitted product identity, ingredients, strength, dosage form, labeler and public UPC fields.
+- **openFDA Drugs@FDA** — openFDA distributes this dataset under Public Domain / CC0. Aaris mirrors current FDA-approved application/product presentations as a separate identity lane: brand, active ingredients, aligned strengths, dosage form and sponsor. Discontinued and tentative-approval presentations are excluded from the current recognition prior, and regulatory application/product numbers are never treated as retail barcodes.
 - **NLM RxNorm Current Prescribable Content (CPC)** — NLM explicitly publishes this subset with no licensing restrictions and as public-domain content. Aaris mirrors only active NLM-normalized `SAB=RXNORM` Semantic Clinical Drug / Semantic Branded Drug concepts (`SCD` / `SBD`) from CPC.
 
 Do not mirror proprietary medicine databases, scrape sites that prohibit redistribution, or copy the full RxNorm monthly/weekly release. Full RxNorm includes third-party source vocabularies with different licence terms; CPC is a separate deliberately redistributable subset.
