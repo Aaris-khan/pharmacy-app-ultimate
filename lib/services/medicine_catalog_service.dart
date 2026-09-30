@@ -1009,8 +1009,9 @@ String _catalogQuery(String raw) {
     RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
     ' ',
   );
+  final recoveredForm = _catalogFormFromText(withoutStockDates);
   final value = _repairCatalogFragments(searchText(withoutStockDates));
-  if (value.isEmpty) return '';
+  if (value.isEmpty && recoveredForm.isEmpty) return '';
   const noise = {
     'exp',
     'expiry',
@@ -1043,9 +1044,13 @@ String _catalogQuery(String raw) {
       .split(' ')
       .where((token) => token.isNotEmpty)
       .where((token) => !noise.contains(token))
-      .take(14)
+      .take(recoveredForm.isEmpty ? 14 : 13)
       .toList();
-  return tokens.join(' ');
+  final formToken = searchText(recoveredForm);
+  if (formToken.isNotEmpty && !tokens.contains(formToken)) {
+    tokens.add(formToken);
+  }
+  return tokens.take(14).join(' ');
 }
 
 String _repairCatalogFragments(String value) {
