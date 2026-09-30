@@ -408,14 +408,22 @@ class _SearchScreenState extends State<SearchScreen> {
       _onlineMode = enabled;
       _clearCatalog();
     });
-    if (enabled) {
-      // Owner opt-in is the earliest safe moment to refresh the versioned
-      // GitHub Release mirror. Do this while the user is typing/opening the
-      // scanner so the eventual lookup is usually local and immediate.
-      unawaited(_catalog.warmReleaseMirror());
-      if (_catalogEligibleText(_query.text)) {
-        _scheduleTypedOnlineLookup(_query.text);
+    if (!enabled) return;
+
+    // Owner opt-in is the earliest safe moment to refresh the versioned GitHub
+    // Release mirror. If a scan is already on screen, immediately continue that
+    // exact scan through the scan-aware catalogue path; previously the toggle
+    // only warmed the mirror and the user had to scan/type again.
+    unawaited(_catalog.warmReleaseMirror());
+    final scan = _scan;
+    if (scan != null) {
+      if (widget.database && !_scanHasConfidentLocalMatch()) {
+        unawaited(_discoverOnline(scan));
       }
+      return;
+    }
+    if (_catalogEligibleText(_query.text)) {
+      _scheduleTypedOnlineLookup(_query.text);
     }
   }
 
