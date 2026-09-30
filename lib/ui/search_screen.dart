@@ -408,8 +408,14 @@ class _SearchScreenState extends State<SearchScreen> {
       _onlineMode = enabled;
       _clearCatalog();
     });
-    if (enabled && _catalogEligibleText(_query.text)) {
-      _scheduleTypedOnlineLookup(_query.text);
+    if (enabled) {
+      // Owner opt-in is the earliest safe moment to refresh the versioned
+      // GitHub Release mirror. Do this while the user is typing/opening the
+      // scanner so the eventual lookup is usually local and immediate.
+      unawaited(_catalog.warmReleaseMirror());
+      if (_catalogEligibleText(_query.text)) {
+        _scheduleTypedOnlineLookup(_query.text);
+      }
     }
   }
 
@@ -885,7 +891,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     padding: const EdgeInsets.only(top: 12),
                     child: Tooltip(
                       message:
-                          'When enabled, a short single-medicine query can also search free public medicine catalogs. Stock dates and pharmacy-specific values are never taken from the internet.',
+                          'When enabled, Aaris refreshes its verified local medicine catalogue from GitHub Releases and can fall back to free public medicine catalogs. Stock dates and pharmacy-specific values are never taken from the internet.',
                       child: FilterChip(
                         avatar: Icon(
                           Icons.public_rounded,
