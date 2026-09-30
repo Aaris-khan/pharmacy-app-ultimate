@@ -556,6 +556,13 @@ void main() {
     expect(results.first.seed.form, 'Lotion');
     expect(release.scanCalls, 1);
     expect(release.genericCalls, 0);
+    expect(release.lastEvidence, isNotEmpty);
+    expect(
+      release.lastEvidence.any(
+        (frame) => frame.text.toLowerCase().contains('candidlotion'),
+      ),
+      isTrue,
+    );
     expect(release.lastQueries.length, greaterThanOrEqualTo(3));
     expect(
       release.lastQueries.any(
@@ -609,6 +616,8 @@ class _FakeScanAwareProvider implements MedicineScanAwareCatalogProvider {
   int genericCalls = 0;
   int scanCalls = 0;
   List<String> lastQueries = const <String>[];
+  List<MedicineFrameEvidence> lastEvidence =
+      const <MedicineFrameEvidence>[];
 
   @override
   Future<List<MedicineCatalogCandidate>> search({
@@ -629,6 +638,7 @@ class _FakeScanAwareProvider implements MedicineScanAwareCatalogProvider {
   }) async {
     scanCalls++;
     lastQueries = List<String>.unmodifiable(queries);
+    lastEvidence = List<MedicineFrameEvidence>.unmodifiable(evidence);
     return results;
   }
 }
