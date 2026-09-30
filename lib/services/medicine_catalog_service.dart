@@ -174,7 +174,12 @@ class MedicineCatalogService {
         text: text,
         limit: boundedLimit,
       );
-      return _rerankCatalogCandidatesForScan(candidates, draft, barcode);
+      return _rerankCatalogCandidatesForScan(
+        candidates,
+        draft,
+        barcode,
+        rawText: text,
+      );
     }
 
     final release = await _searchProvider(
@@ -891,7 +896,7 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
 
     var observedForm = draft.field('form');
     if (observedForm.isEmpty) {
-      final recoveredForm = _catalogFormFromText(rawText);
+      final recoveredForm = _catalogFormFromText(_catalogOcrSurface(rawText));
       if (recoveredForm.isNotEmpty) {
         observedForm = ExtractedMedicineField(
           value: recoveredForm,
@@ -1119,7 +1124,7 @@ String _repairCatalogFragments(String value) {
     }
 
     final compactDose = RegExp(
-      r'^(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)
+      r'^(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
     ).firstMatch(parts[index]);
     if (compactDose != null) {
       output.add(compactDose.group(1)!);
@@ -1127,258 +1132,9 @@ String _repairCatalogFragments(String value) {
       index++;
       continue;
     }
+
     final gluedDose = RegExp(
       r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
-    ).firstMatch(parts[index]);
-    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-,
-    ).firstMatch(parts[index]);
-    if (compactDose != null) {
-      output.add(compactDose.group(1)!);
-      output.add(compactDose.group(2)!);
-      index++;
-      continue;
-    }
-
-    final gluedDose = RegExp(
-      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-,
-    ).firstMatch(parts[index]);
-    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-,
-    ).firstMatch(parts[index]);
-    if (compactDose != null) {
-      output.add(compactDose.group(1)!);
-      output.add(compactDose.group(2)!);
-      index++;
-      continue;
-    }
-    final gluedDose = RegExp(
-      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
-    ).firstMatch(parts[index]);
-    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-,
-    ).firstMatch(parts[index]);
-    if (compactDose != null) {
-      output.add(compactDose.group(1)!);
-      output.add(compactDose.group(2)!);
-      index++;
-      continue;
-    }
-
-    final gluedDose = RegExp(
-      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)    if (gluedDose != null) {
-      output.add(gluedDose.group(1)!);
-      output.add(gluedDose.group(2)!);
-      output.add(gluedDose.group(3)!);
-      index++;
-      continue;
-    }
-
-    output.add(parts[index]);
-    index++;
-  }
-  return output.join(' ');
-}
-
-List<String> _searchTerms(String value) {
-  final tokens = searchText(value)
-      .split(' ')
-      .where((token) => RegExp(r'^[a-z][a-z0-9]{2,}$').hasMatch(token))
-      .where(
-        (token) =>
-            !const {
-              'tablet',
-              'tablets',
-              'capsule',
-              'capsules',
-              'syrup',
-              'injection',
-              'cream',
-              'ointment',
-              'medicine',
-              'mg',
-              'ml',
-              'manufactured',
-              'manufacturer',
-            }.contains(token),
-      )
-      .toList();
-  tokens.sort((a, b) => b.length.compareTo(a.length));
-  return tokens;
-}
-
-String _queryLiteral(String value) =>
-    value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '');
-,
     ).firstMatch(parts[index]);
     if (gluedDose != null) {
       output.add(gluedDose.group(1)!);
