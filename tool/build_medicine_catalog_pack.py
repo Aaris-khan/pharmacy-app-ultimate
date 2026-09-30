@@ -183,9 +183,9 @@ def normalize_form(raw: object) -> str:
 
 
 _INDIAN_FORM_PRESENTATION = re.compile(
-    r"\\b(?:soft\\s+gel(?:atin)?\\s+capsules?|softgels?|tablets?|capsules?|"
+    r"\b(?:soft\s+gel(?:atin)?\s+capsules?|softgels?|tablets?|capsules?|"
     r"syrups?|suspensions?|solutions?|injections?|injectables?|creams?|"
-    r"ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?)\\b",
+    r"ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?)\b",
     re.IGNORECASE,
 )
 
@@ -200,7 +200,7 @@ def indian_brand_name(raw: object) -> str:
     if not value:
         return ""
     value = _INDIAN_FORM_PRESENTATION.sub(" ", value)
-    return clean(re.sub(r"\\s+", " ", value), 300)
+    return clean(re.sub(r"\s+", " ", value), 300)
 
 
 def _identity_key(raw: object) -> str:
@@ -414,7 +414,7 @@ def _parse_ekacare_generic(
         return "", "", []
     parts = [
         clean(part, 300)
-        for part in re.split(r"\\s*\\+\\s*", value)
+        for part in re.split(r"\s*\+\s*", value)
         if clean(part, 300)
     ][:6]
     components: list[tuple[str, str]] = []
@@ -422,7 +422,7 @@ def _parse_ekacare_generic(
     for part in parts:
         ingredient = part
         strength = ""
-        wrapped = re.search(r"\\(([^()]*)\\)\\s*$", part)
+        wrapped = re.search(r"\(([^()]*)\)\s*$", part)
         if wrapped is not None:
             candidate = normalize_strength(wrapped.group(1))
             if _RX_STRENGTH.fullmatch(candidate):
