@@ -150,6 +150,42 @@ void main() {
     expect(seed.form, 'Lotion');
   });
 
+  test('scan ranking treats explicit percent concentration as equivalent', () async {
+    final provider = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '10 mg/mL',
+          form: 'Lotion',
+        ),
+        score: .86,
+        provider: 'normalized-concentration',
+      ),
+    ]);
+    final service = MedicineCatalogService(providers: [provider]);
+    addTearDown(service.close);
+
+    final results = await service.searchScan(
+      text:
+          'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1% w/v\nLOTION',
+      evidence: const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 303,
+          quality: .98,
+          text:
+              'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1% w/v\nLOTION',
+        ),
+      ],
+    );
+
+    expect(results, hasLength(1));
+    expect(results.single.reason, contains('Scan agrees'));
+    expect(results.single.reason, contains('strength'));
+    expect(results.single.seed.form, 'Lotion');
+  });
+
   test('RxNorm preserves aligned multi-ingredient composition and doses', () {
     final seed = RxNormProvider.parseResults(
       [
