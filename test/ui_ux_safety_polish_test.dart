@@ -855,4 +855,43 @@ void main() {
     );
   });
 
+
+  test('cold-start Stock navigation yields background work to the first frame', () {
+    final app = File('lib/app.dart').readAsStringSync();
+    final stock = File('lib/ui/search_screen.dart').readAsStringSync();
+
+    expect(app, contains("import 'package:flutter/scheduler.dart';"));
+    expect(
+      app,
+      contains('Timer(const Duration(milliseconds: 300)'),
+      reason: 'Initial input needs a bounded grace window before full-data work.',
+    );
+    expect(app, contains('SchedulerBinding.instance'));
+    expect(app, contains('Priority.idle'));
+    expect(
+      app,
+      contains('Timer(const Duration(seconds: 2), launch)'),
+      reason: 'Idle scheduling must retain a bounded starvation fallback.',
+    );
+    expect(app, contains('_startupAutopilotGrace?.cancel()'));
+    expect(app, contains('_startupAutopilotFallback?.cancel()'));
+
+    final initStart = stock.indexOf('void initState()');
+    final dependenciesStart = stock.indexOf(
+      'void didChangeDependencies()',
+      initStart,
+    );
+    expect(initStart, greaterThanOrEqualTo(0));
+    expect(dependenciesStart, greaterThan(initStart));
+    final initSource = stock.substring(initStart, dependenciesStart);
+    expect(initSource, contains('if (widget.database && widget.embedded)'));
+    expect(
+      initSource,
+      contains('WidgetsBinding.instance.addPostFrameCallback'),
+    );
+    expect(initSource, contains('if (!_controllerListening)'));
+    expect(initSource, contains('_refreshWhenActive = true'));
+    expect(initSource, contains('unawaited(_search())'));
+  });
+
 }
