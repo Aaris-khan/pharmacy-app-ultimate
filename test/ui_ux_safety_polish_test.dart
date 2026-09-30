@@ -354,7 +354,7 @@ void main() {
     expect(source, contains('constraints: const BoxConstraints(maxWidth: 720)'));
     expect(source, contains('alignment: Alignment.bottomCenter'));
     expect(source, contains('Icons.home_outlined'));
-    expect(source, contains('selectedIcon: Icon(Icons.home_rounded)'));
+    expect(source, contains('selectedIcon: Icons.home_rounded'));
     expect(source, contains('Icons.psychology_outlined'));
     expect(source, contains('Icons.psychology_rounded'));
     expect(source, contains('HapticFeedback.selectionClick()'));
