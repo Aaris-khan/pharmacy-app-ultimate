@@ -17,6 +17,7 @@ from pathlib import Path
 
 OPENFDA_DOWNLOAD_INDEX = "https://api.fda.gov/download.json"
 OPENFDA_SOURCE_URL = "https://open.fda.gov/apis/drug/ndc/"
+OPENFDA_DRUGSFDA_SOURCE_URL = "https://open.fda.gov/apis/drug/drugsfda/"
 OPENFDA_LICENSE_URL = "https://open.fda.gov/license/"
 RXNORM_FILES_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
 RXNORM_SOURCE_URL = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/prescribe.html"
@@ -24,6 +25,8 @@ RXNORM_DOWNLOAD_HOST = "download.nlm.nih.gov"
 MAX_SHARD_RECORDS = 20_000
 MAX_SHARD_BYTES = 8 * 1024 * 1024
 MAX_RXNORM_ARCHIVE_BYTES = 256 * 1024 * 1024
+MIN_DRUGSFDA_PRODUCTS = 10_000
+MAX_DRUGSFDA_PRODUCTS = 250_000
 MIN_RXNORM_CLINICAL_DRUGS = 10_000
 MAX_RXNORM_CLINICAL_DRUGS = 100_000
 
@@ -293,6 +296,143 @@ def load_openfda() -> tuple[list[dict[str, object]], str]:
                     product = transform(raw)
                     if product is not None:
                         products[str(product["product_id"])] = product
+    return [products[key] for key in sorted(products)], export_date
+
+
+def drugsfda_product_id(
+    application_number: object,
+    product_number: object,
+) -> str:
+    application = clean(application_number, 80).upper()
+    product = clean(product_number, 40).upper()
+    application = re.sub(r"[^A-Z0-9.-]+", "-", application).strip("-")
+    product = re.sub(r"[^A-Z0-9.-]+", "-", product).strip("-")
+    if not application or not product:
+        return ""
+    return f"openfda:drugsfda:{application}:{product}"
+
+
+def transform_drugsfda_product(
+    application: dict[str, object],
+    row: dict[str, object],
+) -> dict[str, object] | None:
+    product_id = drugsfda_product_id(
+        application.get("application_number"),
+        row.get("product_number"),
+    )
+    if not product_id:
+        return None
+
+    # Drugs@FDA contains historical products as well as currently marketed
+    # products. Historical/tentative entries remain useful on FDA's website,
+    # but should not become a default current-product recognition prior.
+    marketing_status = clean(row.get("marketing_status"), 120).casefold()
+    if "discontinued" in marketing_status or "tentative" in marketing_status:
+        return None
+
+    brand = clean(row.get("brand_name"))
+    active_components: list[tuple[str, str]] = []
+    active = row.get("active_ingredients")
+    if isinstance(active, list):
+        for item in active[:8]:
+            if not isinstance(item, dict):
+                continue
+            ingredient = clean(item.get("name"))
+            if not ingredient:
+                continue
+            active_components.append(
+                (ingredient, normalize_strength(item.get("strength")))
+            )
+
+    salt = " + ".join(name for name, _ in active_components)
+    name = brand or salt
+    if not name or not salt:
+        return None
+
+    strength = (
+        " + ".join(dose for _, dose in active_components)
+        if active_components
+        and all(dose for _, dose in active_components)
+        else ""
+    )
+    form = normalize_form(row.get("dosage_form"))
+
+    aliases: list[str] = []
+    if salt.casefold() != name.casefold():
+        aliases.append(salt)
+
+    return {
+        "op": "upsert",
+        "product_id": product_id,
+        "name": name,
+        "brand": brand,
+        "salt": salt,
+        "strength": strength,
+        "form": form,
+        "manufacturer": clean(application.get("sponsor_name")),
+        "aliases": aliases,
+        "aliases_ocr": ocr_aliases(
+            name=name,
+            brand=brand,
+            salt=salt,
+            form=form,
+            components=active_components,
+        ),
+        # Application/product numbers are regulatory identifiers, not retail
+        # UPC/EAN/GTIN scanner payloads, so they never enter the barcode lane.
+        "barcodes": [],
+        "source": "public:openfda_drugsfda_cc0",
+        "verified": True,
+        # Drugs@FDA describes FDA-approved product applications, so it is a
+        # stronger identity prior than the labeler-submitted NDC directory.
+        "prior_weight": 0.72,
+    }
+
+
+def load_drugsfda() -> tuple[list[dict[str, object]], str]:
+    metadata = json.loads(fetch(OPENFDA_DOWNLOAD_INDEX))
+    endpoint = metadata["results"]["drug"]["drugsfda"]
+    partitions = endpoint.get("partitions", [])
+    export_date = clean(endpoint.get("export_date"), 40)
+    if not partitions:
+        raise RuntimeError("openFDA Drugs@FDA download index has no partitions")
+
+    products: dict[str, dict[str, object]] = {}
+    for partition in partitions:
+        url = partition.get("file")
+        if not isinstance(url, str) or not url:
+            raise RuntimeError("openFDA Drugs@FDA partition is missing its URL")
+        archive_bytes = fetch(url)
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            json_names = [
+                name for name in archive.namelist() if name.lower().endswith(".json")
+            ]
+            if not json_names:
+                raise RuntimeError(f"No JSON payload in {url}")
+            for name in json_names:
+                with archive.open(name) as stream:
+                    payload = json.load(stream)
+                for application in payload.get("results", []):
+                    if not isinstance(application, dict):
+                        continue
+                    raw_products = application.get("products")
+                    if not isinstance(raw_products, list):
+                        continue
+                    for raw_product in raw_products:
+                        if not isinstance(raw_product, dict):
+                            continue
+                        product = transform_drugsfda_product(
+                            application,
+                            raw_product,
+                        )
+                        if product is not None:
+                            products[str(product["product_id"])] = product
+
+    if not MIN_DRUGSFDA_PRODUCTS <= len(products) <= MAX_DRUGSFDA_PRODUCTS:
+        raise RuntimeError(
+            "openFDA Drugs@FDA schema/count sanity check failed: "
+            f"{len(products)} active product presentations"
+        )
     return [products[key] for key in sorted(products)], export_date
 
 
@@ -619,6 +759,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     openfda_products, openfda_export_date = load_openfda()
+    drugsfda_products, drugsfda_export_date = load_drugsfda()
     (
         rxnorm_products,
         rxnorm_release_date,
@@ -627,7 +768,11 @@ def main() -> None:
     ) = load_rxnorm_cpc()
 
     combined: dict[str, dict[str, object]] = {}
-    for product in [*openfda_products, *rxnorm_products]:
+    for product in [
+        *openfda_products,
+        *drugsfda_products,
+        *rxnorm_products,
+    ]:
         combined[str(product["product_id"])] = product
 
     sources: list[dict[str, object]] = [
@@ -644,6 +789,22 @@ def main() -> None:
             "quality_note": (
                 "NDC content is submitted by labelers and is not FDA verification "
                 "or approval. Aaris uses it only as product-identity evidence."
+            ),
+        },
+        {
+            "name": "openFDA Drugs@FDA",
+            "product_source": "public:openfda_drugsfda_cc0",
+            "source_url": OPENFDA_DRUGSFDA_SOURCE_URL,
+            "download_index": OPENFDA_DOWNLOAD_INDEX,
+            "export_date": drugsfda_export_date,
+            "license": "CC0-1.0 / Public Domain",
+            "license_url": OPENFDA_LICENSE_URL,
+            "redistributable": True,
+            "records": len(drugsfda_products),
+            "quality_note": (
+                "Approved human product application identity only. Discontinued "
+                "and tentative-approval presentations are excluded from the "
+                "current recognition prior."
             ),
         },
         {
@@ -674,6 +835,7 @@ def main() -> None:
         "Built "
         f"{len(combined)} identity records "
         f"({len(openfda_products)} openFDA NDC + "
+        f"{len(drugsfda_products)} Drugs@FDA + "
         f"{len(rxnorm_products)} RxNorm CPC)"
     )
 
