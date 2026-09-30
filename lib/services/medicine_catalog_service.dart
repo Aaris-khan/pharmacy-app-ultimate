@@ -623,6 +623,17 @@ String _repairCatalogFragments(String value) {
       }
     }
 
+    final gluedDose = RegExp(
+      r'^([a-z]{4,})(\d+(?:[.]\d+)?)(mcg|ug|mg|gm|g|ml|meq|iu|units?)$',
+    ).firstMatch(parts[index]);
+    if (gluedDose != null) {
+      output.add(gluedDose.group(1)!);
+      output.add(gluedDose.group(2)!);
+      output.add(gluedDose.group(3)!);
+      index++;
+      continue;
+    }
+
     output.add(parts[index]);
     index++;
   }
