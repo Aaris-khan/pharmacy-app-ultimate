@@ -105,7 +105,9 @@ def ocr_aliases(
     values: list[str] = [name, brand, salt]
     identity = brand or name
     if form:
-        values.extend((f"{name}{form}", f"{brand}{form}"))
+        values.append(f"{name}{form}")
+        if brand:
+            values.append(f"{brand}{form}")
 
     if components:
         bounded = components[:6]
