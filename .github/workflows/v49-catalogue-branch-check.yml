@@ -1,0 +1,50 @@
+name: V49 catalogue branch check
+
+on:
+  push:
+    branches:
+      - upgrade/scan-catalog-drugsfda-v49
+    paths:
+      - 'tool/build_medicine_catalog_pack.py'
+      - 'tool/test_build_medicine_catalog_pack.py'
+      - '.github/workflows/v49-catalogue-branch-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Compile and unit test catalogue builder
+        run: |
+          python -m py_compile tool/build_medicine_catalog_pack.py
+          python -m unittest tool/test_build_medicine_catalog_pack.py
+
+      - name: Verify live Drugs@FDA import
+        run: |
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          path = Path("tool/build_medicine_catalog_pack.py")
+          spec = importlib.util.spec_from_file_location("catalog_builder", path)
+          module = importlib.util.module_from_spec(spec)
+          assert spec is not None and spec.loader is not None
+          spec.loader.exec_module(module)
+
+          products, export_date = module.load_drugsfda()
+          assert module.MIN_DRUGSFDA_PRODUCTS <= len(products) <= module.MAX_DRUGSFDA_PRODUCTS
+          assert export_date
+          assert all(row["source"] == "public:openfda_drugsfda_cc0" for row in products)
+          assert all(row["salt"] for row in products)
+          assert all(row["barcodes"] == [] for row in products)
+          print(f"Validated {len(products)} active Drugs@FDA product presentations from {export_date}")
+          PY
