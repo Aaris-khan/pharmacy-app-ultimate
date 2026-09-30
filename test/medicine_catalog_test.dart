@@ -587,6 +587,112 @@ void main() {
     expect(fallback.calls, 0);
   });
 
+  test(
+    'coherent resolver can recover catalogue salt from independent pack evidence',
+    () async {
+      final provider = _FakeProvider([
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Candid',
+            brand: 'Candid',
+            salt: 'Clotrimazole',
+            strength: '1%',
+            form: 'Lotion',
+            source: 'public:test_catalog',
+            sourceId: 'candid-lotion-1',
+          ),
+          score: .72,
+          provider: 'coherent-test',
+        ),
+      ]);
+      final service = MedicineCatalogService(providers: [provider]);
+      addTearDown(service.close);
+
+      const scanText = 'PRODUCT NAME CANDID\n1% w/v\nLOTION';
+      final results = await service.searchScan(
+        text: scanText,
+        evidence: const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 71,
+            quality: .99,
+            text: scanText,
+          ),
+        ],
+      );
+
+      expect(results, hasLength(1));
+      expect(results.single.seed.salt, 'Clotrimazole');
+      expect(results.single.seed.form, 'Lotion');
+      expect(results.single.score, greaterThanOrEqualTo(.965));
+      expect(results.single.reason, startsWith('Coherent scan match:'));
+      expect(results.single.reason, contains('brand'));
+      expect(results.single.reason, contains('salt'));
+      expect(results.single.reason, contains('strength'));
+      expect(results.single.reason, contains('form'));
+    },
+  );
+
+  test(
+    'coherent resolver abstains when same pack evidence fits different salts',
+    () async {
+      final provider = _FakeProvider([
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Examplex',
+            brand: 'Examplex',
+            salt: 'Alpha Salt',
+            strength: '10 mg',
+            form: 'Tablet',
+            source: 'public:test_catalog',
+            sourceId: 'examplex-alpha',
+          ),
+          score: .82,
+          provider: 'variant-alpha',
+        ),
+        const MedicineCatalogCandidate(
+          seed: MedicineDraftSeed(
+            name: 'Examplex',
+            brand: 'Examplex',
+            salt: 'Beta Salt',
+            strength: '10 mg',
+            form: 'Tablet',
+            source: 'public:test_catalog',
+            sourceId: 'examplex-beta',
+          ),
+          score: .81,
+          provider: 'variant-beta',
+        ),
+      ]);
+      final service = MedicineCatalogService(providers: [provider]);
+      addTearDown(service.close);
+
+      const scanText = 'PRODUCT NAME EXAMPLEX\n10 mg\nTABLETS';
+      final results = await service.searchScan(
+        text: scanText,
+        evidence: const <MedicineFrameEvidence>[
+          MedicineFrameEvidence(
+            sequence: 72,
+            quality: .99,
+            text: scanText,
+          ),
+        ],
+      );
+
+      expect(results, hasLength(2));
+      expect(
+        results.any(
+          (candidate) =>
+              candidate.reason.startsWith('Coherent scan match:'),
+        ),
+        isFalse,
+      );
+      expect(
+        results.map((candidate) => candidate.seed.salt).toSet(),
+        {'Alpha Salt', 'Beta Salt'},
+      );
+    },
+  );
+
 }
 
 class _FakeProvider implements MedicineCatalogProvider {
