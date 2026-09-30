@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../domain/medicine.dart';
 import '../domain/medicine_discovery.dart';
+import '../domain/medicine_form_recognition.dart';
 import '../domain/medicine_ocr_text.dart';
 import '../domain/medicine_resolution_v2.dart';
 import '../domain/medicine_strength.dart';
@@ -796,7 +797,7 @@ MedicineDraftSeed _rxSeed(String raw, String rxcui) {
       .replaceAll(RegExp(r'\s*\[[^\]]+\]\s*'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  final form = _catalogFormFromText(withoutBrand);
+  final form = recognizeMedicineFormFromText(withoutBrand);
   final strengthPattern = RegExp(
     // Keep denominator quantities with their units. Ingredient separators in
     // normalized RxNorm names use a slash surrounded by spaces, while dose
@@ -891,23 +892,6 @@ String _catalogOcrSurface(String raw) => raw
     .where((line) => line.isNotEmpty)
     .join(' ');
 
-String _catalogFormFromText(String raw) {
-  final normalized = normalize(raw);
-  if (normalized.isEmpty) return '';
-  final aliases = medicineFormAliases.entries
-      .where((entry) => entry.key != 'other')
-      .toList(growable: false)
-    ..sort((left, right) => right.key.length.compareTo(left.key.length));
-  for (final entry in aliases) {
-    final pattern =
-        '(?:^|[^a-z])' + RegExp.escape(entry.key) + r'(?:$|[^a-z])';
-    if (RegExp(pattern, caseSensitive: false).hasMatch(normalized)) {
-      return entry.value;
-    }
-  }
-  return '';
-}
-
 List<String> _catalogScanQueryVariants(
   MedicineScanDraft draft,
   String rawText,
@@ -951,7 +935,7 @@ String _catalogScanQuery(MedicineScanDraft draft, String fallback) {
   // The semantic draft can intentionally abstain from a weak standalone form
   // line. A literal known form printed anywhere in the same scan is still safe
   // identity evidence for public-catalog retrieval, so preserve that signal.
-  add(_catalogFormFromText(_catalogOcrSurface(fallback)));
+  add(recognizeMedicineFormFromText(_catalogOcrSurface(fallback)));
   if (parts.isEmpty) return fallback;
   final joined = parts.join(' ');
   return joined.length <= 420 ? joined : joined.substring(0, 420);
@@ -1098,7 +1082,7 @@ List<String> _catalogPhysicalEvidenceLabels(
 
   var observedForm = draft.field('form');
   if (observedForm.isEmpty) {
-    final recovered = _catalogFormFromText(_catalogOcrSurface(rawText));
+    final recovered = recognizeMedicineFormFromText(_catalogOcrSurface(rawText));
     if (recovered.isNotEmpty) {
       observedForm = ExtractedMedicineField(
         value: recovered,
@@ -1262,7 +1246,7 @@ List<MedicineCatalogCandidate> _rerankCatalogCandidatesForScan(
 
     var observedForm = draft.field('form');
     if (observedForm.isEmpty) {
-      final recoveredForm = _catalogFormFromText(_catalogOcrSurface(rawText));
+      final recoveredForm = recognizeMedicineFormFromText(_catalogOcrSurface(rawText));
       if (recoveredForm.isNotEmpty) {
         observedForm = ExtractedMedicineField(
           value: recoveredForm,
@@ -1380,7 +1364,7 @@ String _catalogQuery(String raw) {
     RegExp(r'\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b'),
     ' ',
   );
-  final recoveredForm = _catalogFormFromText(withoutStockDates);
+  final recoveredForm = recognizeMedicineFormFromText(withoutStockDates);
   final value = _repairCatalogFragments(searchText(withoutStockDates));
   if (value.isEmpty && recoveredForm.isEmpty) return '';
   const noise = {

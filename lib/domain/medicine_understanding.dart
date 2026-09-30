@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'medicine.dart';
+import 'medicine_form_recognition.dart';
 import 'medicine_strength.dart';
 import 'medicine_date_parser.dart';
 import 'medicine_discovery.dart';
@@ -1225,7 +1226,7 @@ class MedicineUnderstandingEngine {
         }
       }
 
-      final form = _formValue(lower);
+      final form = recognizeMedicineFormFromText(lower);
       if (form.isNotEmpty) add('form', form, .72);
 
       final pack = _packSize(line);
@@ -2481,16 +2482,6 @@ double _uppercaseRatio(String value) {
   if (list.isEmpty) return 0;
   final uppercase = list.where((code) => code >= 65 && code <= 90).length;
   return uppercase / list.length;
-}
-
-String _formValue(String normalized) {
-  for (final entry in medicineFormAliases.entries) {
-    if (entry.key == 'other') continue;
-    if (RegExp('\\b${RegExp.escape(entry.key)}\\b').hasMatch(normalized)) {
-      return entry.value;
-    }
-  }
-  return '';
 }
 
 String _packSize(String line) {
