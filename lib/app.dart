@@ -240,52 +240,52 @@ class _ShellState extends State<_Shell> {
               child: LayoutBuilder(
                 builder: (context, navigationConstraints) =>
                     ActiveListenableBuilder(
-            listenable: widget.autopilot,
-            // The navigation bar renders only the bounded badge count. Autopilot
-            // can publish a different priority mix or next task while that count
-            // stays unchanged; those richer updates belong to the beacon/queue,
-            // not a full bottom-navigation rebuild on every tab.
-            rebuildToken: () {
-              final digest = widget.autopilot.digest;
-              final issues = digest.isReady ? digest.navigationBadgeCount : 0;
-              return issues > 99 ? 99 : issues;
-            },
-            builder: (context, _) {
-              final digest = widget.autopilot.digest;
-              final issues = digest.isReady ? digest.navigationBadgeCount : 0;
-              final badgeCount = issues > 99 ? 99 : issues;
-              // Use the width the navigation bar actually receives after
-              // SafeArea margins and the 720px shell cap. Screen width can be
-              // wider than this surface and would keep labels visible too long.
-              final navigationWidth = navigationConstraints.maxWidth;
-              final navigationLabelHeight =
-                  MediaQuery.textScalerOf(context).scale(11);
-              final compactNavigation =
-                  navigationWidth < 380 || navigationLabelHeight > 15;
-              final navigationHeight =
-                  72.0 +
-                  (navigationLabelHeight - 11)
-                      .clamp(0.0, 24.0)
-                      .toDouble();
-              final reduceMotion =
-                  MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-              return NavigationBar(
-                height: navigationHeight,
-                animationDuration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 260),
-                labelBehavior: compactNavigation
-                    ? NavigationDestinationLabelBehavior.onlyShowSelected
-                    : NavigationDestinationLabelBehavior.alwaysShow,
-                selectedIndex: tab,
-                onDestinationSelected: _selectTab,
-                destinations: [
-                  NavigationDestination(
-                    icon: _AnimatedNavigationIcon(
-                      icon: Icons.home_outlined,
-                      selectedIcon: Icons.home_rounded,
-                      selected: tab == 0,
-                      reduceMotion: reduceMotion,
+                      listenable: widget.autopilot,
+                      // The navigation bar renders only the bounded badge count. Autopilot
+                      // can publish a different priority mix or next task while that count
+                      // stays unchanged; those richer updates belong to the beacon/queue,
+                      // not a full bottom-navigation rebuild on every tab.
+                      rebuildToken: () {
+                        final digest = widget.autopilot.digest;
+                        final issues = digest.isReady ? digest.navigationBadgeCount : 0;
+                        return issues > 99 ? 99 : issues;
+                      },
+                      builder: (context, _) {
+                        final digest = widget.autopilot.digest;
+                        final issues = digest.isReady ? digest.navigationBadgeCount : 0;
+                        final badgeCount = issues > 99 ? 99 : issues;
+                        // Use the width the navigation bar actually receives after
+                        // SafeArea margins and the 720px shell cap. Screen width can be
+                        // wider than this surface and would keep labels visible too long.
+                        final navigationWidth = navigationConstraints.maxWidth;
+                        final navigationLabelHeight =
+                            MediaQuery.textScalerOf(context).scale(11);
+                        final compactNavigation =
+                            navigationWidth < 380 || navigationLabelHeight > 15;
+                        final navigationHeight =
+                            72.0 +
+                            (navigationLabelHeight - 11)
+                                .clamp(0.0, 24.0)
+                                .toDouble();
+                        final reduceMotion =
+                            MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+                        return NavigationBar(
+                          height: navigationHeight,
+                          animationDuration: reduceMotion
+                              ? Duration.zero
+                              : const Duration(milliseconds: 260),
+                          labelBehavior: compactNavigation
+                              ? NavigationDestinationLabelBehavior.onlyShowSelected
+                              : NavigationDestinationLabelBehavior.alwaysShow,
+                          selectedIndex: tab,
+                          onDestinationSelected: _selectTab,
+                          destinations: [
+                            NavigationDestination(
+                              icon: _AnimatedNavigationIcon(
+                                icon: Icons.home_outlined,
+                                selectedIcon: Icons.home_rounded,
+                                selected: tab == 0,
+                                reduceMotion: reduceMotion,
                     ),
                     label: 'Home',
                   ),
