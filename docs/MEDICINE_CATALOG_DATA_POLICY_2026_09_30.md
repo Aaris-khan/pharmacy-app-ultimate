@@ -4,15 +4,24 @@ The shared recognition catalogue is identity assistance, not clinical truth and 
 
 ## Allowed sources
 
-Only data with explicit redistribution rights may be mirrored into Aaris catalogue releases. The first automated source is openFDA Drug NDC, whose openFDA distribution is Public Domain / CC0. Source provenance and licence metadata must be retained in every generated manifest.
+Only data with explicit redistribution rights may be mirrored into Aaris catalogue releases. Source provenance and licence metadata must be retained in every generated manifest.
 
-Do not mirror proprietary medicine databases, scrape sites that prohibit redistribution, or copy full RxNorm monthly/weekly release files without satisfying NLM licensing requirements.
+Automated mirrored sources are deliberately narrow:
+
+- **openFDA Drug NDC** — openFDA distributes the data under Public Domain / CC0. It contributes labeler-submitted product identity, ingredients, strength, dosage form, labeler and public UPC fields.
+- **NLM RxNorm Current Prescribable Content (CPC)** — NLM explicitly publishes this subset with no licensing restrictions and as public-domain content. Aaris mirrors only active NLM-normalized `SAB=RXNORM` Semantic Clinical Drug / Semantic Branded Drug concepts (`SCD` / `SBD`) from CPC.
+
+Do not mirror proprietary medicine databases, scrape sites that prohibit redistribution, or copy the full RxNorm monthly/weekly release. Full RxNorm includes third-party source vocabularies with different licence terms; CPC is a separate deliberately redistributable subset.
 
 ## Safety boundary
 
 Catalogue records may contain product identity only: medicine/trade name, brand, active ingredients, strength, dosage form, manufacturer/labeler, public identifiers, and bounded OCR aliases. They must never provide MFG, EXP, batch, pharmacy quantity, price, supplier, shelf location, or private user data.
 
 A catalogue match is a candidate. Existing physical-pack evidence, contradiction gates, pharmacist review, and the PharmacyController/SQLite transaction remain authoritative.
+
+Compact OCR aliases (for example, a brand or multi-word ingredient with spaces removed) are retrieval hints only. They can nominate a candidate but cannot bypass strength/form/composition contradiction gates.
+
+When Online Search is enabled, the verified GitHub Release mirror is queried first. OCR/query text is sent to live public providers only when the mirror has no strong match.
 
 ## Quality meaning
 
