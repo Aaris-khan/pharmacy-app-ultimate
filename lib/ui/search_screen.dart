@@ -731,7 +731,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     title: title,
                     message:
                         'Find a medicine to edit, record a sale or remove stock.',
-                    icon: Icons.inventory_2_outlined,
+                    icon: Icons.medication_outlined,
                   )
                 else
                   Padding(
