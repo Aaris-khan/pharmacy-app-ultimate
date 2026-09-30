@@ -68,7 +68,7 @@ final _medicineOcrExplicitSemanticLabel = RegExp(
 // token. Longer roles are matched first so words such as NAME can never leak
 // into the extracted value (ACTIVEINGREDIENTNAMEPARACETAMOL, for example).
 final _medicineOcrGluedSemanticLabel = RegExp(
-  r'(?<![A-Za-z])(ACTIVEINGREDIENTS?NAME|MANUFACTURERNAME|PROPRIETARYNAME|BRANDNAME|TRADENAME|TRADEMARK|PRODUCTNAME|GENERICNAME|SALTNAME|ACTIVEINGREDIENTS?|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
+  r'(?<![A-Za-z])(ACTIVEINGREDIENTS?NAME|MANUFACTURERNAME|PROPRIETARYNAME|BRANDNAME|TRADENAME|TRADEMARK|PRODUCTNAME|GENERICNAME|SALTNAME|ACTIVEINGREDIENTS?|COMPOSITION|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
   caseSensitive: false,
 );
 
@@ -287,6 +287,8 @@ String _canonicalMedicineSemanticLabel(String value) {
     case 'ACTIVEINGREDIENTS':
     case 'ACTIVEINGREDIENTSNAME':
       return 'ACTIVE INGREDIENTS';
+    case 'COMPOSITION':
+      return 'COMPOSITION';
     case 'MANUFACTURERNAME':
     case 'MANUFACTURER':
       return 'MANUFACTURER';
