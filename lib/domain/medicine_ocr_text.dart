@@ -138,6 +138,23 @@ final _medicineOcrGluedCombinationSeparator = RegExp(
   caseSensitive: false,
 );
 
+
+// Some packs lose *every* separator between adjacent ingredient-dose pairs:
+// PARACETAMOL500MGCAFFEINE65MG. Recover the boundary only when the suffix
+// contains another complete pharmaceutical strength. This is deliberately
+// stronger than a generic word splitter: one dose alone is never enough to
+// manufacture a second ingredient.
+final _medicineOcrImplicitCombinationBoundary = RegExp(
+  r'(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)'
+  r'(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?)'
+  r'(?=[A-Za-z][A-Za-z .()/-]{2,72}\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
+  caseSensitive: false,
+);
+final _medicineOcrImplicitCombinationStop = RegExp(
+  r'^(?:tablets?|capsules?|caplets?|syrups?|suspensions?|solutions?|injections?|creams?|ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?|extended|sustained|modified|controlled|release|dose|dosage|pack|mrp|price|mfg|mfd|exp|expiry)',
+  caseSensitive: false,
+);
+
 // A dropped boundary before a printed dose is semantically recoverable because
 // the numeric token is immediately owned by a pharmaceutical unit. The prefix
 // still needs at least three alphabetic characters; field ownership below keeps
@@ -416,6 +433,22 @@ String _canonicalMedicineOcrSurface(String value) {
     _medicineOcrGluedCombinationSeparator,
     (match) {
       if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      return '${match[1]} + ';
+    },
+  );
+
+  // Recover a completely missing separator between two ingredient-dose pairs.
+  // The second full dose is the proof that this is a composition boundary.
+  result = result.replaceAllMapped(
+    _medicineOcrImplicitCombinationBoundary,
+    (match) {
+      if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      final tail = result.substring(match.end);
+      if (_medicineOcrImplicitCombinationStop.hasMatch(tail)) {
         return match[0]!;
       }
       return '${match[1]} + ';
