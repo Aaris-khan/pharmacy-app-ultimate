@@ -365,6 +365,39 @@ CREATE TABLE catalog_deletes (
         .toList(growable: false);
   }
 
+  /// Marks rows from a completed full-snapshot source as stale only after all
+  /// newer snapshot shards have been applied. Retrieval already ignores
+  /// deprecated rows, so aliases/terms may be retained without becoming hits.
+  Future<int> deprecateSourceBeforeRevision({
+    required String source,
+    required int revision,
+  }) async {
+    final cleanSource = source.trim();
+    if (cleanSource.isEmpty ||
+        cleanSource.length > 80 ||
+        revision <= 0) {
+      throw const FormatException('Invalid catalogue snapshot boundary.');
+    }
+    await initialize();
+    return _database!.transaction((txn) async {
+      final changed = await txn.update(
+        'catalog_products',
+        <String, Object?>{'status': 'deprecated'},
+        where: 'source = ? AND status = ? AND rev < ?',
+        whereArgs: <Object?>[cleanSource, 'active', revision],
+      );
+      await txn.insert(
+        'catalog_meta',
+        <String, Object?>{
+          'key': 'snapshot_floor:$cleanSource',
+          'value': '$revision',
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return changed;
+    });
+  }
+
   /// Applies a trusted, already-acquired JSONL delta atomically after SHA-256
   /// integrity verification. This method performs no network I/O.
   Future<CatalogDeltaApplyResult> applyVerifiedDelta(
