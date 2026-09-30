@@ -376,6 +376,103 @@ void main() {
     expect(release.calls, 1);
     expect(fallback.calls, 1);
   });
+
+  test('scan-aware release gate falls back on strength or form conflict', () async {
+    final release = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '2%',
+          form: 'Cream',
+        ),
+        score: .96,
+        provider: 'release',
+      ),
+    ]);
+    final fallback = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '1%',
+          form: 'Lotion',
+        ),
+        score: .84,
+        provider: 'network',
+      ),
+    ]);
+    final service = MedicineCatalogService(
+      providers: [release, fallback],
+      releaseFirst: true,
+    );
+    addTearDown(service.close);
+
+    final results = await service.searchScan(
+      text: 'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+      evidence: const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 1,
+          quality: .98,
+          text:
+              'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+        ),
+      ],
+    );
+
+    expect(release.calls, 1);
+    expect(fallback.calls, 1);
+    expect(results.first.provider, 'network');
+    expect(results.first.seed.strength, '1%');
+    expect(results.first.seed.form, 'Lotion');
+  });
+
+  test('scan-aware release gate keeps coherent mirrored match private', () async {
+    final release = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(
+          name: 'Candid',
+          brand: 'Candid',
+          salt: 'Clotrimazole',
+          strength: '1%',
+          form: 'Lotion',
+        ),
+        score: .94,
+        provider: 'release',
+      ),
+    ]);
+    final fallback = _FakeProvider([
+      const MedicineCatalogCandidate(
+        seed: MedicineDraftSeed(name: 'Other'),
+        score: .99,
+        provider: 'network',
+      ),
+    ]);
+    final service = MedicineCatalogService(
+      providers: [release, fallback],
+      releaseFirst: true,
+    );
+    addTearDown(service.close);
+
+    final results = await service.searchScan(
+      text: 'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+      evidence: const <MedicineFrameEvidence>[
+        MedicineFrameEvidence(
+          sequence: 2,
+          quality: .98,
+          text:
+              'PRODUCT NAME CANDID\nACTIVE INGREDIENT CLOTRIMAZOLE 1%\nLOTION',
+        ),
+      ],
+    );
+
+    expect(results.first.provider, 'release');
+    expect(release.calls, 1);
+    expect(fallback.calls, 0);
+    expect(results.first.reason, contains('Scan agrees'));
+  });
 }
 
 class _FakeProvider implements MedicineCatalogProvider {
