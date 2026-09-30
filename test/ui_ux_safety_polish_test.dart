@@ -799,7 +799,10 @@ void main() {
     expect(source, contains("import 'dart:async';"));
     expect(source, contains('final bool hapticFeedback;'));
     expect(source, contains('this.hapticFeedback = true'));
-    expect(\n      tactile,\n      contains('HapticFeedback.selectionClick().catchError((Object _) {})'),\n    );
+    expect(
+      tactile,
+      contains('HapticFeedback.selectionClick().catchError((Object _) {})'),
+    );
     expect(tactile, contains('onTap: enabled ? _handleTap : null'));
   });
 
