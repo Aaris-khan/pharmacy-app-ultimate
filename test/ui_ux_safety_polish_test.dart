@@ -765,9 +765,11 @@ void main() {
       expect(icon, contains('Tween<double>(begin: .92, end: 1)'));
       expect(icon, contains('ValueKey<int>(currentIcon.codePoint)'));
       expect(icon, contains('AnimatedScale('));
-      expect(icon, contains('scale: selected && !reduceMotion ? 1.08 : 1'));
+      expect(icon, contains('SizedBox.square('));
+      expect(icon, contains('dimension: 32'));
+      expect(icon, contains('scale: selected && !reduceMotion ? 1.035 : 1'));
       expect(icon, contains('AnimatedSlide('));
-      expect(icon, contains("const Offset(0, -.06)"));
+      expect(icon, contains("const Offset(0, -.04)"));
       expect(icon, contains('child: Badge.count('));
       expect(
         icon,
