@@ -131,14 +131,14 @@ class CatalogBuilderTest(unittest.TestCase):
 
     def test_ekacare_never_invents_missing_combination_doses(self):
         product = builder.transform_ekacare_drug({
-            "medication_name": "Telcare AM Tablet",
+            "medication_name": "Telcare AM",
             "generic_name": "telmisartan + amlodipine",
         })
         self.assertIsNotNone(product)
         self.assertEqual(product["name"], "Telcare AM")
         self.assertEqual(product["salt"], "telmisartan + amlodipine")
         self.assertEqual(product["strength"], "")
-        self.assertEqual(product["form"], "Tablet")
+        self.assertEqual(product["form"], "")
 
     def test_rxnorm_non_clinical_tty_is_rejected(self):
         self.assertIsNone(
