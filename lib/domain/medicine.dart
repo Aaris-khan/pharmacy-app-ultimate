@@ -331,6 +331,9 @@ const medicineFormAliases = <String, String>{
   // Conservative OCR/pack abbreviations. These are exact token aliases, not
   // fuzzy substring rules, so an unrelated word cannot silently become a form.
   'iotion': 'Lotion',
+  'l0tion': 'Lotion',
+  'loti0n': 'Lotion',
+  'lot1on': 'Lotion',
   'lotlon': 'Lotion',
   'loton': 'Lotion',
   'lotn': 'Lotion',

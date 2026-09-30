@@ -68,7 +68,7 @@ final _medicineOcrExplicitSemanticLabel = RegExp(
 // token. Longer roles are matched first so words such as NAME can never leak
 // into the extracted value (ACTIVEINGREDIENTNAMEPARACETAMOL, for example).
 final _medicineOcrGluedSemanticLabel = RegExp(
-  r'(?<![A-Za-z])(ACTIVEINGREDIENTS?NAME|MANUFACTURERNAME|PROPRIETARYNAME|BRANDNAME|TRADENAME|TRADEMARK|PRODUCTNAME|GENERICNAME|SALTNAME|ACTIVEINGREDIENTS?|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
+  r'(?<![A-Za-z])(ACTIVEINGREDIENTS?NAME|MANUFACTURERNAME|PROPRIETARYNAME|BRANDNAME|TRADENAME|TRADEMARK|PRODUCTNAME|GENERICNAME|SALTNAME|ACTIVEINGREDIENTS?|COMPOSITION|MANUFACTURER)(?=[A-Za-z][A-Za-z0-9-]{2,})',
   caseSensitive: false,
 );
 
@@ -135,6 +135,23 @@ final _medicineOcrGluedCombinationSeparator = RegExp(
   r'(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?)'
   r'(?:and|with)'
   r'(?=[A-Za-z][A-Za-z .()/-]{2,72}\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
+  caseSensitive: false,
+);
+
+
+// Some packs lose *every* separator between adjacent ingredient-dose pairs:
+// PARACETAMOL500MGCAFFEINE65MG. Recover the boundary only when the suffix
+// contains another complete pharmaceutical strength. This is deliberately
+// stronger than a generic word splitter: one dose alone is never enough to
+// manufacture a second ingredient.
+final _medicineOcrImplicitCombinationBoundary = RegExp(
+  r'(\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)'
+  r'(?:\s*(?:w\s*/\s*w|w\s*/\s*v|v\s*/\s*v)|\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:ml|g|dose|actuation))?)'
+  r'(?=[A-Za-z][A-Za-z .()/-]{2,72}\d+(?:[.,]\d+)?\s*(?:mcg|ug|mg|gm|g|ml|meq|iu|i\.u\.|units?|%)(?![A-Za-z]))',
+  caseSensitive: false,
+);
+final _medicineOcrImplicitCombinationStop = RegExp(
+  r'^(?:tablets?|capsules?|caplets?|syrups?|suspensions?|solutions?|injections?|creams?|ointments?|gels?|lotions?|drops?|sprays?|inhalers?|powders?|sachets?|extended|sustained|modified|controlled|release|dose|dosage|pack|mrp|price|mfg|mfd|exp|expiry)',
   caseSensitive: false,
 );
 
@@ -270,6 +287,8 @@ String _canonicalMedicineSemanticLabel(String value) {
     case 'ACTIVEINGREDIENTS':
     case 'ACTIVEINGREDIENTSNAME':
       return 'ACTIVE INGREDIENTS';
+    case 'COMPOSITION':
+      return 'COMPOSITION';
     case 'MANUFACTURERNAME':
     case 'MANUFACTURER':
       return 'MANUFACTURER';
@@ -373,6 +392,17 @@ String _canonicalMedicineOcrSurface(String value) {
     (match) => '${match[1]} ',
   );
   result = result.replaceAllMapped(_medicineOcrGluedTraceabilityLabel, (match) {
+    // LOT is also the prefix of legitimate dosage-form tokens such as LOTION
+    // and OCR aliases such as LOTN. Preserve the whole token as medicine-form
+    // evidence; only non-form tokens such as LOT100 are traceability labels.
+    final token = RegExp(r'^[A-Za-z0-9-]+')
+        .firstMatch(result.substring(match.start))
+        ?.group(0)
+        ?.toLowerCase();
+    if (token != null && medicineFormAliases.containsKey(token)) {
+      return match[0]!;
+    }
+
     // A token such as LOT100 can itself be the alphanumeric value of an already
     // explicit Batch/Lot role. Do not reinterpret an owned value as a new role.
     if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
@@ -416,6 +446,22 @@ String _canonicalMedicineOcrSurface(String value) {
     _medicineOcrGluedCombinationSeparator,
     (match) {
       if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      return '${match[1]} + ';
+    },
+  );
+
+  // Recover a completely missing separator between two ingredient-dose pairs.
+  // The second full dose is the proof that this is a composition boundary.
+  result = result.replaceAllMapped(
+    _medicineOcrImplicitCombinationBoundary,
+    (match) {
+      if (_medicineOcrUnsafeRoleOwnsCandidate(result, match.start)) {
+        return match[0]!;
+      }
+      final tail = result.substring(match.end);
+      if (_medicineOcrImplicitCombinationStop.hasMatch(tail)) {
         return match[0]!;
       }
       return '${match[1]} + ';
