@@ -46,6 +46,32 @@ void main() {
       );
     });
 
+    test('single-edit plan covers OCR deletion substitution and insertion', () {
+      // Canonical token: candid. The catalogue delete index contains candi and
+      // candd, while the exact term index contains candid.
+      final dropped = planSingleEditRecoveryKeys(const <String>['candi']);
+      expect(dropped.deleteIndexKeys, contains('candi'));
+
+      final substituted = planSingleEditRecoveryKeys(const <String>['candld']);
+      expect(substituted.deleteIndexKeys, contains('candd'));
+
+      final inserted = planSingleEditRecoveryKeys(const <String>['candlid']);
+      expect(inserted.exactIndexKeys, contains('candid'));
+    });
+
+    test('single-edit recovery stays bounded under packaging garbage', () {
+      final plan = planSingleEditRecoveryKeys(
+        List<String>.generate(100, (index) => 'garbageterm${index}x'),
+        maxDeleteIndexKeys: 37,
+        maxExactIndexKeys: 29,
+      );
+
+      expect(plan.deleteIndexKeys.length, lessThanOrEqualTo(37));
+      expect(plan.exactIndexKeys.length, lessThanOrEqualTo(29));
+      expect(plan.deleteIndexKeys.toSet().length, plan.deleteIndexKeys.length);
+      expect(plan.exactIndexKeys.toSet().length, plan.exactIndexKeys.length);
+    });
+
     test('RRF rewards independent corroboration across retrievers', () {
       final fused = reciprocalRankFuse(const <RankedRetrievalChannel>[
         RankedRetrievalChannel(ids: <String>['a', 'b', 'c']),
