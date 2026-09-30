@@ -473,7 +473,12 @@ class ReleaseCatalogProvider implements MedicineScanAwareCatalogProvider {
       if (key.isEmpty || !seen.add(key)) continue;
       boundedQueries.add(clean);
     }
-    if (boundedQueries.isEmpty && barcode.trim().isEmpty) {
+    final hasRawEvidence = evidence.any(
+      (frame) => frame.text.trim().isNotEmpty || frame.allBarcodes.isNotEmpty,
+    );
+    if (boundedQueries.isEmpty &&
+        barcode.trim().isEmpty &&
+        !hasRawEvidence) {
       return const <MedicineCatalogCandidate>[];
     }
 
