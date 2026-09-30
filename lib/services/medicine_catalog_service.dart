@@ -29,8 +29,10 @@ class MedicineCatalogService {
   MedicineCatalogService({
     http.Client? client,
     List<MedicineCatalogProvider>? providers,
+    bool? releaseFirst,
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null,
+       _releaseFirst = releaseFirst ?? providers == null,
        _providers = providers == null
            ? <MedicineCatalogProvider>[]
            : List<MedicineCatalogProvider>.of(providers) {
@@ -45,6 +47,7 @@ class MedicineCatalogService {
 
   final http.Client _client;
   final bool _ownsClient;
+  final bool _releaseFirst;
   final List<MedicineCatalogProvider> _providers;
   final Map<String, _CatalogCacheEntry> _cache = <String, _CatalogCacheEntry>{};
   final Map<String, Future<List<MedicineCatalogCandidate>>> _inflight =
@@ -144,23 +147,77 @@ class MedicineCatalogService {
     required String text,
     required int limit,
   }) async {
-    final jobs = _providers.map((provider) async {
-      try {
-        return await provider
-            .search(
-              barcode: barcode,
-              text: text,
-              limit: limit,
-            )
-            .timeout(const Duration(seconds: 5));
-      } catch (_) {
-        // One catalog being unavailable must not block another provider or the
-        // local-first pharmacy workflow.
-        return <MedicineCatalogCandidate>[];
+    if (_releaseFirst && _providers.isNotEmpty) {
+      // The GitHub Release mirror is already local after a verified sync. Give
+      // it first refusal so a strong match avoids sending OCR/query text to
+      // third-party APIs. Weak/empty mirror results still fail open to the
+      // existing public providers for coverage.
+      final release = await _searchProvider(
+        _providers.first,
+        barcode: barcode,
+        text: text,
+        limit: limit,
+      );
+      if (release.any((candidate) => candidate.score >= .90)) {
+        return _rankCandidates(<List<MedicineCatalogCandidate>>[
+          release,
+        ], limit);
       }
-    });
 
-    final groups = await Future.wait(jobs);
+      final fallback = await Future.wait(
+        _providers.skip(1).map(
+          (provider) => _searchProvider(
+            provider,
+            barcode: barcode,
+            text: text,
+            limit: limit,
+          ),
+        ),
+      );
+      return _rankCandidates(
+        <List<MedicineCatalogCandidate>>[release, ...fallback],
+        limit,
+      );
+    }
+
+    final groups = await Future.wait(
+      _providers.map(
+        (provider) => _searchProvider(
+          provider,
+          barcode: barcode,
+          text: text,
+          limit: limit,
+        ),
+      ),
+    );
+    return _rankCandidates(groups, limit);
+  }
+
+  Future<List<MedicineCatalogCandidate>> _searchProvider(
+    MedicineCatalogProvider provider, {
+    required String barcode,
+    required String text,
+    required int limit,
+  }) async {
+    try {
+      return await provider
+          .search(
+            barcode: barcode,
+            text: text,
+            limit: limit,
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // One catalogue being unavailable must not block another provider or the
+      // local-first pharmacy workflow.
+      return <MedicineCatalogCandidate>[];
+    }
+  }
+
+  List<MedicineCatalogCandidate> _rankCandidates(
+    Iterable<List<MedicineCatalogCandidate>> groups,
+    int limit,
+  ) {
     final best = <String, MedicineCatalogCandidate>{};
     for (final candidate in groups.expand((items) => items)) {
       if (candidate.seed.name.trim().isEmpty) continue;
@@ -473,36 +530,70 @@ class RxNormProvider implements MedicineCatalogProvider {
 }
 
 MedicineDraftSeed _rxSeed(String raw, String rxcui) {
-  final brandMatch = RegExp(r'\[([^\]]+)\]').firstMatch(raw);
+  final brandMatch = RegExp(r'\\[([^\\]]+)\\]').firstMatch(raw);
   final brand = brandMatch?.group(1)?.trim() ?? '';
-  var withoutBrand = raw.replaceAll(RegExp(r'\s*\[[^\]]+\]\s*'), ' ').trim();
-  final strengthMatch = RegExp(
-    // RxNorm commonly encodes liquid strengths as "250 MG/5 ML". Keep the
-    // denominator quantity with the unit; dropping the 5 would turn a
-    // concentration into a materially different medicine strength.
-    r'\b\d+(?:\.\d+)?\s*(?:mcg|mg|g|ml)(?:\s*/\s*(?:(?:\d+(?:\.\d+)?\s*)?(?:mcg|mg|g|ml|dose|actuation|tablet|capsule)|1))?\b',
-    caseSensitive: false,
-  ).firstMatch(withoutBrand);
-  final strength =
-      strengthMatch?.group(0)?.replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
-
-  final form = _catalogFormFromText(withoutBrand);
-
-  var generic = withoutBrand;
-  if (strengthMatch != null) {
-    generic = generic.substring(0, strengthMatch.start).trim();
-  }
-  generic = generic
-      .replaceAll(medicineFormPresentationPattern, ' ')
-      .replaceAll(
-        RegExp(
-          r'\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|extended\s+release|delayed\s+release)\b',
-          caseSensitive: false,
-        ),
-        ' ',
-      )
-      .replaceAll(RegExp(r'\s+'), ' ')
+  final withoutBrand = raw
+      .replaceAll(RegExp(r'\\s*\\[[^\\]]+\\]\\s*'), ' ')
+      .replaceAll(RegExp(r'\\s+'), ' ')
       .trim();
+  final form = _catalogFormFromText(withoutBrand);
+  final strengthPattern = RegExp(
+    // Keep denominator quantities with their units. Ingredient separators in
+    // normalized RxNorm names use a slash surrounded by spaces, while dose
+    // concentrations such as 250 MG/5 ML do not.
+    r'\\b\\d+(?:\\.\\d+)?\\s*(?:mcg|ug|mg|g|gm|ml|l|meq|mmol|mol|unt|unit|units|iu|%)'
+    r'(?:\\s*/\\s*(?:(?:\\d+(?:\\.\\d+)?\\s*)?(?:mcg|ug|mg|g|gm|ml|l|dose|actuation|actuat|tablet|capsule|packet|patch|hour|hr|unt|unit|units|iu)))?\\b',
+    caseSensitive: false,
+  );
+
+  final parts = withoutBrand
+      .split(RegExp(r'\\s+/\\s+'))
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .take(6)
+      .toList(growable: false);
+  final components = <(String, String)>[];
+  var complete = parts.isNotEmpty;
+  for (final part in parts) {
+    final match = strengthPattern.firstMatch(part);
+    if (match == null) {
+      complete = false;
+      continue;
+    }
+    final ingredient = part.substring(0, match.start).trim();
+    final dose = match.group(0)?.replaceAll(RegExp(r'\\s+'), ' ').trim() ?? '';
+    if (ingredient.isEmpty || dose.isEmpty) {
+      complete = false;
+      continue;
+    }
+    components.add((ingredient, dose));
+  }
+
+  String generic;
+  String strength;
+  if (components.isNotEmpty) {
+    generic = components.map((value) => value.$1).join(' + ');
+    // Never pair the wrong dose with a combination ingredient. If one
+    // slash-delimited component cannot be parsed, keep the ingredients that
+    // were observed but abstain from a combined canonical strength.
+    strength = complete && components.length == parts.length
+        ? components.map((value) => value.$2).join(' + ')
+        : '';
+  } else {
+    generic = withoutBrand
+        .replaceAll(medicineFormPresentationPattern, ' ')
+        .replaceAll(
+          RegExp(
+            r'\\b(?:oral|topical|ophthalmic|otic|nasal|inhalation|rectal|vaginal|sublingual|buccal|transdermal|extended\\s+release|delayed\\s+release)\\b',
+            caseSensitive: false,
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\\s+'), ' ')
+        .trim();
+    strength = '';
+  }
+
   if (generic.isEmpty) generic = withoutBrand;
   final name = brand.isNotEmpty ? brand : generic;
   return MedicineDraftSeed(
