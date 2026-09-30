@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/gs1_healthcare.dart';
+import '../domain/medicine_ocr_text.dart';
 import '../domain/medicine_resolution_v2.dart';
 import '../domain/medicine_understanding.dart';
 import '../domain/retrieval_fusion.dart';
@@ -233,7 +234,8 @@ CREATE TABLE catalog_deletes (
           .take(72)
           .toList(growable: false);
       final lexicalIds = <String>[];
-      final recoveryIds = <String>[];
+      final deleteRecoveryIds = <String>[];
+      final insertionRecoveryIds = <String>[];
       if (rawTerms.isNotEmpty) {
         final frequencyPlaceholders = List.filled(
           rawTerms.length,
@@ -288,16 +290,15 @@ CREATE TABLE catalog_deletes (
           documentFrequency,
           limit: 18,
         );
-        final deleteKeys = <String>{};
-        for (final term in recoveryTerms) {
-          for (final value in _deleteKeys(_ocrFoldToken(term)).take(18)) {
-            deleteKeys.add(value);
-            if (deleteKeys.length >= 120) break;
-          }
-          if (deleteKeys.length >= 120) break;
-        }
-        if (deleteKeys.isNotEmpty) {
-          final placeholders = List.filled(deleteKeys.length, '?').join(',');
+        final recoveryPlan = planSingleEditRecoveryKeys(
+          recoveryTerms.map(_ocrFoldToken),
+        );
+
+        if (recoveryPlan.deleteIndexKeys.isNotEmpty) {
+          final placeholders = List.filled(
+            recoveryPlan.deleteIndexKeys.length,
+            '?',
+          ).join(',');
           final rows = await _database!.rawQuery(
             '''SELECT cd.product_id, SUM(cd.weight) AS score
              FROM catalog_deletes cd
@@ -308,18 +309,44 @@ CREATE TABLE catalog_deletes (
              GROUP BY cd.product_id
              ORDER BY score DESC, cd.product_id ASC
              LIMIT ${boundedLimit * 3}''',
-            deleteKeys.toList(growable: false),
+            recoveryPlan.deleteIndexKeys,
           );
           for (final row in rows) {
             final id = row['product_id'];
-            if (id is String) recoveryIds.add(id);
+            if (id is String) deleteRecoveryIds.add(id);
+          }
+        }
+
+        if (recoveryPlan.exactIndexKeys.isNotEmpty) {
+          final placeholders = List.filled(
+            recoveryPlan.exactIndexKeys.length,
+            '?',
+          ).join(',');
+          final rows = await _database!.rawQuery(
+            '''SELECT ct.product_id, SUM(ct.weight) AS score
+             FROM catalog_terms ct
+             INNER JOIN catalog_products p ON p.product_id = ct.product_id
+             WHERE ct.term IN ($placeholders)
+               AND p.status = 'active'
+               AND p.verified = 1
+             GROUP BY ct.product_id
+             ORDER BY score DESC, ct.product_id ASC
+             LIMIT ${boundedLimit * 3}''',
+            recoveryPlan.exactIndexKeys,
+          );
+          for (final row in rows) {
+            final id = row['product_id'];
+            if (id is String) insertionRecoveryIds.add(id);
           }
         }
       }
 
       final fused = reciprocalRankFuse(<RankedRetrievalChannel>[
         RankedRetrievalChannel(ids: lexicalIds),
-        RankedRetrievalChannel(ids: recoveryIds, weight: .62),
+        RankedRetrievalChannel(ids: deleteRecoveryIds, weight: .64),
+        // Extra-character recovery is useful but intentionally weaker than a
+        // direct/delete-index hit; downstream identity gates still decide.
+        RankedRetrievalChannel(ids: insertionRecoveryIds, weight: .48),
       ]);
       if (pinned.isEmpty && fused.isEmpty) {
         return const <CanonicalMedicineProduct>[];
@@ -830,7 +857,11 @@ Map<String, double> _catalogTerms(CanonicalMedicineProduct product) {
 Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
   final result = <String>{};
   for (final frame in evidence.take(maxMedicineEvidenceFrames)) {
-    final normalized = searchText(frame.text);
+    // Give retrieval the same deterministic medicine-specific OCR repair used
+    // by the resolver. This repairs glued labels/doses/forms and script digits
+    // without inventing product identity.
+    final repairedText = normalizeMedicineOcrLine(frame.text);
+    final normalized = searchText(repairedText);
     final tokens = normalized
         .split(' ')
         .where((value) => value.isNotEmpty)
@@ -861,7 +892,7 @@ Set<String> _evidenceTerms(List<MedicineFrameEvidence> evidence) {
       }
     }
 
-    for (final rawLine in frame.text.split(RegExp(r'[\r\n]+')).take(48)) {
+    for (final rawLine in repairedText.split(RegExp(r'[\r\n]+')).take(48)) {
       final line = searchText(rawLine);
       if (line.isEmpty) continue;
       final useful = line
