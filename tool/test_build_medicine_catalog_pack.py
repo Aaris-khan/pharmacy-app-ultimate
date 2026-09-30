@@ -49,6 +49,63 @@ class CatalogBuilderTest(unittest.TestCase):
             aliases,
         )
 
+    def test_drugsfda_product_adds_approved_multi_ingredient_identity(self):
+        application = {
+            "application_number": "NDA012345",
+            "sponsor_name": "Example Laboratories",
+        }
+        product = builder.transform_drugsfda_product(
+            application,
+            {
+                "product_number": "001",
+                "brand_name": "Example Duo",
+                "marketing_status": "Prescription",
+                "dosage_form": "LOTION",
+                "active_ingredients": [
+                    {"name": "CLOTRIMAZOLE", "strength": "10 mg/mL"},
+                    {"name": "ZINC OXIDE", "strength": "20 mg/mL"},
+                ],
+            },
+        )
+        self.assertIsNotNone(product)
+        self.assertEqual(
+            product["product_id"],
+            "openfda:drugsfda:NDA012345:001",
+        )
+        self.assertEqual(product["name"], "Example Duo")
+        self.assertEqual(product["brand"], "Example Duo")
+        self.assertEqual(product["salt"], "CLOTRIMAZOLE + ZINC OXIDE")
+        self.assertEqual(product["strength"], "10 mg/mL + 20 mg/mL")
+        self.assertEqual(product["form"], "Lotion")
+        self.assertEqual(product["manufacturer"], "Example Laboratories")
+        self.assertEqual(product["barcodes"], [])
+        aliases = set(product["aliases_ocr"])
+        self.assertIn("exampleduo", aliases)
+        self.assertIn("clotrimazolezincoxide", aliases)
+        self.assertIn("exampleduolotion", aliases)
+
+    def test_drugsfda_historical_or_tentative_products_are_not_current_prior(self):
+        application = {
+            "application_number": "ANDA000001",
+            "sponsor_name": "Example Laboratories",
+        }
+        base = {
+            "product_number": "001",
+            "brand_name": "Historical Drug",
+            "dosage_form": "TABLET",
+            "active_ingredients": [
+                {"name": "PARACETAMOL", "strength": "500 mg"},
+            ],
+        }
+        for status in ("Discontinued", "None (Tentative Approval)"):
+            with self.subTest(status=status):
+                self.assertIsNone(
+                    builder.transform_drugsfda_product(
+                        application,
+                        {**base, "marketing_status": status},
+                    )
+                )
+
     def test_unbranded_product_never_indexes_form_as_identity(self):
         aliases = set(
             builder.ocr_aliases(
