@@ -127,19 +127,116 @@ class MedicineCatalogService {
     }
 
     final smartText = draft == null ? text : _catalogScanQuery(draft, text);
-    var candidates = await search(
-      barcode: barcode,
-      text: smartText,
-      limit: limit,
-    );
+    var candidates = draft == null
+        ? await search(
+            barcode: barcode,
+            text: smartText,
+            limit: limit,
+          )
+        : await _searchProvidersForScan(
+            barcode: barcode,
+            text: smartText,
+            draft: draft,
+            limit: limit,
+          );
 
     if (candidates.isEmpty &&
         searchText(smartText) != searchText(text) &&
         text.trim().isNotEmpty) {
       candidates = await search(barcode: barcode, text: text, limit: limit);
+      if (draft != null && candidates.isNotEmpty) {
+        candidates = _rerankCatalogCandidatesForScan(
+          candidates,
+          draft,
+          barcode,
+        );
+      }
     }
-    if (draft == null || candidates.isEmpty) return candidates;
-    return _rerankCatalogCandidatesForScan(candidates, draft, barcode);
+    return candidates;
+  }
+
+  /// Release-first scan lookup must prove that the mirrored candidate agrees
+  /// with the observed pack before it suppresses live public fallback. A high
+  /// lexical score alone is insufficient: a brand can exist in multiple
+  /// strengths/forms and noisy OCR can nominate the wrong sibling product.
+  Future<List<MedicineCatalogCandidate>> _searchProvidersForScan({
+    required String barcode,
+    required String text,
+    required MedicineScanDraft draft,
+    required int limit,
+  }) async {
+    if (!_releaseFirst || _providers.isEmpty) {
+      final candidates = await search(
+        barcode: barcode,
+        text: text,
+        limit: limit,
+      );
+      return _rerankCatalogCandidatesForScan(candidates, draft, barcode);
+    }
+
+    final release = await _searchProvider(
+      _providers.first,
+      barcode: barcode,
+      text: text,
+      limit: limit,
+    );
+    final releaseRanked = _rerankCatalogCandidatesForScan(
+      _rankCandidates(<List<MedicineCatalogCandidate>>[release], limit),
+      draft,
+      barcode,
+    );
+    if (_scanReleaseMatchIsDecisive(releaseRanked)) {
+      return releaseRanked;
+    }
+
+    final fallback = await Future.wait(
+      _providers.skip(1).map(
+        (provider) => _searchProvider(
+          provider,
+          barcode: barcode,
+          text: text,
+          limit: limit,
+        ),
+      ),
+    );
+    final combined = _rankCandidates(
+      <List<MedicineCatalogCandidate>>[release, ...fallback],
+      limit,
+    );
+    return _rerankCatalogCandidatesForScan(combined, draft, barcode);
+  }
+
+  bool _scanReleaseMatchIsDecisive(
+    List<MedicineCatalogCandidate> candidates,
+  ) {
+    if (candidates.isEmpty) return false;
+    final first = candidates.first;
+    if (first.reason.startsWith('Exact catalogue barcode')) return true;
+    if (first.score < .90 ||
+        first.reason.startsWith('Check scan conflict:') ||
+        !first.reason.startsWith('Scan agrees:')) {
+      return false;
+    }
+
+    final evidence = first.reason.substring('Scan agrees:'.length).trim();
+    final independentAgreements = evidence.isEmpty
+        ? 0
+        : evidence
+              .split(',')
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .length;
+    if (independentAgreements < 2) return false;
+
+    if (candidates.length > 1) {
+      final runnerUp = candidates[1];
+      if (first.seed.identityKey != runnerUp.seed.identityKey &&
+          first.score - runnerUp.score < .04) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<List<MedicineCatalogCandidate>> _searchProviders({
